@@ -60,6 +60,7 @@ const TEST_FILES = [
   "mutualAid.status.test.js",
   "backup.test.js",
   "cloudtakMarketplace.test.js",
+  "marketplaceHelper.sudoers.test.js",
   "setupDeviceAccess.test.js",
   "activeUserGate.test.js",
   "appVersion.test.js",

@@ -651,24 +651,85 @@ function marketplacePrivilegeBin() {
 }
 
 /**
- * Elevate helpers for CloudTAK marketplace.
- * After root→non-root SSH, plugin trees are often root-owned. Elevate via:
- *   1) bootstrap marketplace sudoers using TAK Portal repair-script NOPASSWD hook (sudo only)
- *   2) $CTAK_PRIV -n / -S  (sudo or dzdo — matches TAK_SSH_PRIVILEGE_CMD)
- *   3) docker / privileged docker as uid 0
+ * Elevate helpers for CloudTAK marketplace (issue #68).
+ * Never write NOPASSWD: ALL or rewrite tak-portal-repair-certs.sh.
+ * Prefer: marketplace-helper (fixed verbs) → stored sudo password → docker on CT paths only.
  */
 function pluginPrivilegeBash() {
   const sudoPass = marketplaceSudoPassword();
   const privBin = marketplacePrivilegeBin();
+  const helperPath = takSshSvc.TAK_PORTAL_MARKETPLACE_HELPER || "/usr/local/libexec/tak-portal/marketplace-helper";
+  const leftoverSudoers =
+    takSshSvc.TAK_PORTAL_MARKETPLACE_SUDOERS_LEFTOVER || "/etc/sudoers.d/tak-portal-marketplace";
   return `
 CTAK_SUDO_PASS=${ssh.shellQuote(sudoPass)}
 CTAK_PRIV=${ssh.shellQuote(privBin)}
+CTAK_MARKETPLACE_HELPER=${ssh.shellQuote(helperPath)}
+CTAK_MARKETPLACE_SUDOERS_LEFTOVER=${ssh.shellQuote(leftoverSudoers)}
 CTAK_DOCKER_BIN=""
 CTAK_DOCKER_NOPASS=""
 CTAK_DOCKER_PASS=""
 
 cloudtak_owner() {
   stat -c '%U' "$CT" 2>/dev/null || stat -f '%Su' "$CT" 2>/dev/null || true
+}
+
+marketplace_admin_enable_msg() {
+  echo "ask your admin to enable marketplace installs (install $CTAK_MARKETPLACE_HELPER and grant it in sudoers; re-run TAK Portal SSH handshake on Portal-managed hosts)" >&2
+}
+
+marketplace_helper_available() {
+  [ -x "$CTAK_MARKETPLACE_HELPER" ] || return 1
+  if "$CTAK_PRIV" -n "$CTAK_MARKETPLACE_HELPER" version >/dev/null 2>&1; then return 0; fi
+  if [ -n "\${CTAK_SUDO_PASS:-}" ]; then
+    if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' "$CTAK_MARKETPLACE_HELPER" version >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+marketplace_helper_run() {
+  if ! [ -x "$CTAK_MARKETPLACE_HELPER" ]; then
+    echo "elevate: marketplace helper missing at $CTAK_MARKETPLACE_HELPER" >&2
+    marketplace_admin_enable_msg
+    return 1
+  fi
+  if "$CTAK_PRIV" -n "$CTAK_MARKETPLACE_HELPER" version >/dev/null 2>&1; then
+    echo "elevate: marketplace-helper $*"
+    "$CTAK_PRIV" -n "$CTAK_MARKETPLACE_HELPER" "$@"
+    return $?
+  fi
+  if [ -n "\${CTAK_SUDO_PASS:-}" ]; then
+    if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' "$CTAK_MARKETPLACE_HELPER" version >/dev/null 2>&1; then
+      echo "elevate: marketplace-helper (password) $*"
+      printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' "$CTAK_MARKETPLACE_HELPER" "$@"
+      return $?
+    fi
+  fi
+  echo "elevate: cannot run marketplace helper (no passwordless grant and no usable TAK_SSH_SUDO_PASSWORD)" >&2
+  marketplace_admin_enable_msg
+  return 1
+}
+
+cleanup_leftover_marketplace_sudoers() {
+  local f="$CTAK_MARKETPLACE_SUDOERS_LEFTOVER"
+  [ -e "$f" ] || return 0
+  echo "elevate: removing leftover $f (security hardening #68)"
+  if marketplace_helper_run cleanup-sudoers; then return 0; fi
+  if [ -n "\${CTAK_SUDO_PASS:-}" ]; then
+    if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' rm -f "$f"; then
+      echo "elevate: removed leftover sudoers via stored password"
+      return 0
+    fi
+  fi
+  # Last resort: only if an older broad NOPASSWD grant is still active — use it once to delete itself.
+  if "$CTAK_PRIV" -n rm -f "$f" >/dev/null 2>&1; then
+    echo "elevate: removed leftover sudoers via existing passwordless grant"
+    return 0
+  fi
+  echo "WARNING: leftover $f is still present. Ask your admin to remove it; TAK Portal no longer installs NOPASSWD: ALL." >&2
+  return 1
 }
 
 resolve_docker_bin() {
@@ -697,7 +758,7 @@ resolve_docker_bin() {
       return 0
     fi
   fi
-  echo "elevate: docker not usable by $(id -un) — add user to docker group or enable $CTAK_PRIV docker" >&2
+  echo "elevate: docker not usable by $(id -un) — add user to docker group, store a sudo password, or ask your admin to enable marketplace installs" >&2
   return 1
 }
 
@@ -720,11 +781,8 @@ docker() {
 
 elevate_via_priv() {
   local cmd="$1"
-  if "$CTAK_PRIV" -n true >/dev/null 2>&1; then
-    echo "elevate: $CTAK_PRIV -n"
-    "$CTAK_PRIV" -n bash -lc "$cmd"
-    return $?
-  fi
+  # Do not probe \`sudo -n true\` — narrow portal sudoers no longer grant ALL.
+  # Only use a stored password for arbitrary bash; passwordless root is helper-only.
   if [ -n "\${CTAK_SUDO_PASS:-}" ]; then
     if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' true >/dev/null 2>&1; then
       echo "elevate: $CTAK_PRIV -S stored password"
@@ -732,8 +790,6 @@ elevate_via_priv() {
       return $?
     fi
     echo "elevate: stored $CTAK_PRIV password rejected" >&2
-  else
-    echo "elevate: $CTAK_PRIV -n unavailable and no TAK_SSH_SUDO_PASSWORD stored" >&2
   fi
   return 1
 }
@@ -765,12 +821,11 @@ elevate_via_docker() {
   chmod 755 "$wrapper"
   echo "elevate: docker run -u 0 image=$img"
   set +e
-  # Mount /tmp so elevate_run can see marketplace align/patch scripts written there.
+  # Mount CloudTAK + /tmp only — never host /etc/sudoers.d or other system paths (#68).
   docker_cli run --rm -u 0 \\
     -v "$CT:$CT:rw" \\
     -v "$HOME:$HOME:rw" \\
     -v /tmp:/tmp:rw \\
-    -v /etc/sudoers.d:/etc/sudoers.d:rw \\
     -v "$wrapper:$wrapper:ro" \\
     -e HOME="$HOME" \\
     --entrypoint /bin/sh \\
@@ -785,109 +840,23 @@ elevate_via_docker() {
   return "$ec"
 }
 
-bootstrap_marketplace_sudoers_via_tak_portal() {
-  # /etc/sudoers.d only affects sudo — skip for dzdo.
-  [ "$CTAK_PRIV" = "sudo" ] || return 1
-  if "$CTAK_PRIV" -n true >/dev/null 2>&1; then return 0; fi
-  local me repair bootstrap ok tee_try bash_try
-  me=$(id -un)
-  repair="/opt/tak/utils/tak-portal-repair-certs.sh"
-  echo "elevate: bootstrapping marketplace sudoers via TAK Portal repair-script NOPASSWD hook"
-  bootstrap=$(mktemp /tmp/ctak-sudoers-boot.XXXXXX)
-  if command -v python3 >/dev/null 2>&1; then
-    ME="$me" REPAIR="$repair" python3 - <<'PY' > "$bootstrap"
-import os
-me = os.environ["ME"]
-repair = os.environ["REPAIR"]
-print("#!/bin/bash")
-print("set -euo pipefail")
-print("umask 077")
-print("cat > /etc/sudoers.d/tak-portal-marketplace <<'SUDO'")
-print("Defaults:%s !requiretty" % me)
-print("%s ALL=NOPASSWD: ALL" % me)
-print("SUDO")
-print("chmod 440 /etc/sudoers.d/tak-portal-marketplace")
-print("command -v visudo >/dev/null 2>&1 && visudo -cf /etc/sudoers.d/tak-portal-marketplace || true")
-print("cat > %s <<'REPAIR'" % repair)
-print("#!/bin/bash")
-print("set -euo pipefail")
-print("CERTS=/opt/tak/certs")
-print('mkdir -p "$CERTS/files"')
-print('chmod 644 "$CERTS/cert-metadata.sh" 2>/dev/null || true')
-print('for f in "$CERTS"/*.sh; do')
-print('  [ -f "$f" ] || continue')
-print('  bn=$(basename "$f")')
-print('  if [ "$bn" = "cert-metadata.sh" ]; then chmod 644 "$f"; else chmod 755 "$f"; fi')
-print("done")
-print('chown -R tak:tak "$CERTS"')
-print("REPAIR")
-print("chmod 755 %s" % repair)
-PY
-  else
-    {
-      echo '#!/bin/bash'
-      echo 'set -euo pipefail'
-      echo 'umask 077'
-      printf 'cat > /etc/sudoers.d/tak-portal-marketplace <<SUDO\\n'
-      printf 'Defaults:%s !requiretty\\n' "$me"
-      printf '%s ALL=NOPASSWD: ALL\\n' "$me"
-      printf 'SUDO\\n'
-      echo 'chmod 440 /etc/sudoers.d/tak-portal-marketplace'
-      echo "printf '%s\\n' '#!/bin/bash' 'chown -R tak:tak /opt/tak/certs 2>/dev/null || true' > '$repair'"
-      echo "chmod 755 '$repair'"
-    } > "$bootstrap"
-  fi
-  chmod 700 "$bootstrap"
-  ok=0
-  for tee_try in /usr/bin/tee /bin/tee; do
-    [ -x "$tee_try" ] || continue
-    if "$CTAK_PRIV" -n "$tee_try" "$repair" < "$bootstrap" >/dev/null 2>&1; then
-      ok=1
-      break
-    fi
-  done
-  if [ "$ok" -ne 1 ]; then
-    echo "elevate: $CTAK_PRIV tee $repair failed — is TAK Portal SSH sudoers installed?" >&2
-    rm -f "$bootstrap"
-    return 1
-  fi
-  ok=0
-  for bash_try in /usr/bin/bash /bin/bash; do
-    [ -x "$bash_try" ] || continue
-    if "$CTAK_PRIV" -n "$bash_try" "$repair"; then
-      ok=1
-      break
-    fi
-  done
-  rm -f "$bootstrap"
-  if [ "$ok" -ne 1 ]; then
-    echo "elevate: $CTAK_PRIV bash $repair bootstrap failed" >&2
-    return 1
-  fi
-  if "$CTAK_PRIV" -n true >/dev/null 2>&1; then
-    echo "elevate: marketplace sudoers active via TAK Portal hook"
-    return 0
-  fi
-  echo "elevate: marketplace sudoers installed but $CTAK_PRIV -n still failed" >&2
-  return 1
-}
-
+# Kept name for call sites / tests: cleans leftover NOPASSWD drop-in; never installs one.
 ensure_marketplace_sudoers() {
-  if "$CTAK_PRIV" -n true >/dev/null 2>&1; then return 0; fi
-  local me
-  me=$(id -un)
-  # dzdo does not read /etc/sudoers.d — passwordless must already be configured on the host.
-  if [ "$CTAK_PRIV" != "sudo" ]; then
-    echo "elevate: $CTAK_PRIV -n unavailable for $me (no sudoers.d bootstrap for $CTAK_PRIV)"
-    return 1
-  fi
-  echo "elevate: ensuring passwordless sudo for $me"
-  if bootstrap_marketplace_sudoers_via_tak_portal; then return 0; fi
-  elevate_via_docker "printf '%s\\n' \"Defaults:\${me} !requiretty\" \"\${me} ALL=NOPASSWD: ALL\" > /etc/sudoers.d/tak-portal-marketplace && chmod 440 /etc/sudoers.d/tak-portal-marketplace" || true
-  if "$CTAK_PRIV" -n true >/dev/null 2>&1; then
-    echo "elevate: marketplace sudoers active via docker"
+  cleanup_leftover_marketplace_sudoers || true
+  if marketplace_helper_available; then
+    echo "elevate: marketplace helper ready at $CTAK_MARKETPLACE_HELPER"
     return 0
   fi
+  if [ -n "\${CTAK_SUDO_PASS:-}" ] && printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' true >/dev/null 2>&1; then
+    echo "elevate: stored $CTAK_PRIV password available (no NOPASSWD: ALL)"
+    return 0
+  fi
+  if resolve_docker_bin; then
+    echo "elevate: docker available for CloudTAK-scoped ops (no host sudoers writes)"
+    return 0
+  fi
+  echo "elevate: marketplace privilege not available" >&2
+  marketplace_admin_enable_msg
   return 1
 }
 
@@ -895,19 +864,15 @@ elevate_run() {
   local cmd="$1"
   local owner
   owner=$(cloudtak_owner)
-  if ! "$CTAK_PRIV" -n true >/dev/null 2>&1; then
-    ensure_marketplace_sudoers || true
-  fi
+  cleanup_leftover_marketplace_sudoers || true
   if [ -n "$owner" ] && [ "$(id -un)" != "$owner" ] && "$CTAK_PRIV" -n -u "$owner" true >/dev/null 2>&1; then
     echo "elevate: as checkout owner $owner"
     "$CTAK_PRIV" -n -u "$owner" bash -lc "$cmd" && return 0
   fi
   if elevate_via_priv "$cmd"; then return 0; fi
-  if elevate_via_docker "$cmd"; then
-    ensure_marketplace_sudoers || true
-    return 0
-  fi
+  if elevate_via_docker "$cmd"; then return 0; fi
   echo "elevate: all methods failed for: $cmd" >&2
+  marketplace_admin_enable_msg
   return 1
 }
 
@@ -916,7 +881,14 @@ reclaim_cloudtak_plugin_paths() {
   me=$(id -un)
   grp=$(id -gn)
   echo "Reclaiming CloudTAK plugin paths for $me — fixes root-owned leftovers from prior SSH users"
-  ensure_marketplace_sudoers || true
+  cleanup_leftover_marketplace_sudoers || true
+  mkdir -p "$HOME/.cache/cloudtak-marketplace" 2>/dev/null || true
+  if marketplace_helper_run reclaim "$CT" "$me" "$grp"; then
+    chown -R "$me:$grp" "$HOME/.cache/cloudtak-marketplace" 2>/dev/null || \\
+      elevate_run "chown -R $(printf '%q' "$me:$grp") $(printf '%q' "$HOME/.cache/cloudtak-marketplace")" || true
+    echo "Reclaim complete (marketplace-helper)"
+    return 0
+  fi
   # Include cloudtak-marketplace-plugins (runtime persist) and plugin compose overlays —
   # prior root SSH installs leave those root-owned and break takwerx rm/cp.
   if ! elevate_run "mkdir -p '$CT/app/plugins' '$CT/api/web/plugins' '$CT/app/src/plugins' '$CT/api/web/src/plugins' '$CT/api/stateless/routes' '$CT/cloudtak-marketplace-plugins' '$HOME/.cache/cloudtak-marketplace' && chown -R '$me:$grp' '$CT/app/plugins' '$CT/api/web/plugins' '$CT/app/src/plugins' '$CT/api/web/src/plugins' '$CT/api/stateless/routes' '$CT/cloudtak-marketplace-plugins' '$HOME/.cache/cloudtak-marketplace' && chmod -R u+rwX '$CT/app/plugins' '$CT/api/web/plugins' '$CT/app/src/plugins' '$CT/api/web/src/plugins' '$CT/api/stateless/routes' '$CT/cloudtak-marketplace-plugins' '$HOME/.cache/cloudtak-marketplace' && { chown '$me:$grp' '$CT'/docker-compose.plugin-*.yml '$CT'/docker-compose.marketplace.yml 2>/dev/null || true; }"; then
@@ -1552,6 +1524,16 @@ async function remoteShaForPlugin(plugin) {
   return String(result.stdout || "").trim().split(/\s+/)[0] || "";
 }
 
+/** True when installed.json shows a successful install (not error-only leftovers). */
+function isMarketplaceInstalledRecord(rec) {
+  return !!(rec && (rec.installedAt || rec.sha));
+}
+
+function installedShaFromRow(row, installedPlugins) {
+  const rec = installedPlugins && row && installedPlugins[row.id];
+  return (rec && rec.sha) || (row.scan && row.scan.gitHead) || "";
+}
+
 async function enrichUpdateShas(uiPlugins) {
   const installed = store.readInstalled();
   const out = [];
@@ -1559,10 +1541,8 @@ async function enrichUpdateShas(uiPlugins) {
     const next = { ...row };
     if (row.installed && row.catalog) {
       const remoteSha = await remoteShaForPlugin(row.catalog);
-      const localSha =
-        (installed.plugins[row.id] && installed.plugins[row.id].sha) ||
-        row.scan.gitHead ||
-        "";
+      // Host scan can be missing after a failed clone that left an installed.json row (#70).
+      const localSha = installedShaFromRow(row, installed.plugins);
       next.remoteSha = remoteSha || "";
       next.installedSha = localSha;
       next.updateAvailable = !!(remoteSha && localSha && remoteSha !== localSha) || !!(remoteSha && !localSha && row.installed);
@@ -1672,7 +1652,8 @@ function buildUiPlugins(options = {}) {
     const scanHit = scanHitForCatalog(p);
     const rec = installedRec.plugins[p.id];
     const errorMessage = pluginErrorMessage(installedRec, p.id, p.web.dest);
-    const installed = !!(scanHit || rec);
+    // Error-only records (failed clone before anything landed) must not count as installed (#70).
+    const installed = !!(scanHit || isMarketplaceInstalledRecord(rec));
     // Hidden catalog entries stay in loadCatalog/detect/install paths, but are
     // omitted from the marketplace UI unless already present on the host.
     if (p.hidden && !installed) continue;
@@ -1696,7 +1677,7 @@ function buildUiPlugins(options = {}) {
       installed,
       error: !!errorMessage,
       errorMessage,
-      origin: scanHit ? scanHit.origin : rec ? "marketplace" : "",
+      origin: scanHit ? scanHit.origin : isMarketplaceInstalledRecord(rec) ? "marketplace" : "",
       layout: {
         web: true,
         routes: !!p.routes,
@@ -1759,6 +1740,7 @@ function buildUiPlugins(options = {}) {
   }
   for (const [id, rec] of Object.entries(installedRec.plugins || {})) {
     if (byId.has(id)) continue;
+    if (!isMarketplaceInstalledRecord(rec)) continue;
     const dest = String((rec && rec.dest) || "").trim();
     if (!dest || !safeDestName(dest) || destListed(dest)) continue;
     byId.set(id, hostOnlyPlugin({ id, dest, repo: (rec && rec.repo) || "", scan: null }));
@@ -1997,6 +1979,14 @@ function summarizeCommandError(message) {
     .filter(Boolean);
   if (!lines.length) return "SSH command failed";
   const clip = (s) => (s.length > 220 ? s.slice(0, 217) + "..." : s);
+  const joined = lines.join("\n");
+  if (/plugin repository not found/i.test(joined)) {
+    const hit = lines.find((line) => /plugin repository not found/i.test(line));
+    if (hit) return clip(hit.replace(/^ERROR:\s*/i, ""));
+  }
+  if (/could not read Username for ['"]?https:\/\/github\.com/i.test(joined) || /Repository not found/i.test(joined)) {
+    return "plugin repository not found or not accessible";
+  }
   const interesting = /failed to solve|invalid compose|ERROR:|exit code|✖\s+\d+\s+problems|EACCES|permission denied|Could not|not found|Refusing /i;
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = lines[i].replace(/^#\d+\s+/, "").replace(/^(?:=>\s*)+/, "");
@@ -3238,7 +3228,7 @@ run_as_writer() {
     if elevate_run "$cmd"; then
       return 0
     fi
-    echo "ERROR: cannot write $PLUGIN_ROOT as $(id -un), even with \${CTAK_PRIV:-sudo}/docker elevation. Point CloudTAK SSH at an account that can \${CTAK_PRIV:-sudo} or run docker (checkout owner: $owner)." >&2
+    echo "ERROR: cannot write $PLUGIN_ROOT as $(id -un), even with \${CTAK_PRIV:-sudo}/docker elevation. Ask your admin to enable marketplace installs (checkout owner: $owner)." >&2
     exit 1
   fi
   if bash -lc "$cmd"; then
@@ -3248,14 +3238,27 @@ run_as_writer() {
   if elevate_run "$cmd"; then
     return 0
   fi
-  echo "ERROR: cannot write $PLUGIN_ROOT as $(id -un), even with \${CTAK_PRIV:-sudo}/docker elevation. Point CloudTAK SSH at an account that can \${CTAK_PRIV:-sudo} or run docker (checkout owner: $owner)." >&2
+  echo "ERROR: cannot write $PLUGIN_ROOT as $(id -un), even with \${CTAK_PRIV:-sudo}/docker elevation. Ask your admin to enable marketplace installs (checkout owner: $owner)." >&2
   exit 1
 }
 
 echo "Fetching latest plugin source"
 echo "Cloning $REPO ($REF)"
 reset_cache
-GIT_TERMINAL_PROMPT=0 git_ok clone --quiet --depth 1 --single-branch --branch "$REF" "$REPO" "$CACHE"
+clone_err=$(mktemp)
+if ! GIT_TERMINAL_PROMPT=0 git_ok clone --quiet --depth 1 --single-branch --branch "$REF" "$REPO" "$CACHE" 2>"$clone_err"; then
+  err=$(cat "$clone_err" 2>/dev/null || true)
+  rm -f "$clone_err"
+  if printf '%s' "$err" | grep -qiE 'Repository not found|could not read Username|Authentication failed|Permission denied \\(publickey\\)|remote: Not Found'; then
+    echo "ERROR: plugin repository not found or not accessible: $REPO" >&2
+  elif [ -n "$err" ]; then
+    printf 'ERROR: %s\\n' "$err" >&2
+  else
+    echo "ERROR: git clone failed for $REPO" >&2
+  fi
+  exit 1
+fi
+rm -f "$clone_err"
 REPO_DIR="$CACHE"
 SHA=$(git_ok -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)
 echo "Plugin source $REPO_DIR @ $SHA"
@@ -3486,38 +3489,90 @@ CT=${ssh.shellQuote(ct)}
 SVC=${ssh.shellQuote(service || "api")}
 ${pluginPrivilegeBash()}
 cd "$CT"
-CF=""
-if [ -f docker-compose.yml ]; then CF=docker-compose.yml
-elif [ -f docker-compose.yaml ]; then CF=docker-compose.yaml
-elif [ -f compose.yml ]; then CF=compose.yml
-elif [ -f compose.yaml ]; then CF=compose.yaml
-else echo "No compose file in $CT" >&2; exit 1
-fi
-# Ensure passwordless privilege / privileged docker before align + compose (takwerx has no docker group).
+# Prefer fixed marketplace-helper rebuild (narrow sudoers). Fall back to docker compose.
 ensure_marketplace_sudoers || true
 # A plugin copied earlier can still fail vue-tsc and block this rebuild.
 ${pluginHostAlignRunnerBash()}
 align_plugins_to_host "$CT"
-MPF=""
-if [ -f docker-compose.marketplace.yml ]; then
-  MPF="-f docker-compose.marketplace.yml"
-  echo "Using marketplace CSP overlay"
+if marketplace_helper_run rebuild "$CT" "$SVC"; then
+  echo "Waiting for $SVC to be running"
+  n=0
+  while [ "$n" -lt 90 ]; do
+    n=$((n+1))
+    fmt=$(docker compose ps "$SVC" --format '{{.State}} {{.Health}}' 2>/dev/null || true)
+    if [ -z "$fmt" ]; then
+      fmt=$(docker compose ps "$SVC" 2>/dev/null | tail -n +2 || true)
+    fi
+    echo "  $SVC status: $fmt"
+    low=$(printf '%s' "$fmt" | tr '[:upper:]' '[:lower:]')
+    state=$(printf '%s' "$low" | awk '{print $1}')
+    health=$(printf '%s' "$low" | awk '{print $2}')
+    if [ "$state" = "running" ] && [ "$health" != "starting" ]; then
+      echo "Container $SVC is running"
+      break
+    fi
+    if printf '%s' "$low" | grep -qE '(^|[[:space:]])running([[:space:]]|$)|[[:space:]]up[[:space:]]|\\(healthy\\)'; then
+      if ! printf '%s' "$low" | grep -qE 'restarting|starting|exited|dead|created|paused'; then
+        echo "Container $SVC is running"
+        break
+      fi
+    fi
+    if [ "$n" -ge 90 ]; then
+      echo "Timed out waiting for $SVC to be running" >&2
+      exit 1
+    fi
+    sleep 2
+  done
+  echo REBUILD_OK
+  echo "Removing unused Docker images"
+  docker image prune -f || true
+  exit 0
+fi
+# Fallback: honour COMPOSE_FILE from .env (infra-TAK overlays) instead of hard-coding -f pairs.
+COMPOSE_ARGS=()
+if [ -f .env ]; then
+  _cf=$(grep -E '^[[:space:]]*COMPOSE_FILE=' .env | tail -n 1 | cut -d= -f2- || true)
+  _cf=$(printf '%s' "\$_cf" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"\$//' -e "s/^'//" -e "s/'\$//")
+  if [ -n "\$_cf" ]; then
+    IFS=':' read -r -a _cffiles <<< "\$_cf"
+    for _f in "\${_cffiles[@]}"; do
+      [ -n "\$_f" ] || continue
+      case "\$_f" in *..*|/*) echo "Refusing compose file path: \$_f" >&2; exit 1 ;; esac
+      [ -f "\$_f" ] || { echo "COMPOSE_FILE entry missing: \$_f" >&2; exit 1; }
+      COMPOSE_ARGS+=(-f "\$_f")
+    done
+    echo "Using COMPOSE_FILE from .env"
+  fi
+fi
+if [ "\${#COMPOSE_ARGS[@]}" -eq 0 ]; then
+  CF=""
+  if [ -f docker-compose.yml ]; then CF=docker-compose.yml
+  elif [ -f docker-compose.yaml ]; then CF=docker-compose.yaml
+  elif [ -f compose.yml ]; then CF=compose.yml
+  elif [ -f compose.yaml ]; then CF=compose.yaml
+  else echo "No compose file in $CT" >&2; exit 1
+  fi
+  COMPOSE_ARGS=(-f "$CF")
+  if [ -f docker-compose.marketplace.yml ]; then
+    COMPOSE_ARGS+=(-f docker-compose.marketplace.yml)
+    echo "Using marketplace CSP overlay"
+  fi
 fi
 export BUILDKIT_PROGRESS=plain
 export COMPOSE_ANSI=never
 export COMPOSE_PROGRESS=plain
-# docker() is shadowed by pluginPrivilegeBash to use $CTAK_PRIV -n docker when needed.
-docker compose --progress=plain -f "$CF" $MPF build --no-cache "$SVC"
+# docker() is shadowed by pluginPrivilegeBash to use $CTAK_PRIV docker when needed.
+docker compose --progress=plain "\${COMPOSE_ARGS[@]}" build --no-cache "$SVC"
 echo "CloudTAK image build finished."
-docker compose --progress=plain -f "$CF" $MPF up -d --force-recreate "$SVC"
+docker compose --progress=plain "\${COMPOSE_ARGS[@]}" up -d --force-recreate "$SVC"
 echo "CloudTAK container recreate finished."
 echo "Waiting for $SVC to be running"
 n=0
 while [ "$n" -lt 90 ]; do
   n=$((n+1))
-  fmt=$(docker compose -f "$CF" ps "$SVC" --format '{{.State}} {{.Health}}' 2>/dev/null || true)
+  fmt=$(docker compose "\${COMPOSE_ARGS[@]}" ps "$SVC" --format '{{.State}} {{.Health}}' 2>/dev/null || true)
   if [ -z "$fmt" ]; then
-    fmt=$(docker compose -f "$CF" ps "$SVC" 2>/dev/null | tail -n +2 || true)
+    fmt=$(docker compose "\${COMPOSE_ARGS[@]}" ps "$SVC" 2>/dev/null | tail -n +2 || true)
   fi
   echo "  $SVC status: $fmt"
   low=$(printf '%s' "$fmt" | tr '[:upper:]' '[:lower:]')
@@ -4035,6 +4090,8 @@ module.exports = {
   deployPluginCaddy,
   getSnapshot,
   buildUiPlugins,
+  isMarketplaceInstalledRecord,
+  installedShaFromRow,
   refreshUiSnapshot,
   uiSnapshot,
   refreshShaCache,

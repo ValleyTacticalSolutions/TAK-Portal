@@ -1135,12 +1135,24 @@ function resolveDepName(name, known, project) {
   const raw = String(name || "").replace(/^['"]|['"]$/g, "");
   if (!raw) return "";
   if (known.has(raw)) return raw;
-  const prefix = project ? String(project).replace(/\/+$/, "").split(/[\\/]/).pop().toLowerCase() + "-" : "";
-  if (prefix && raw.toLowerCase().startsWith(prefix)) {
+  const matchTail = (prefix) => {
+    if (!prefix || !raw.toLowerCase().startsWith(prefix)) return "";
     const tail = raw.slice(prefix.length);
+    if (!tail) return "";
     for (const svc of known) {
       if (svc.toLowerCase() === tail.toLowerCase()) return svc;
     }
+    return "";
+  };
+  const projectPrefix = project
+    ? String(project).replace(/\/+$/, "").split(/[\\/]/).pop().toLowerCase() + "-"
+    : "";
+  const viaProject = matchTail(projectPrefix);
+  if (viaProject) return viaProject;
+  // Plugin overlays always use cloudtak-* names; stack folders are often not "CloudTAK".
+  if (projectPrefix !== "cloudtak-") {
+    const viaCloudtak = matchTail("cloudtak-");
+    if (viaCloudtak) return viaCloudtak;
   }
   return "";
 }
@@ -1200,6 +1212,16 @@ function filterDependsEntries(block, known, project, notes) {
     i += 1;
   }
   return kept;
+}
+
+function rewriteComposeServiceUrls(text, known, project, notes) {
+  // Print-style overlays set API_INTERNAL_URL=http://cloudtak-api:5000; stock stacks use api/tiles.
+  return String(text || "").replace(/(https?:\/\/)([A-Za-z0-9._-]+)(?=:\d+)/g, (match, proto, host) => {
+    const resolved = resolveDepName(host, known, project);
+    if (!resolved || resolved === host) return match;
+    notes.push(host + " -> " + resolved + " (url)");
+    return proto + resolved;
+  });
 }
 
 function rewriteComposeDepends(text, externalNames, project) {
@@ -1262,7 +1284,8 @@ function rewriteComposeDepends(text, externalNames, project) {
   }
   let joined = out.join("\n");
   if (trailingNl) joined += "\n";
-  return { text: joined, notes };
+  const withUrls = rewriteComposeServiceUrls(joined, known, project, notes);
+  return { text: withUrls, notes };
 }
 
 function fixComposeDependsFile(overlayPath, basePaths, project) {
@@ -1381,7 +1404,7 @@ function main() {
     }
     const result = fixComposeDependsFile(overlayPath, paths.slice(1), project);
     if (result.text && result.notes && result.notes.length) {
-      console.log("Adjusted plugin depends_on to services in this CloudTAK stack");
+      console.log("Adjusted plugin compose service refs to this CloudTAK stack");
       result.notes.forEach((line) => console.log("  " + line));
     }
     return;

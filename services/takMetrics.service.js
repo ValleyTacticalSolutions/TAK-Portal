@@ -111,7 +111,7 @@ function buildTakAxios() {
   };
 
   if (p12Path) {
-    const { getPemFromP12 } = require("p12-pem");
+    const { getPemFromP12 } = require("./p12Pem");
     const certs = getPemFromP12(p12Path, p12Pass);
 
     if (!certs?.pemCertificate) throw new Error("TAK metrics: Unable to extract certificate(s) from P12");
@@ -197,7 +197,7 @@ function buildTakMtlsHttpsAgent(opts = {}) {
   };
 
   if (p12Path) {
-    const { getPemFromP12 } = require("p12-pem");
+    const { getPemFromP12 } = require("./p12Pem");
     const certs = getPemFromP12(p12Path, p12Pass);
 
     if (!certs?.pemCertificate) throw new Error("TAK locate relay: Unable to extract certificate(s) from P12");

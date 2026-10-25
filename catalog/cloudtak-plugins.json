@@ -23,6 +23,8 @@
       "repo": "https://github.com/snstac/CloudTAK-Plugin-HelloWorld.git",
       "added": "2026-09-20",
       "maintainer": "snstac",
+      "hidden": true,
+      "notes": "Temporarily hidden: upstream GitHub repo is gone (404), so clone fails with a credential prompt.",
       "web": { "dest": "helloworld" },
       "detect": [
         "api/web/plugins/helloworld/index.ts",
@@ -36,6 +38,8 @@
       "repo": "https://github.com/snstac/CloudTAK-Plugin-uDash.git",
       "added": "2026-09-20",
       "maintainer": "snstac",
+      "hidden": true,
+      "notes": "Temporarily hidden: upstream GitHub repo is gone (404), so clone fails with a credential prompt.",
       "web": { "dest": "udash" },
       "sidecars": [{ "dir": "server", "port": 3080 }],
       "additionalActions": [
@@ -191,8 +195,6 @@
       "repo": "https://github.com/dfndr13/cloudtak-replay-plugin.git",
       "added": "2026-09-25",
       "maintainer": "dfndr13",
-      "hidden": true,
-      "notes": "Temporarily hidden: core patches target CloudTAK 13.69.0 and fail on newer checkouts (e.g. connection-pool.ts).",
       "web": { "dest": "replay" },
       "detect": [
         "api/web/plugins/replay/index.ts",

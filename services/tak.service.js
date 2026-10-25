@@ -7,7 +7,7 @@
  * - Revoke ALL certificates ever issued by a given creatorDn (creatorDn == username)
  * - Use the generic "all certs" endpoint (includes active/revoked/expired/etc.)
  * - Absolutely verify revocation before returning success (to block Authentik deletion if not verified)
- * - Support legacy PKCS#12 (RC2-40-CBC) by parsing P12 via node-tak’s approach (p12-pem) and supplying PEM to Node TLS
+ * - Support legacy PKCS#12 (RC2-40-CBC) by parsing P12 via node-forge (services/p12Pem.js) and supplying PEM to Node TLS
  *
  * Env:
  *   TAK_URL                       e.g. https://tak.example.com:8443 or https://tak.example.com:8443/Marti
@@ -24,12 +24,6 @@
  * Optional:
  *   TAK_CA_PATH                   PEM CA bundle
  *   TAK_CERT_LIST_TIMEOUT_MS      timeout for cert catalog GETs (default 60000)
- *
- * Notes:
- * - For P12 parsing, install:
- *     npm install p12-pem
- * - Remove node-forge if previously used:
- *     npm uninstall node-forge
  */
 
 const fs = require("fs");
@@ -155,7 +149,7 @@ function loadTakClientTlsMaterials() {
   let passphrase;
 
   if (p12Path) {
-    const { getPemFromP12 } = require("p12-pem");
+    const { getPemFromP12 } = require("./p12Pem");
 
     const pass = p12Pass ?? "";
     const certs = getPemFromP12(p12Path, pass);

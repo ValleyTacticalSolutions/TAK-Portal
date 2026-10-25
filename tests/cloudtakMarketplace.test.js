@@ -108,16 +108,90 @@ assert.ok(sidebarConfigurator.detect.some((d) => d.includes("app/plugins/sidebar
 assert.match(marketplace.installRemoteScript("/root/CloudTAK", sidebarConfigurator), /install\.sh/);
 const replay = normalized.plugins.find((p) => p.id === "replay");
 assert.strictEqual(replay.web.dest, "replay");
-assert.strictEqual(replay.hidden, true, "replay stays in catalog but is hidden from marketplace UI");
+assert.strictEqual(!!replay.hidden, false, "replay is available in the marketplace UI");
 assert.match(marketplace.uninstallRemoteScript("/root/CloudTAK", "replay", [], "replay"), /--remove/);
 assert.match(marketplace.installRemoteScript("/root/CloudTAK", replay), /apply_plugin_patches/);
 assert.match(marketplace.installRemoteScript("/root/CloudTAK", replay), /marketplace-install-status/);
+const helloworld = normalized.plugins.find((p) => p.id === "helloworld");
+const udashHidden = normalized.plugins.find((p) => p.id === "udash");
+assert.strictEqual(helloworld.hidden, true, "helloworld hidden while upstream repo 404s");
+assert.strictEqual(udashHidden.hidden, true, "udash hidden while upstream repo 404s");
 {
   const ui = marketplace.buildUiPlugins({ skipRemoteSha: true });
-  assert.ok(!ui.plugins.some((p) => p.id === "replay"), "hidden replay omitted from marketplace list when not installed");
-  const blocked = marketplace.stageJob({ kind: "install", pluginId: "replay", createdBy: "test" });
-  assert.strictEqual(blocked.ok, false);
-  assert.match(String(blocked.error || ""), /temporarily unavailable/i);
+  assert.ok(ui.plugins.some((p) => p.id === "replay"), "replay listed in marketplace UI");
+  assert.ok(!ui.plugins.some((p) => p.id === "helloworld"), "hidden helloworld omitted from marketplace list when not installed");
+  assert.ok(!ui.plugins.some((p) => p.id === "udash"), "hidden udash omitted from marketplace list when not installed");
+  const blockedHello = marketplace.stageJob({ kind: "install", pluginId: "helloworld", createdBy: "test" });
+  assert.strictEqual(blockedHello.ok, false);
+  assert.match(String(blockedHello.error || ""), /temporarily unavailable/i);
+  assert.strictEqual(marketplace.stageJob({ kind: "install", pluginId: "udash", createdBy: "test" }).ok, false);
+}
+
+// #70: failed clone leaves error-only installed.json; must not count as installed or crash check-updates
+{
+  assert.strictEqual(marketplace.isMarketplaceInstalledRecord({ lastError: "clone failed", dest: "print" }), false);
+  assert.strictEqual(
+    marketplace.isMarketplaceInstalledRecord({ sha: "abc", installedAt: "2026-01-01T00:00:00.000Z", dest: "print" }),
+    true
+  );
+  assert.strictEqual(
+    marketplace.installedShaFromRow({ id: "print", scan: null }, { print: { sha: "deadbeef" } }),
+    "deadbeef"
+  );
+  assert.strictEqual(
+    marketplace.installedShaFromRow({ id: "print", scan: null }, { print: { lastError: "clone failed" } }),
+    ""
+  );
+  assert.strictEqual(
+    marketplace.installedShaFromRow({ id: "print", scan: { gitHead: "abc1234" } }, {}),
+    "abc1234"
+  );
+
+  const prevInstalled = store.readInstalled();
+  const prevFailScan = store.readScanCache();
+  store.writeInstalled({
+    plugins: {
+      print: {
+        dest: "print",
+        lastError: "could not read Username for 'https://github.com'",
+        lastErrorAt: new Date().toISOString(),
+      },
+      "rubber-sheet": {
+        sha: "1111111",
+        dest: "rubber-sheet",
+        installedAt: new Date().toISOString(),
+      },
+    },
+  });
+  store.writeScanCache({
+    ok: true,
+    scannedAt: new Date().toISOString(),
+    path: "/root/CloudTAK",
+    plugins: [{ dest: "rubber-sheet", catalogId: "rubber-sheet", origin: "marketplace", onDisk: true, gitHead: "1111111" }],
+  });
+  try {
+    const ui = marketplace.buildUiPlugins({ skipRemoteSha: true });
+    const printRow = ui.plugins.find((p) => p.id === "print");
+    assert.ok(printRow, "print catalog row present after failed install");
+    assert.strictEqual(printRow.installed, false, "error-only print must not show as installed");
+    assert.strictEqual(printRow.error, true);
+    assert.match(String(printRow.errorMessage || ""), /could not read Username/);
+    assert.strictEqual(printRow.scan, null);
+    // Same null-scan path that previously threw in enrichUpdateShas / check-updates
+    assert.doesNotThrow(() =>
+      marketplace.installedShaFromRow(printRow, store.readInstalled().plugins)
+    );
+    const rubber = ui.plugins.find((p) => p.id === "rubber-sheet");
+    assert.strictEqual(rubber.installed, true, "successful install still marked installed");
+  } finally {
+    store.writeInstalled(prevInstalled || { plugins: {} });
+    if (prevFailScan) store.writeScanCache(prevFailScan);
+    else {
+      try {
+        fs.unlinkSync(path.join(store.DIR, "scan-cache.json"));
+      } catch (_) {}
+    }
+  }
 }
 const drifted = [
   "import type ConfigStateful from '../config.js';",
@@ -270,6 +344,8 @@ assert.doesNotMatch(printScript, /cloudtak_default/);
 assert.match(printScript, /\.ctak-runtime-plugin\.sh[\s\S]*resolve_docker_bin[\s\S]*fix_overlay_depends/);
 assert.match(printScript, /fix_overlay_depends[\s\S]*docker_cli run --rm -u 0/);
 assert.match(printScript, /fix_overlay_depends[\s\S]*elevate_run "command -v node/);
+assert.match(printScript, /plugin repository not found or not accessible/);
+assert.match(printScript, /GIT_TERMINAL_PROMPT=0 git_ok clone/);
 
 const uninstallPrint = marketplace.uninstallRemoteScript("/root/CloudTAK", "print", [], "print");
 assert.match(uninstallPrint, /Cleaning plugin runtime/);
@@ -311,6 +387,29 @@ assert.match(withPrint.text, /^\(cloudtak_print\) \{/m);
 assert.match(withPrint.text, /cloud\.example\.com \{[\s\S]*import cloudtak_print[\s\S]*reverse_proxy cloudtak-api:5000/);
 assert.doesNotMatch(withPrint.text.split("cloud.example.com")[0], /import cloudtak_print/);
 assert.strictEqual(caddy.applyCaddySnippets(withPrint.text, [printSnippet]).changed, false);
+{
+  // Host/systemd Caddy (infra-TAK): existing (cloudtak_print) pointing at loopback must not be overwritten.
+  const hostPrint = [
+    "(cloudtak_print) {",
+    "\t@cloudtak_print path /print-api /print-api/*",
+    "\thandle @cloudtak_print {",
+    "\t\treverse_proxy 127.0.0.1:5010",
+    "\t}",
+    "}",
+    "",
+    "cloud.example.com {",
+    "\timport cloudtak_print",
+    "\treverse_proxy cloudtak-api:5000",
+    "}",
+    "",
+  ].join("\n");
+  const keepHost = caddy.applyCaddySnippets(hostPrint, [printSnippet]);
+  assert.strictEqual(keepHost.ok, true);
+  assert.strictEqual(keepHost.changed, false);
+  assert.match(keepHost.text, /reverse_proxy 127\.0\.0\.1:5010/);
+  assert.doesNotMatch(keepHost.text, /reverse_proxy cloudtak-print:5010/);
+  assert.ok(caddy.appliedKeys([print], hostPrint).length > 0);
+}
 assert.strictEqual(caddy.applyCaddySnippets("a.example.com {\n\treverse_proxy other:1\n}\n\nb.example.com {\n\treverse_proxy other:2\n}\n", [udashSnippet]).ok, false);
 const hostFile = [
   "{",
@@ -787,18 +886,29 @@ const overlay = [
   "      - cloudtak-api",
   "      - cloudtak-tiles",
   "      - cloudtak-store",
+  "    environment:",
+  "      - API_INTERNAL_URL=http://cloudtak-api:5000",
+  "      - TILES_INTERNAL_URL=http://cloudtak-tiles:5002",
 ].join("\n") + "\n";
-const baseServices = ["api", "store", "media", "postgis"];
+const baseServices = ["api", "store", "media", "postgis", "tiles"];
 const fixed = align.rewriteComposeDepends(overlay, baseServices, "CloudTAK");
 assert.match(fixed.text, /-\s+api/);
 assert.match(fixed.text, /-\s+store/);
-assert.doesNotMatch(fixed.text, /cloudtak-tiles/);
+assert.match(fixed.text, /-\s+tiles/);
 assert.doesNotMatch(fixed.text, /cloudtak-store/);
+assert.match(fixed.text, /API_INTERNAL_URL=http:\/\/api:5000/);
+assert.match(fixed.text, /TILES_INTERNAL_URL=http:\/\/tiles:5002/);
+assert.doesNotMatch(fixed.text, /http:\/\/cloudtak-api:/);
+assert.doesNotMatch(fixed.text, /http:\/\/cloudtak-tiles:/);
 assert.ok(fixed.notes.some((n) => n.includes("cloudtak-api") && n.includes("api")));
-assert.ok(fixed.notes.some((n) => n.includes("dropped cloudtak-tiles")));
+assert.ok(fixed.notes.some((n) => /cloudtak-api -> api \(url\)/.test(n)));
+assert.ok(fixed.notes.some((n) => /cloudtak-tiles -> tiles \(url\)/.test(n)));
 const fixedAgain = align.rewriteComposeDepends(fixed.text, baseServices, "cloudtak");
 assert.strictEqual(fixedAgain.text, fixed.text);
 assert.deepStrictEqual(fixedAgain.notes, []);
+const stackFolder = align.rewriteComposeDepends(overlay, baseServices, "tak-stack");
+assert.match(stackFolder.text, /API_INTERNAL_URL=http:\/\/api:5000/);
+assert.match(stackFolder.text, /-\s+api/);
 
 const inline = align.rewriteComposeDepends(
   "services:\n  sidecar:\n    depends_on: [cloudtak-api, cloudtak-missing]\n",
@@ -828,6 +938,16 @@ const composeErr = marketplace.summarizeCommandError(
 assert.match(composeErr, /invalid compose/);
 assert.ok(composeErr.length < 240);
 assert.strictEqual(marketplace.summarizeCommandError("Plugin print is not in the catalog"), "Plugin print is not in the catalog");
+assert.strictEqual(
+  marketplace.summarizeCommandError(
+    "Cloning https://github.com/snstac/CloudTAK-Plugin-HelloWorld.git (main)\nfatal: could not read Username for 'https://github.com': terminal prompts disabled"
+  ),
+  "plugin repository not found or not accessible"
+);
+assert.match(
+  marketplace.summarizeCommandError("ERROR: plugin repository not found or not accessible: https://github.com/snstac/CloudTAK-Plugin-uDash.git"),
+  /plugin repository not found/
+);
 
 const installAligned = marketplace.installRemoteScript("/root/CloudTAK", livewx);
 assert.match(installAligned, /align_plugins_to_host/);
@@ -857,12 +977,25 @@ assert.match(rebuildAligned, /restore_marketplace_package_lock/);
 assert.doesNotMatch(installAligned, /--user /);
 assert.doesNotMatch(rebuildAligned, /--user /);
 assert.ok(marketplace.rebuildTimeoutMs() >= 60 * 60 * 1000);
+// Security hardening (#68): never bootstrap NOPASSWD: ALL; prefer marketplace-helper; honour COMPOSE_FILE.
+assert.match(rebuildAligned, /marketplace_helper_run rebuild/);
+assert.match(rebuildAligned, /cleanup_leftover_marketplace_sudoers/);
+assert.match(rebuildAligned, /ask your admin to enable marketplace installs/);
+assert.match(rebuildAligned, /COMPOSE_FILE=/);
+assert.doesNotMatch(rebuildAligned, /bootstrap_marketplace_sudoers/);
+assert.doesNotMatch(rebuildAligned, /\/etc\/sudoers\.d:\/etc\/sudoers\.d/);
+assert.doesNotMatch(rebuildAligned, /ALL=NOPASSWD:\s*ALL/);
+assert.doesNotMatch(rebuildAligned, /cat > \/etc\/sudoers\.d\/tak-portal-marketplace/);
+assert.doesNotMatch(installAligned, /bootstrap_marketplace_sudoers/);
+assert.doesNotMatch(installAligned, /\/etc\/sudoers\.d:\/etc\/sudoers\.d/);
+assert.doesNotMatch(installAligned, /ALL=NOPASSWD:\s*ALL/);
+assert.match(installAligned, /marketplace_helper_run/);
+assert.match(installAligned, /CTAK_MARKETPLACE_HELPER=/);
 
 // Marketplace elevate helpers follow TAK_SSH_PRIVILEGE_CMD (sudo default, dzdo when configured).
 assert.match(installAligned, /CTAK_PRIV='sudo'|CTAK_PRIV='dzdo'/);
 assert.match(installAligned, /elevate_via_priv/);
-assert.match(installAligned, /"\$CTAK_PRIV" -n true/);
-assert.match(installAligned, /\[ "\$CTAK_PRIV" != "sudo" \]/);
+assert.match(installAligned, /marketplace_helper_available/);
 {
   const prev = String((settingsSvc.getSettings() || {}).TAK_SSH_PRIVILEGE_CMD || "");
   settingsSvc.updateSettings({ TAK_SSH_PRIVILEGE_CMD: "dzdo" });

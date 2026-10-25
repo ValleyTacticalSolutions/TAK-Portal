@@ -63,6 +63,10 @@ function privilegedUnavailableMessage() {
 const TAK_CORE_CONFIG_PATH = "/opt/tak/CoreConfig.xml";
 const TAK_CERTS_DIR = "/opt/tak/certs";
 const TAK_PORTAL_CERTS_REPAIR_SCRIPT = "/opt/tak/utils/tak-portal-repair-certs.sh";
+/** Root-owned CloudTAK marketplace helper (fixed verbs only). See issue #68. */
+const TAK_PORTAL_MARKETPLACE_HELPER = "/usr/local/libexec/tak-portal/marketplace-helper";
+const TAK_PORTAL_MARKETPLACE_SUDOERS_LEFTOVER = "/etc/sudoers.d/tak-portal-marketplace";
+const MARKETPLACE_HELPER_SOURCE = path.join(__dirname, "..", "host-helpers", "marketplace-helper");
 
 /** Shell checks that match commands granted in /etc/sudoers.d/tak-portal (not bare `sudo true`). */
 function shellProbeNopasswdRootAccess() {
@@ -264,9 +268,22 @@ chown -R tak:tak "$CERTS"
 `;
 }
 
+function readMarketplaceHelperSource() {
+  try {
+    return fs.readFileSync(MARKETPLACE_HELPER_SOURCE, "utf8");
+  } catch (err) {
+    throw new Error(
+      `Marketplace helper source missing at ${MARKETPLACE_HELPER_SOURCE}: ${err && err.message ? err.message : err}`
+    );
+  }
+}
+
 function buildPortalSudoersInstallScript(portalUsername) {
   const user = assertSafePortalSshUsername(portalUsername);
   const repairScript = TAK_PORTAL_CERTS_REPAIR_SCRIPT;
+  const helperPath = TAK_PORTAL_MARKETPLACE_HELPER;
+  const leftover = TAK_PORTAL_MARKETPLACE_SUDOERS_LEFTOVER;
+  const helperB64 = Buffer.from(readMarketplaceHelperSource(), "utf8").toString("base64");
   return `#!/bin/bash
 set -euo pipefail
 PORTAL_USER='${user}'
@@ -277,12 +294,21 @@ SYSTEMCTL="$(command -v systemctl)"
 TAIL="$(command -v tail)"
 VISUDO="$(command -v visudo)"
 REBOOT="$(command -v reboot 2>/dev/null || true)"
+HELPER_PATH='${helperPath}'
+LEFTOVER_MARKETPLACE_SUDOERS='${leftover}'
 if [ -z "$REBOOT" ] || [ ! -x "$REBOOT" ]; then
   for p in /sbin/reboot /usr/sbin/reboot; do
     if [ -x "$p" ]; then REBOOT="$p"; break; fi
   done
 fi
 umask 077
+# Install fixed-verb marketplace helper (no NOPASSWD: ALL). See issue #68.
+mkdir -p "$(dirname "$HELPER_PATH")"
+echo '${helperB64}' | base64 -d > "$HELPER_PATH"
+chmod 755 "$HELPER_PATH"
+chown root:root "$HELPER_PATH" 2>/dev/null || true
+# Drop any prior marketplace NOPASSWD: ALL drop-in left by older TAK Portal releases.
+rm -f "$LEFTOVER_MARKETPLACE_SUDOERS"
 TMP="$(mktemp)"
 {
   echo "Defaults:$PORTAL_USER !requiretty"
@@ -296,8 +322,8 @@ TMP="$(mktemp)"
   if [ -n "$REBOOT" ] && [ -x "$REBOOT" ]; then
     echo "$PORTAL_USER ALL=(root) NOPASSWD: $REBOOT"
   fi
-  # CloudTAK marketplace / host file ops after root→non-root SSH migrations
-  echo "$PORTAL_USER ALL=(ALL) NOPASSWD: ALL"
+  # CloudTAK marketplace: only the fixed helper (never NOPASSWD: ALL).
+  echo "$PORTAL_USER ALL=(root) NOPASSWD: $HELPER_PATH"
 } > "$TMP"
 chmod 440 "$TMP"
 mv "$TMP" /etc/sudoers.d/tak-portal
@@ -1941,6 +1967,10 @@ async function removeRemoteFilePrivileged(remoteAbsolutePath, timeoutMs = 60000)
 module.exports = {
   getPrivilegeBin,
   normalizePrivilegeBin,
+  TAK_PORTAL_MARKETPLACE_HELPER,
+  TAK_PORTAL_MARKETPLACE_SUDOERS_LEFTOVER,
+  buildPortalSudoersInstallScript,
+  readMarketplaceHelperSource,
   getLocalKeyStatus,
   ensureLocalSshKeyPair,
   onboardTakSshWithPassword,
