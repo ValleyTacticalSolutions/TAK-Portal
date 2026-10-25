@@ -999,7 +999,13 @@ assert.doesNotMatch(installAligned, /CTAK_MARKETPLACE_HELPER_B64=/);
 assert.match(installAligned, /\/tmp\/tak-portal-marketplace-helper\.src/);
 assert.match(installAligned, /\/opt\/infratak\/\.shims/);
 assert.match(installAligned, /tak-portal-mp-helper/);
+assert.match(installAligned, /marketplace_is_infratak/);
+assert.match(installAligned, /docker compose run/);
+assert.match(installAligned, /elevate: direct \(infra-TAK broker PATH shims\)/);
+assert.match(installAligned, /broker denies docker bind of \/usr\/local/);
 assert.match(installAligned, /ensure_marketplace_sudoers[\s\S]*install_marketplace_helper[\s\S]*cleanup_leftover_marketplace_sudoers/);
+assert.match(installAligned, /\/tmp\/ctak-overlay/);
+assert.doesNotMatch(installAligned, /-v "\$OVERRIDE:\/overlay\.yml"/);
 {
   const prev = settingsSvc.getSettings() || {};
   settingsSvc.updateSettings({

@@ -676,7 +676,7 @@ const MARKETPLACE_HELPER_STAGED_SRC = "/tmp/tak-portal-marketplace-helper.src";
  * Prefer: marketplace-helper (fixed verbs) → stored sudo password → docker on CT paths only.
  * For SSH user takwerx (infra-TAK): auto-deploy the helper before removing leftover broad sudoers.
  */
-function pluginPrivilegeBash() {
+function pluginPrivilegeBash(options = {}) {
   const sudoPass = marketplaceSudoPassword();
   const privBin = marketplacePrivilegeBin();
   const helperPath = takSshSvc.TAK_PORTAL_MARKETPLACE_HELPER || "/usr/local/libexec/tak-portal/marketplace-helper";
@@ -684,6 +684,7 @@ function pluginPrivilegeBash() {
     takSshSvc.TAK_PORTAL_MARKETPLACE_SUDOERS_LEFTOVER || "/etc/sudoers.d/tak-portal-marketplace";
   const autoDeploy = isTakwerxMarketplaceUser() ? "1" : "0";
   const grantUser = marketplaceSshUsername() || "takwerx";
+  const composeService = String((options && options.composeService) || "api").trim() || "api";
   // Helper source is staged over SFTP (never embedded — keeps bash -lc under ARG_MAX).
   return `
 CTAK_SUDO_PASS=${ssh.shellQuote(sudoPass)}
@@ -694,11 +695,12 @@ CTAK_MARKETPLACE_HELPER_SUDOERS=${ssh.shellQuote(MARKETPLACE_HELPER_SUDOERS)}
 CTAK_MARKETPLACE_HELPER_SRC=${ssh.shellQuote(MARKETPLACE_HELPER_STAGED_SRC)}
 CTAK_AUTO_DEPLOY_HELPER=${ssh.shellQuote(autoDeploy)}
 CTAK_HELPER_GRANT_USER=${ssh.shellQuote(grantUser)}
+CTAK_COMPOSE_SERVICE=${ssh.shellQuote(composeService)}
 CTAK_DOCKER_BIN=""
 CTAK_DOCKER_NOPASS=""
 CTAK_DOCKER_PASS=""
 
-# infra-TAK: broker PATH shims so docker works for non-root takwerx without docker group.
+# infra-TAK: broker PATH shims so docker/chown work for non-root takwerx without docker group.
 if [ -d /opt/infratak/.shims ]; then
   case ":\${PATH:-}:" in
     *:/opt/infratak/.shims:*) ;;
@@ -710,6 +712,13 @@ cloudtak_owner() {
   stat -c '%U' "$CT" 2>/dev/null || stat -f '%Su' "$CT" 2>/dev/null || true
 }
 
+marketplace_is_infratak() {
+  [ -d /opt/infratak/.shims ] && return 0
+  [ -S /run/takwerx-broker.sock ] && return 0
+  [ -S /opt/infratak/broker.sock ] && return 0
+  return 1
+}
+
 marketplace_should_auto_deploy_helper() {
   [ "\${CTAK_AUTO_DEPLOY_HELPER:-0}" = "1" ] && return 0
   [ "$(id -un)" = "takwerx" ] && return 0
@@ -717,8 +726,8 @@ marketplace_should_auto_deploy_helper() {
 }
 
 marketplace_admin_enable_msg() {
-  if marketplace_should_auto_deploy_helper; then
-    echo "ask your admin to enable marketplace installs (infra-TAK should grant $CTAK_MARKETPLACE_HELPER; Portal auto-deploys the helper for takwerx when host privilege is available)" >&2
+  if marketplace_is_infratak || marketplace_should_auto_deploy_helper; then
+    echo "ask your admin to enable marketplace installs (infra-TAK should install and grant $CTAK_MARKETPLACE_HELPER; broker denies docker bind mounts under /usr and /home)" >&2
   else
     echo "ask your admin to enable marketplace installs (install $CTAK_MARKETPLACE_HELPER and grant it in sudoers; re-run TAK Portal SSH handshake on Portal-managed hosts)" >&2
   fi
@@ -816,7 +825,13 @@ install_marketplace_helper() {
     fi
   fi
 
-  # Docker: write helper binary under /usr/local/libexec only (no sudoers.d mount — #68).
+  # Docker install of /usr/local is impossible on infra-TAK (broker denies /usr bind mounts).
+  # On Portal-managed hosts without the broker, install the binary via docker (no sudoers.d mount — #68).
+  if marketplace_is_infratak; then
+    rm -f "$script" || true
+    echo "elevate: infra-TAK broker denies docker bind of /usr/local; skipping helper docker install (infra-TAK should ship the grant)" >&2
+    return 1
+  fi
   if resolve_docker_bin; then
     local img helper_dir ec
     helper_dir=$(dirname "$CTAK_MARKETPLACE_HELPER")
@@ -854,7 +869,7 @@ install_marketplace_helper() {
         fi
       fi
       rm -f "$script" || true
-      echo "elevate: helper binary deployed; waiting on infra-TAK/sudoers grant for $CTAK_MARKETPLACE_HELPER" >&2
+      echo "elevate: helper binary deployed; waiting on sudoers grant for $CTAK_MARKETPLACE_HELPER" >&2
       return 0
     fi
   fi
@@ -954,16 +969,7 @@ elevate_via_sudo() {
 elevate_via_docker() {
   local cmd="$1"
   resolve_docker_bin || return 1
-  local img wrapper ec
-  img=$(docker_cli images -q 2>/dev/null | head -n 1 || true)
-  if [ -z "$img" ]; then
-    echo "elevate: no local images; pulling alpine:3.20"
-    docker_cli pull alpine:3.20 || return 1
-    img="alpine:3.20"
-  else
-    img=$(docker_cli images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | awk 'NF && index($0,"none")==0 {print; exit}' || true)
-    if [ -z "$img" ]; then img=$(docker_cli images -q 2>/dev/null | head -n 1); fi
-  fi
+  local img wrapper ec svc
   wrapper=$(mktemp /tmp/ctak-elevate.XXXXXX)
   {
     echo '#!/bin/sh'
@@ -971,23 +977,52 @@ elevate_via_docker() {
     printf '%s\\n' "$cmd"
   } > "$wrapper"
   chmod 755 "$wrapper"
-  echo "elevate: docker run -u 0 image=$img"
   set +e
-  # Mount CloudTAK + /tmp only — never host /etc/sudoers.d or other system paths (#68).
-  docker_cli run --rm -u 0 \\
-    -v "$CT:$CT:rw" \\
-    -v "$HOME:$HOME:rw" \\
-    -v /tmp:/tmp:rw \\
-    -v "$wrapper:$wrapper:ro" \\
-    -e HOME="$HOME" \\
-    --entrypoint /bin/sh \\
-    "$img" \\
-    "$wrapper"
-  ec=$?
+  # infra-TAK broker denies \`docker run -v /home/...\` and \`/usr/...\`.
+  # \`docker compose run\` is allowed and can add binds (argv[1]=compose skips mount gate).
+  if marketplace_is_infratak || marketplace_should_auto_deploy_helper; then
+    svc="\${CTAK_COMPOSE_SERVICE:-api}"
+    echo "elevate: docker compose run -u 0 service=$svc (infra-TAK)"
+    (
+      cd "$CT" || exit 1
+      docker_cli compose run --rm --no-deps -u 0 \\
+        -v "$CT:$CT:rw" \\
+        -v "$HOME:$HOME:rw" \\
+        -v /tmp:/tmp:rw \\
+        -v "$wrapper:$wrapper:ro" \\
+        -e HOME="$HOME" \\
+        --entrypoint /bin/sh \\
+        "$svc" \\
+        "$wrapper"
+    )
+    ec=$?
+  else
+    img=$(docker_cli images -q 2>/dev/null | head -n 1 || true)
+    if [ -z "$img" ]; then
+      echo "elevate: no local images; pulling alpine:3.20"
+      docker_cli pull alpine:3.20 || { rm -f "$wrapper"; set -e; return 1; }
+      img="alpine:3.20"
+    else
+      img=$(docker_cli images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | awk 'NF && index($0,"none")==0 {print; exit}' || true)
+      if [ -z "$img" ]; then img=$(docker_cli images -q 2>/dev/null | head -n 1); fi
+    fi
+    echo "elevate: docker run -u 0 image=$img"
+    # Mount CloudTAK + /tmp only — never host /etc/sudoers.d or other system paths (#68).
+    docker_cli run --rm -u 0 \\
+      -v "$CT:$CT:rw" \\
+      -v "$HOME:$HOME:rw" \\
+      -v /tmp:/tmp:rw \\
+      -v "$wrapper:$wrapper:ro" \\
+      -e HOME="$HOME" \\
+      --entrypoint /bin/sh \\
+      "$img" \\
+      "$wrapper"
+    ec=$?
+  fi
   set -e
   rm -f "$wrapper" || true
   if [ "$ec" -ne 0 ]; then
-    echo "elevate: docker run failed exit $ec" >&2
+    echo "elevate: docker elevate failed exit $ec" >&2
   fi
   return "$ec"
 }
@@ -1020,6 +1055,11 @@ elevate_run() {
   owner=$(cloudtak_owner)
   install_marketplace_helper || true
   cleanup_leftover_marketplace_sudoers || true
+  # infra-TAK: PATH shims mediate chown/mkdir for CloudTAK module dirs — try as self first.
+  if marketplace_is_infratak || marketplace_should_auto_deploy_helper; then
+    echo "elevate: direct (infra-TAK broker PATH shims)"
+    if bash -lc "$cmd"; then return 0; fi
+  fi
   if [ -n "$owner" ] && [ "$(id -un)" != "$owner" ] && "$CTAK_PRIV" -n -u "$owner" true >/dev/null 2>&1; then
     echo "elevate: as checkout owner $owner"
     "$CTAK_PRIV" -n -u "$owner" bash -lc "$cmd" && return 0
@@ -2915,21 +2955,40 @@ function pluginRuntimeExtrasBash() {
     "      return 0",
     "    fi",
     "  fi",
+    // Stage under /tmp — infra-TAK broker allows /tmp binds but denies /home binds on docker run.
     '  if declare -F docker_cli >/dev/null 2>&1 && resolve_docker_bin; then',
-    '    docker_cli run --rm -u 0 \\',
+    '    local tmp_ov tmp_base',
+    '    tmp_ov=$(mktemp /tmp/ctak-overlay.XXXXXX.yml)',
+    '    tmp_base=$(mktemp /tmp/ctak-base.XXXXXX.yml)',
+    '    cp "$OVERRIDE" "$tmp_ov" && cp "$base" "$tmp_base" || { rm -f "$tmp_ov" "$tmp_base"; return 0; }',
+    '    if docker_cli run --rm -u 0 \\',
     '      -v "$script:/align.cjs:ro" \\',
-    '      -v "$OVERRIDE:/overlay.yml" \\',
-    '      -v "$base:/base.yml:ro" \\',
+    '      -v "$tmp_ov:/overlay.yml" \\',
+    '      -v "$tmp_base:/base.yml:ro" \\',
     "      node:22-alpine \\",
-    '      node /align.cjs --fix-compose-depends /overlay.yml /base.yml --project "$proj" && return 0',
+    '      node /align.cjs --fix-compose-depends /overlay.yml /base.yml --project "$proj"; then',
+    '      cp "$tmp_ov" "$OVERRIDE"',
+    '      rm -f "$tmp_ov" "$tmp_base"',
+    "      return 0",
+    "    fi",
+    '    rm -f "$tmp_ov" "$tmp_base"',
     "  fi",
     '  if command -v docker >/dev/null 2>&1; then',
-    '    docker run --rm -u 0 \\',
+    '    local tmp_ov tmp_base',
+    '    tmp_ov=$(mktemp /tmp/ctak-overlay.XXXXXX.yml)',
+    '    tmp_base=$(mktemp /tmp/ctak-base.XXXXXX.yml)',
+    '    cp "$OVERRIDE" "$tmp_ov" && cp "$base" "$tmp_base" || { rm -f "$tmp_ov" "$tmp_base"; return 0; }',
+    '    if docker run --rm -u 0 \\',
     '      -v "$script:/align.cjs:ro" \\',
-    '      -v "$OVERRIDE:/overlay.yml" \\',
-    '      -v "$base:/base.yml:ro" \\',
+    '      -v "$tmp_ov:/overlay.yml" \\',
+    '      -v "$tmp_base:/base.yml:ro" \\',
     "      node:22-alpine \\",
-    '      node /align.cjs --fix-compose-depends /overlay.yml /base.yml --project "$proj" && return 0',
+    '      node /align.cjs --fix-compose-depends /overlay.yml /base.yml --project "$proj"; then',
+    '      cp "$tmp_ov" "$OVERRIDE"',
+    '      rm -f "$tmp_ov" "$tmp_base"',
+    "      return 0",
+    "    fi",
+    '    rm -f "$tmp_ov" "$tmp_base"',
     "  fi",
     '  echo "WARNING: could not check plugin depends_on" >&2',
     "  return 0",
@@ -3223,19 +3282,36 @@ CTAK_PLUGIN_ALIGN_JS
       return 0
     fi
   fi
-  # Prefer docker_cli ($CTAK_PRIV -n docker when the user is not in the docker group).
+  # Prefer docker_cli. On infra-TAK, broker denies \`docker run -v /home\`; use compose run.
   if declare -F docker_cli >/dev/null 2>&1 && resolve_docker_bin; then
-    echo "Aligning plugin files via docker (root)"
-    docker_cli run --rm -u 0 \\
-      -v "$ct:$ct" \\
-      -v "$script:/align.cjs:ro" \\
-      node:22-alpine \\
-      node /align.cjs "$ct"
-    ensure_marketplace_git_pull_wrap "$ct" "$script"
-    restore_marketplace_package_lock "$ct"
-    return 0
+    if declare -F marketplace_is_infratak >/dev/null 2>&1 && marketplace_is_infratak; then
+      echo "Aligning plugin files via docker compose run (infra-TAK)"
+      local svc="\${CTAK_COMPOSE_SERVICE:-api}"
+      if ( cd "$ct" && docker_cli compose run --rm --no-deps -u 0 \\
+        -v "$ct:$ct" \\
+        -v "$script:/align.cjs:ro" \\
+        --entrypoint node \\
+        "$svc" \\
+        /align.cjs "$ct" ); then
+        ensure_marketplace_git_pull_wrap "$ct" "$script"
+        restore_marketplace_package_lock "$ct"
+        return 0
+      fi
+      echo "WARNING: docker compose align failed; trying node image via compose" >&2
+    else
+      echo "Aligning plugin files via docker (root)"
+      if docker_cli run --rm -u 0 \\
+        -v "$ct:$ct" \\
+        -v "$script:/align.cjs:ro" \\
+        node:22-alpine \\
+        node /align.cjs "$ct"; then
+        ensure_marketplace_git_pull_wrap "$ct" "$script"
+        restore_marketplace_package_lock "$ct"
+        return 0
+      fi
+    fi
   fi
-  if command -v docker >/dev/null 2>&1; then
+  if command -v docker >/dev/null 2>&1 && ! { declare -F marketplace_is_infratak >/dev/null 2>&1 && marketplace_is_infratak; }; then
     echo "Aligning plugin files via docker (root)"
     docker run --rm -u 0 \\
       -v "$ct:$ct" \\
@@ -3287,16 +3363,30 @@ CTAK_PLUGIN_PATCH_JS
     fi
   fi
   if declare -F docker_cli >/dev/null 2>&1 && resolve_docker_bin; then
-    echo "Applying plugin patches via docker (root)"
-    docker_cli run --rm -u 0 \\
-      -v "$ct:$ct" \\
-      -v "$repo:$repo" \\
-      -v "$script:/patch.cjs:ro" \\
-      node:22-alpine \\
-      node /patch.cjs "$repo" "$ct"
-    return 0
+    if declare -F marketplace_is_infratak >/dev/null 2>&1 && marketplace_is_infratak; then
+      echo "Applying plugin patches via docker compose run (infra-TAK)"
+      local svc="\${CTAK_COMPOSE_SERVICE:-api}"
+      if ( cd "$ct" && docker_cli compose run --rm --no-deps -u 0 \\
+        -v "$ct:$ct" \\
+        -v "$repo:$repo" \\
+        -v "$script:/patch.cjs:ro" \\
+        --entrypoint node \\
+        "$svc" \\
+        /patch.cjs "$repo" "$ct" ); then
+        return 0
+      fi
+    else
+      echo "Applying plugin patches via docker (root)"
+      docker_cli run --rm -u 0 \\
+        -v "$ct:$ct" \\
+        -v "$repo:$repo" \\
+        -v "$script:/patch.cjs:ro" \\
+        node:22-alpine \\
+        node /patch.cjs "$repo" "$ct"
+      return 0
+    fi
   fi
-  if command -v docker >/dev/null 2>&1; then
+  if command -v docker >/dev/null 2>&1 && ! { declare -F marketplace_is_infratak >/dev/null 2>&1 && marketplace_is_infratak; }; then
     echo "Applying plugin patches via docker (root)"
     docker run --rm -u 0 \\
       -v "$ct:$ct" \\
@@ -3359,7 +3449,7 @@ reset_cache() {
 }
 
 ${pluginLayoutBash()}
-${pluginPrivilegeBash()}
+${pluginPrivilegeBash({ composeService: apiSvc })}
 ${pluginRemoveBash()}
 ${pluginMarketplaceGitHygieneBash()}
 WEB_REL=$(cloudtak_web_rel "$CT")
@@ -3589,7 +3679,7 @@ ID=${ssh.shellQuote(id)}
 CT_COMPOSE_SVC=${ssh.shellQuote(apiSvc)}
 if [ -z "$ID" ]; then ID="$DEST"; fi
 ${pluginLayoutBash()}
-${pluginPrivilegeBash()}
+${pluginPrivilegeBash({ composeService: apiSvc })}
 WEB_REL=$(cloudtak_web_rel "$CT")
 PLUGIN_ROOT="$CT/$WEB_REL/plugins"
 echo "CloudTAK plugin directory: $PLUGIN_ROOT (also clearing legacy api/web paths)"
@@ -3645,11 +3735,12 @@ echo UNINSTALL_OK
 }
 
 function rebuildRemoteScript(ct, service) {
+  const svc = service || "api";
   return `
 set -euo pipefail
 CT=${ssh.shellQuote(ct)}
-SVC=${ssh.shellQuote(service || "api")}
-${pluginPrivilegeBash()}
+SVC=${ssh.shellQuote(svc)}
+${pluginPrivilegeBash({ composeService: svc })}
 cd "$CT"
 # Prefer fixed marketplace-helper rebuild (narrow sudoers). Fall back to docker compose.
 ensure_marketplace_sudoers || true
