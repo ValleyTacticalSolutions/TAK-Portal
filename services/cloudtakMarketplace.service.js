@@ -650,10 +650,29 @@ function marketplacePrivilegeBin() {
   }
 }
 
+/** CloudTAK marketplace SSH username (infra-TAK sets takwerx outside Portal handshake). */
+function marketplaceSshUsername() {
+  try {
+    const cfg = ssh.getConnectConfig();
+    if (cfg && cfg.username) return String(cfg.username).trim();
+  } catch (_) {}
+  const cloud = String(getString("CLOUDTAK_SSH_USER", "") || "").trim();
+  if (cloud) return cloud;
+  return String(getString("TAK_SSH_USER", "") || "").trim();
+}
+
+function isTakwerxMarketplaceUser() {
+  return marketplaceSshUsername().toLowerCase() === "takwerx";
+}
+
+/** Narrow sudoers drop-in for the fixed helper only (never NOPASSWD: ALL). */
+const MARKETPLACE_HELPER_SUDOERS = "/etc/sudoers.d/tak-portal-mp-helper";
+
 /**
  * Elevate helpers for CloudTAK marketplace (issue #68).
  * Never write NOPASSWD: ALL or rewrite tak-portal-repair-certs.sh.
  * Prefer: marketplace-helper (fixed verbs) → stored sudo password → docker on CT paths only.
+ * For SSH user takwerx (infra-TAK): auto-deploy the helper before removing leftover broad sudoers.
  */
 function pluginPrivilegeBash() {
   const sudoPass = marketplaceSudoPassword();
@@ -661,21 +680,46 @@ function pluginPrivilegeBash() {
   const helperPath = takSshSvc.TAK_PORTAL_MARKETPLACE_HELPER || "/usr/local/libexec/tak-portal/marketplace-helper";
   const leftoverSudoers =
     takSshSvc.TAK_PORTAL_MARKETPLACE_SUDOERS_LEFTOVER || "/etc/sudoers.d/tak-portal-marketplace";
+  const helperB64 = Buffer.from(takSshSvc.readMarketplaceHelperSource(), "utf8").toString("base64");
+  const autoDeploy = isTakwerxMarketplaceUser() ? "1" : "0";
+  const grantUser = marketplaceSshUsername() || "takwerx";
   return `
 CTAK_SUDO_PASS=${ssh.shellQuote(sudoPass)}
 CTAK_PRIV=${ssh.shellQuote(privBin)}
 CTAK_MARKETPLACE_HELPER=${ssh.shellQuote(helperPath)}
 CTAK_MARKETPLACE_SUDOERS_LEFTOVER=${ssh.shellQuote(leftoverSudoers)}
+CTAK_MARKETPLACE_HELPER_SUDOERS=${ssh.shellQuote(MARKETPLACE_HELPER_SUDOERS)}
+CTAK_MARKETPLACE_HELPER_B64=${ssh.shellQuote(helperB64)}
+CTAK_AUTO_DEPLOY_HELPER=${ssh.shellQuote(autoDeploy)}
+CTAK_HELPER_GRANT_USER=${ssh.shellQuote(grantUser)}
 CTAK_DOCKER_BIN=""
 CTAK_DOCKER_NOPASS=""
 CTAK_DOCKER_PASS=""
+
+# infra-TAK: broker PATH shims so docker works for non-root takwerx without docker group.
+if [ -d /opt/infratak/.shims ]; then
+  case ":\${PATH:-}:" in
+    *:/opt/infratak/.shims:*) ;;
+    *) export PATH="/opt/infratak/.shims:\${PATH:-/usr/bin:/bin}" ;;
+  esac
+fi
 
 cloudtak_owner() {
   stat -c '%U' "$CT" 2>/dev/null || stat -f '%Su' "$CT" 2>/dev/null || true
 }
 
+marketplace_should_auto_deploy_helper() {
+  [ "\${CTAK_AUTO_DEPLOY_HELPER:-0}" = "1" ] && return 0
+  [ "$(id -un)" = "takwerx" ] && return 0
+  return 1
+}
+
 marketplace_admin_enable_msg() {
-  echo "ask your admin to enable marketplace installs (install $CTAK_MARKETPLACE_HELPER and grant it in sudoers; re-run TAK Portal SSH handshake on Portal-managed hosts)" >&2
+  if marketplace_should_auto_deploy_helper; then
+    echo "ask your admin to enable marketplace installs (infra-TAK should grant $CTAK_MARKETPLACE_HELPER; Portal auto-deploys the helper for takwerx when host privilege is available)" >&2
+  else
+    echo "ask your admin to enable marketplace installs (install $CTAK_MARKETPLACE_HELPER and grant it in sudoers; re-run TAK Portal SSH handshake on Portal-managed hosts)" >&2
+  fi
 }
 
 marketplace_helper_available() {
@@ -709,6 +753,113 @@ marketplace_helper_run() {
   fi
   echo "elevate: cannot run marketplace helper (no passwordless grant and no usable TAK_SSH_SUDO_PASSWORD)" >&2
   marketplace_admin_enable_msg
+  return 1
+}
+
+# Write a root install script (helper binary + narrow sudoers; never NOPASSWD: ALL).
+marketplace_helper_write_install_script() {
+  local out="$1"
+  local grant_user="\${CTAK_HELPER_GRANT_USER:-takwerx}"
+  {
+    echo '#!/bin/bash'
+    echo 'set -euo pipefail'
+    echo "HELPER=$(printf '%q' "$CTAK_MARKETPLACE_HELPER")"
+    echo "GRANT_FILE=$(printf '%q' "$CTAK_MARKETPLACE_HELPER_SUDOERS")"
+    echo "GRANT_USER=$(printf '%q' "$grant_user")"
+    echo "B64=$(printf '%q' "$CTAK_MARKETPLACE_HELPER_B64")"
+    echo 'mkdir -p "$(dirname "$HELPER")"'
+    echo 'printf "%s\\n" "$B64" | base64 -d > "$HELPER"'
+    echo 'chmod 755 "$HELPER"'
+    echo 'chown root:root "$HELPER" 2>/dev/null || true'
+    echo 'TMP=$(mktemp)'
+    echo 'printf "%s\\n" "Defaults:$GRANT_USER !requiretty" "$GRANT_USER ALL=(root) NOPASSWD: $HELPER" > "$TMP"'
+    echo 'chmod 440 "$TMP"'
+    echo 'if command -v visudo >/dev/null 2>&1; then visudo -cf "$TMP"; fi'
+    echo 'mv "$TMP" "$GRANT_FILE"'
+    echo 'echo "marketplace helper installed at $HELPER (grant $GRANT_FILE)"'
+  } > "$out"
+  chmod 700 "$out"
+}
+
+# Deploy helper for takwerx BEFORE removing leftover NOPASSWD: ALL (bootstrap once).
+install_marketplace_helper() {
+  local script
+  marketplace_should_auto_deploy_helper || return 1
+  if marketplace_helper_available; then return 0; fi
+  if [ -z "\${CTAK_MARKETPLACE_HELPER_B64:-}" ]; then
+    echo "elevate: marketplace helper source missing; cannot auto-deploy" >&2
+    return 1
+  fi
+  script=$(mktemp /tmp/ctak-helper-install.XXXXXX)
+  marketplace_helper_write_install_script "$script"
+  echo "elevate: auto-deploying marketplace helper for $(id -un) (infra-TAK; no Portal SSH handshake)"
+
+  # Prefer leftover broad grant while it still exists, then stored password.
+  if "$CTAK_PRIV" -n true >/dev/null 2>&1; then
+    if "$CTAK_PRIV" -n bash "$script"; then
+      rm -f "$script" || true
+      echo "elevate: marketplace helper installed via passwordless $CTAK_PRIV"
+      marketplace_helper_available && return 0
+    fi
+  fi
+  if [ -n "\${CTAK_SUDO_PASS:-}" ]; then
+    if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' true >/dev/null 2>&1; then
+      if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' bash "$script"; then
+        rm -f "$script" || true
+        echo "elevate: marketplace helper installed via stored password"
+        marketplace_helper_available && return 0
+      fi
+    fi
+  fi
+
+  # Docker: write helper binary under /usr/local/libexec only (no sudoers.d mount — #68).
+  if resolve_docker_bin; then
+    local img staging helper_dir ec
+    helper_dir=$(dirname "$CTAK_MARKETPLACE_HELPER")
+    staging=$(mktemp /tmp/ctak-helper.XXXXXX)
+    printf '%s\\n' "$CTAK_MARKETPLACE_HELPER_B64" | base64 -d > "$staging" || { rm -f "$staging" "$script"; return 1; }
+    img=$(docker_cli images -q 2>/dev/null | head -n 1 || true)
+    if [ -z "$img" ]; then
+      docker_cli pull alpine:3.20 || { rm -f "$staging" "$script"; return 1; }
+      img="alpine:3.20"
+    else
+      img=$(docker_cli images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | awk 'NF && index($0,"none")==0 {print; exit}' || true)
+      if [ -z "$img" ]; then img=$(docker_cli images -q 2>/dev/null | head -n 1); fi
+    fi
+    echo "elevate: installing marketplace helper binary via docker (root)"
+    set +e
+    docker_cli run --rm -u 0 \\
+      -v "$helper_dir:$helper_dir:rw" \\
+      -v "$staging:$staging:ro" \\
+      --entrypoint /bin/sh \\
+      "$img" \\
+      -c "mkdir -p '$helper_dir' && cp '$staging' '$CTAK_MARKETPLACE_HELPER' && chmod 755 '$CTAK_MARKETPLACE_HELPER'"
+    ec=$?
+    set -e
+    rm -f "$staging" || true
+    if [ "$ec" -eq 0 ] && [ -x "$CTAK_MARKETPLACE_HELPER" ]; then
+      echo "elevate: marketplace helper binary present at $CTAK_MARKETPLACE_HELPER"
+      if marketplace_helper_available; then rm -f "$script" || true; return 0; fi
+      if "$CTAK_PRIV" -n true >/dev/null 2>&1; then
+        if "$CTAK_PRIV" -n bash "$script"; then
+          rm -f "$script" || true
+          marketplace_helper_available && return 0
+        fi
+      fi
+      if [ -n "\${CTAK_SUDO_PASS:-}" ] && printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' true >/dev/null 2>&1; then
+        if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' bash "$script"; then
+          rm -f "$script" || true
+          marketplace_helper_available && return 0
+        fi
+      fi
+      rm -f "$script" || true
+      echo "elevate: helper binary deployed; waiting on infra-TAK/sudoers grant for $CTAK_MARKETPLACE_HELPER" >&2
+      return 0
+    fi
+  fi
+
+  rm -f "$script" || true
+  echo "elevate: could not auto-deploy marketplace helper" >&2
   return 1
 }
 
@@ -781,7 +932,7 @@ docker() {
 
 elevate_via_priv() {
   local cmd="$1"
-  # Do not probe \`sudo -n true\` — narrow portal sudoers no longer grant ALL.
+  # Do not probe \`sudo -n true\` for arbitrary cmds — narrow portal sudoers no longer grant ALL.
   # Only use a stored password for arbitrary bash; passwordless root is helper-only.
   if [ -n "\${CTAK_SUDO_PASS:-}" ]; then
     if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' true >/dev/null 2>&1; then
@@ -841,7 +992,9 @@ elevate_via_docker() {
 }
 
 # Kept name for call sites / tests: cleans leftover NOPASSWD drop-in; never installs one.
+# For takwerx, deploy the fixed helper first while leftover privilege may still exist.
 ensure_marketplace_sudoers() {
+  install_marketplace_helper || true
   cleanup_leftover_marketplace_sudoers || true
   if marketplace_helper_available; then
     echo "elevate: marketplace helper ready at $CTAK_MARKETPLACE_HELPER"
@@ -864,6 +1017,7 @@ elevate_run() {
   local cmd="$1"
   local owner
   owner=$(cloudtak_owner)
+  install_marketplace_helper || true
   cleanup_leftover_marketplace_sudoers || true
   if [ -n "$owner" ] && [ "$(id -un)" != "$owner" ] && "$CTAK_PRIV" -n -u "$owner" true >/dev/null 2>&1; then
     echo "elevate: as checkout owner $owner"
@@ -881,7 +1035,8 @@ reclaim_cloudtak_plugin_paths() {
   me=$(id -un)
   grp=$(id -gn)
   echo "Reclaiming CloudTAK plugin paths for $me — fixes root-owned leftovers from prior SSH users"
-  cleanup_leftover_marketplace_sudoers || true
+  # Install helper (takwerx) before stripping leftover NOPASSWD: ALL.
+  ensure_marketplace_sudoers || true
   mkdir -p "$HOME/.cache/cloudtak-marketplace" 2>/dev/null || true
   if marketplace_helper_run reclaim "$CT" "$me" "$grp"; then
     chown -R "$me:$grp" "$HOME/.cache/cloudtak-marketplace" 2>/dev/null || \\
@@ -2554,6 +2709,12 @@ function pluginRuntimePrivilegeBash() {
     'CTAK_DOCKER_BIN=""',
     'CTAK_DOCKER_NOPASS=""',
     'CTAK_DOCKER_PASS=""',
+    'if [ -d /opt/infratak/.shims ]; then',
+    '  case ":${PATH:-}:" in',
+    '    *:/opt/infratak/.shims:*) ;;',
+    '    *) export PATH="/opt/infratak/.shims:${PATH:-/usr/bin:/bin}" ;;',
+    '  esac',
+    'fi',
     "resolve_docker_bin() {",
     '  if [ -n "$CTAK_DOCKER_BIN" ]; then return 0; fi',
     '  if ! command -v docker >/dev/null 2>&1; then',
@@ -4127,6 +4288,9 @@ module.exports = {
   normalizeFlatSamplePluginTree,
   pluginEntryImportsLib,
   marketplacePrivilegeBin,
+  marketplaceSshUsername,
+  isTakwerxMarketplaceUser,
+  MARKETPLACE_HELPER_SUDOERS,
   MARKETPLACE_GIT_RESTORE_PATHS,
   marketplaceWrapGitPullScript,
 };

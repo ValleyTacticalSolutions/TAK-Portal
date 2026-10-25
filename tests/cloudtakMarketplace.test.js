@@ -991,6 +991,32 @@ assert.doesNotMatch(installAligned, /\/etc\/sudoers\.d:\/etc\/sudoers\.d/);
 assert.doesNotMatch(installAligned, /ALL=NOPASSWD:\s*ALL/);
 assert.match(installAligned, /marketplace_helper_run/);
 assert.match(installAligned, /CTAK_MARKETPLACE_HELPER=/);
+// takwerx / infra-TAK: auto-deploy helper before leftover sudoers cleanup; prefer broker shims.
+assert.match(installAligned, /install_marketplace_helper/);
+assert.match(installAligned, /CTAK_MARKETPLACE_HELPER_B64=/);
+assert.match(installAligned, /\/opt\/infratak\/\.shims/);
+assert.match(installAligned, /tak-portal-mp-helper/);
+assert.match(installAligned, /ensure_marketplace_sudoers[\s\S]*install_marketplace_helper[\s\S]*cleanup_leftover_marketplace_sudoers/);
+{
+  const prev = settingsSvc.getSettings() || {};
+  settingsSvc.updateSettings({
+    CLOUDTAK_MARKETPLACE_USE_TAK_SSH: "false",
+    CLOUDTAK_SSH_USER: "takwerx",
+    CLOUDTAK_SSH_HOST: "127.0.0.1",
+  });
+  try {
+    assert.strictEqual(marketplace.isTakwerxMarketplaceUser(), true);
+    const twInstall = marketplace.installRemoteScript("/home/takwerx/CloudTAK", livewx);
+    assert.match(twInstall, /CTAK_AUTO_DEPLOY_HELPER='1'/);
+    assert.match(twInstall, /infra-TAK; no Portal SSH handshake/);
+  } finally {
+    settingsSvc.updateSettings({
+      CLOUDTAK_MARKETPLACE_USE_TAK_SSH: prev.CLOUDTAK_MARKETPLACE_USE_TAK_SSH || "true",
+      CLOUDTAK_SSH_USER: prev.CLOUDTAK_SSH_USER || "",
+      CLOUDTAK_SSH_HOST: prev.CLOUDTAK_SSH_HOST || "",
+    });
+  }
+}
 
 // Marketplace elevate helpers follow TAK_SSH_PRIVILEGE_CMD (sudo default, dzdo when configured).
 assert.match(installAligned, /CTAK_PRIV='sudo'|CTAK_PRIV='dzdo'/);
