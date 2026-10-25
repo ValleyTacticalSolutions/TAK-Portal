@@ -108,7 +108,7 @@ assert.ok(sidebarConfigurator.detect.some((d) => d.includes("app/plugins/sidebar
 assert.match(marketplace.installRemoteScript("/root/CloudTAK", sidebarConfigurator), /install\.sh/);
 const replay = normalized.plugins.find((p) => p.id === "replay");
 assert.strictEqual(replay.web.dest, "replay");
-assert.strictEqual(!!replay.hidden, false, "replay is available in the marketplace UI");
+assert.strictEqual(!!replay.hidden, true, "replay hidden while upstream patches lag current CloudTAK");
 assert.match(marketplace.uninstallRemoteScript("/root/CloudTAK", "replay", [], "replay"), /--remove/);
 assert.match(marketplace.installRemoteScript("/root/CloudTAK", replay), /apply_plugin_patches/);
 assert.match(marketplace.installRemoteScript("/root/CloudTAK", replay), /marketplace-install-status/);
@@ -118,13 +118,14 @@ assert.strictEqual(helloworld.hidden, true, "helloworld hidden while upstream re
 assert.strictEqual(udashHidden.hidden, true, "udash hidden while upstream repo 404s");
 {
   const ui = marketplace.buildUiPlugins({ skipRemoteSha: true });
-  assert.ok(ui.plugins.some((p) => p.id === "replay"), "replay listed in marketplace UI");
+  assert.ok(!ui.plugins.some((p) => p.id === "replay"), "hidden replay omitted from marketplace list when not installed");
   assert.ok(!ui.plugins.some((p) => p.id === "helloworld"), "hidden helloworld omitted from marketplace list when not installed");
   assert.ok(!ui.plugins.some((p) => p.id === "udash"), "hidden udash omitted from marketplace list when not installed");
   const blockedHello = marketplace.stageJob({ kind: "install", pluginId: "helloworld", createdBy: "test" });
   assert.strictEqual(blockedHello.ok, false);
   assert.match(String(blockedHello.error || ""), /temporarily unavailable/i);
   assert.strictEqual(marketplace.stageJob({ kind: "install", pluginId: "udash", createdBy: "test" }).ok, false);
+  assert.strictEqual(marketplace.stageJob({ kind: "install", pluginId: "replay", createdBy: "test" }).ok, false);
 }
 
 // #70: failed clone leaves error-only installed.json; must not count as installed or crash check-updates
@@ -982,6 +983,11 @@ assert.match(rebuildAligned, /marketplace_helper_run rebuild/);
 assert.match(rebuildAligned, /cleanup_leftover_marketplace_sudoers/);
 assert.match(rebuildAligned, /ask your admin to enable marketplace installs/);
 assert.match(rebuildAligned, /COMPOSE_FILE=/);
+// infra-TAK gh261: absolute COMPOSE_FILE paths under the checkout must be accepted (stripped to relative).
+assert.match(rebuildAligned, /_ct_abs=/);
+assert.match(rebuildAligned, /Refusing compose file outside CloudTAK checkout/);
+assert.match(rebuildAligned, /_ct_abs"\/\*/);
+assert.match(rebuildAligned, /_f#\$_ct_abs\//);
 assert.doesNotMatch(rebuildAligned, /bootstrap_marketplace_sudoers/);
 assert.doesNotMatch(rebuildAligned, /\/etc\/sudoers\.d:\/etc\/sudoers\.d/);
 assert.doesNotMatch(rebuildAligned, /ALL=NOPASSWD:\s*ALL/);

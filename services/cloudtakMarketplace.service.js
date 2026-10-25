@@ -3782,7 +3782,9 @@ if marketplace_helper_run rebuild "$CT" "$SVC"; then
   exit 0
 fi
 # Fallback: honour COMPOSE_FILE from .env (infra-TAK overlays) instead of hard-coding -f pairs.
+# infra-TAK (gh261) writes absolute paths under the checkout; Portal pins relative marketplace.yml.
 COMPOSE_ARGS=()
+_ct_abs=$(pwd -P 2>/dev/null || pwd)
 if [ -f .env ]; then
   _cf=$(grep -E '^[[:space:]]*COMPOSE_FILE=' .env | tail -n 1 | cut -d= -f2- || true)
   _cf=$(printf '%s' "\$_cf" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"\$//' -e "s/^'//" -e "s/'\$//")
@@ -3790,7 +3792,14 @@ if [ -f .env ]; then
     IFS=':' read -r -a _cffiles <<< "\$_cf"
     for _f in "\${_cffiles[@]}"; do
       [ -n "\$_f" ] || continue
-      case "\$_f" in *..*|/*) echo "Refusing compose file path: \$_f" >&2; exit 1 ;; esac
+      case "\$_f" in *..*) echo "Refusing compose file path: \$_f" >&2; exit 1 ;; esac
+      case "\$_f" in
+        "\$_ct_abs"/*) _f="\${_f#\$_ct_abs/}" ;;
+        "$CT"/*) _f="\${_f#$CT/}" ;;
+      esac
+      case "\$_f" in
+        /*) echo "Refusing compose file outside CloudTAK checkout: \$_f" >&2; exit 1 ;;
+      esac
       [ -f "\$_f" ] || { echo "COMPOSE_FILE entry missing: \$_f" >&2; exit 1; }
       COMPOSE_ARGS+=(-f "\$_f")
     done

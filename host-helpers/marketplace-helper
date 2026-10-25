@@ -93,11 +93,32 @@ cmd_reclaim() {
   echo "reclaim ok"
 }
 
+# Normalize one COMPOSE_FILE entry to a path relative to $ct.
+# infra-TAK writes absolute paths under the checkout (gh261); TAK Portal pins
+# relative names like docker-compose.marketplace.yml. Accept both.
+compose_file_rel() {
+  local ct="$1" f="$2" ct_abs=""
+  [ -n "$f" ] || return 1
+  case "$f" in
+    *..*) die "refusing traversal compose file: $f" ;;
+  esac
+  ct_abs=$(cd "$ct" 2>/dev/null && pwd -P || printf '%s' "$ct")
+  case "$f" in
+    "$ct_abs"/*) f="${f#"$ct_abs"/}" ;;
+    "$ct"/*) f="${f#"$ct"/}" ;;
+  esac
+  case "$f" in
+    /*) die "refusing compose file outside CloudTAK checkout: $f" ;;
+  esac
+  [ -f "$ct/$f" ] || die "COMPOSE_FILE entry missing: $f"
+  printf '%s\n' "$f"
+}
+
 # Build docker compose -f args: honour COMPOSE_FILE from .env when set (infra-TAK overlays).
 compose_file_args() {
   local ct="$1"
   local envf="$ct/.env"
-  local current="" f
+  local current="" f rel
   if [ -f "$envf" ]; then
     current=$(grep -E '^[[:space:]]*COMPOSE_FILE=' "$envf" | tail -n 1 | cut -d= -f2- || true)
     current=$(printf '%s' "$current" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
@@ -107,11 +128,8 @@ compose_file_args() {
     # shellcheck disable=SC2086
     for f in $current; do
       [ -n "$f" ] || continue
-      case "$f" in
-        *..* | /*) die "refusing absolute or traversal compose file: $f" ;;
-      esac
-      [ -f "$ct/$f" ] || die "COMPOSE_FILE entry missing: $f"
-      printf '%s\n' "-f" "$f"
+      rel=$(compose_file_rel "$ct" "$f") || die "invalid COMPOSE_FILE entry: $f"
+      printf '%s\n' "-f" "$rel"
     done
     return 0
   fi

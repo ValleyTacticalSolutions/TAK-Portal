@@ -195,6 +195,8 @@
       "repo": "https://github.com/dfndr13/cloudtak-replay-plugin.git",
       "added": "2026-09-25",
       "maintainer": "dfndr13",
+      "hidden": true,
+      "notes": "Temporarily hidden: upstream install.sh patches only support CloudTAK v13.109.3–v13.113.0 (atlas-database.ts patch fails on newer checkouts).",
       "web": { "dest": "replay" },
       "detect": [
         "api/web/plugins/replay/index.ts",

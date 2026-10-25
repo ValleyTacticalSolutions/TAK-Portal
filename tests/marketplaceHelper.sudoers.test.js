@@ -26,6 +26,9 @@ assert.match(source, /\binstall-plugin\b/);
 assert.match(source, /\brebuild\b/);
 assert.match(source, /\bwrite-caddy-route\b/);
 assert.match(source, /\bcleanup-sudoers\b/);
+assert.match(source, /\bcompose_file_rel\b/);
+assert.match(source, /refusing compose file outside CloudTAK checkout/);
+assert.doesNotMatch(source, /refusing absolute or traversal compose file/);
 assert.doesNotMatch(source, /eval\s/);
 assert.doesNotMatch(source, /NOPASSWD/);
 
