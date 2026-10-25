@@ -551,24 +551,128 @@ function execOverSsh(connectConfig, command, timeoutMs = 30000, onChunk) {
   });
 }
 
+function sshNotConfiguredPayload() {
+  return {
+    ok: false,
+    message: useTakSsh()
+      ? "TAK Server SSH is not configured. Complete SSH setup under Connection & Certificates."
+      : "CloudTAK SSH is not configured. Enter host, user, and password, then generate and install a key.",
+    stdout: "",
+    stderr: "",
+    exitCode: null,
+  };
+}
+
 async function runCommand(command, timeoutMs = 30000, onChunk) {
   const raw = String(command || "").trim();
   if (!raw) {
     return { ok: false, message: "Command is required.", stdout: "", stderr: "", exitCode: null };
   }
   const cfg = getConnectConfig();
-  if (!cfg) {
-    return {
-      ok: false,
-      message: useTakSsh()
-        ? "TAK Server SSH is not configured. Complete SSH setup under Connection & Certificates."
-        : "CloudTAK SSH is not configured. Enter host, user, and password, then generate and install a key.",
-      stdout: "",
-      stderr: "",
-      exitCode: null,
-    };
-  }
+  if (!cfg) return sshNotConfiguredPayload();
   return execOverSsh(cfg, raw, timeoutMs, onChunk);
+}
+
+/**
+ * Upload utf8 content to a remote path via SFTP (avoids ARG_MAX on large bash -lc payloads).
+ */
+function sftpWriteUtf8(connectConfig, remotePath, contents, timeoutMs = 60000) {
+  return new Promise((resolve) => {
+    const conn = new Client();
+    let finished = false;
+    const done = (payload) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(t);
+      try {
+        conn.end();
+      } catch (_) {}
+      resolve(payload);
+    };
+    const t = setTimeout(() => {
+      done({ ok: false, message: "SFTP upload timed out.", stdout: "", stderr: "", exitCode: null });
+    }, timeoutMs);
+
+    const connectOpts = {
+      host: connectConfig.host,
+      port: connectConfig.port,
+      username: connectConfig.username,
+      readyTimeout: connectConfig.readyTimeout || 15000,
+    };
+    if (connectConfig.privateKey) {
+      connectOpts.privateKey = connectConfig.privateKey;
+      if (connectConfig.passphrase) connectOpts.passphrase = connectConfig.passphrase;
+    }
+    if (connectConfig.password) {
+      connectOpts.password = connectConfig.password;
+      connectOpts.tryKeyboard = true;
+    }
+
+    conn
+      .on("keyboard-interactive", (name, instructions, instructionsLang, prompts, finish) => {
+        if (connectConfig && connectConfig.password) {
+          finish([String(connectConfig.password)]);
+          return;
+        }
+        finish([]);
+      })
+      .on("ready", () => {
+        conn.sftp((err, sftp) => {
+          if (err) {
+            done({ ok: false, message: err.message || String(err), stdout: "", stderr: "", exitCode: null });
+            return;
+          }
+          const stream = sftp.createWriteStream(remotePath, { mode: 0o600 });
+          stream.on("error", (e) => {
+            done({ ok: false, message: e.message || String(e), stdout: "", stderr: "", exitCode: null });
+          });
+          stream.on("close", () => {
+            done({ ok: true, stdout: "", stderr: "", exitCode: 0, remotePath });
+          });
+          stream.end(Buffer.from(String(contents || ""), "utf8"));
+        });
+      })
+      .on("error", (err) => {
+        done({ ok: false, message: err.message || String(err), stdout: "", stderr: "", exitCode: null });
+      })
+      .connect(connectOpts);
+  });
+}
+
+async function uploadUtf8(remotePath, contents, timeoutMs = 60000) {
+  const cfg = getConnectConfig();
+  if (!cfg) return sshNotConfiguredPayload();
+  const dest = String(remotePath || "").trim();
+  if (!dest.startsWith("/")) {
+    return { ok: false, message: "Remote path must be absolute.", stdout: "", stderr: "", exitCode: null };
+  }
+  return sftpWriteUtf8(cfg, dest, contents, timeoutMs);
+}
+
+/**
+ * Run a large bash script without stuffing it into argv (ARG_MAX).
+ * Uploads to /tmp, executes with pty for progress, then deletes.
+ */
+async function runBashScript(script, timeoutMs = 30000, onChunk) {
+  const body = String(script || "");
+  if (!body.trim()) {
+    return { ok: false, message: "Script is required.", stdout: "", stderr: "", exitCode: null };
+  }
+  const cfg = getConnectConfig();
+  if (!cfg) return sshNotConfiguredPayload();
+
+  const remote = `/tmp/ctak-mp-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.sh`;
+  const up = await sftpWriteUtf8(cfg, remote, body.endsWith("\n") ? body : `${body}\n`, Math.min(timeoutMs, 120000));
+  if (!up.ok) return up;
+
+  const quoted = shellQuote(remote);
+  const result = await execOverSsh(
+    cfg,
+    `bash ${quoted}; ec=$?; rm -f ${quoted}; exit $ec`,
+    timeoutMs,
+    onChunk
+  );
+  return result;
 }
 
 function detectScript() {
@@ -786,6 +890,8 @@ module.exports = {
   ensureCloudtakSshKeyPair,
   onboardWithPassword,
   runCommand,
+  runBashScript,
+  uploadUtf8,
   abortActiveCommand,
   sendRemoteInterrupt,
   stripAnsi,

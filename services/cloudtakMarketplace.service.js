@@ -667,6 +667,8 @@ function isTakwerxMarketplaceUser() {
 
 /** Narrow sudoers drop-in for the fixed helper only (never NOPASSWD: ALL). */
 const MARKETPLACE_HELPER_SUDOERS = "/etc/sudoers.d/tak-portal-mp-helper";
+/** Staged helper source on the remote host (SFTP); not embedded in remote bash argv. */
+const MARKETPLACE_HELPER_STAGED_SRC = "/tmp/tak-portal-marketplace-helper.src";
 
 /**
  * Elevate helpers for CloudTAK marketplace (issue #68).
@@ -680,16 +682,16 @@ function pluginPrivilegeBash() {
   const helperPath = takSshSvc.TAK_PORTAL_MARKETPLACE_HELPER || "/usr/local/libexec/tak-portal/marketplace-helper";
   const leftoverSudoers =
     takSshSvc.TAK_PORTAL_MARKETPLACE_SUDOERS_LEFTOVER || "/etc/sudoers.d/tak-portal-marketplace";
-  const helperB64 = Buffer.from(takSshSvc.readMarketplaceHelperSource(), "utf8").toString("base64");
   const autoDeploy = isTakwerxMarketplaceUser() ? "1" : "0";
   const grantUser = marketplaceSshUsername() || "takwerx";
+  // Helper source is staged over SFTP (never embedded — keeps bash -lc under ARG_MAX).
   return `
 CTAK_SUDO_PASS=${ssh.shellQuote(sudoPass)}
 CTAK_PRIV=${ssh.shellQuote(privBin)}
 CTAK_MARKETPLACE_HELPER=${ssh.shellQuote(helperPath)}
 CTAK_MARKETPLACE_SUDOERS_LEFTOVER=${ssh.shellQuote(leftoverSudoers)}
 CTAK_MARKETPLACE_HELPER_SUDOERS=${ssh.shellQuote(MARKETPLACE_HELPER_SUDOERS)}
-CTAK_MARKETPLACE_HELPER_B64=${ssh.shellQuote(helperB64)}
+CTAK_MARKETPLACE_HELPER_SRC=${ssh.shellQuote(MARKETPLACE_HELPER_STAGED_SRC)}
 CTAK_AUTO_DEPLOY_HELPER=${ssh.shellQuote(autoDeploy)}
 CTAK_HELPER_GRANT_USER=${ssh.shellQuote(grantUser)}
 CTAK_DOCKER_BIN=""
@@ -757,6 +759,7 @@ marketplace_helper_run() {
 }
 
 # Write a root install script (helper binary + narrow sudoers; never NOPASSWD: ALL).
+# Source file is staged by Portal over SFTP (CTAK_MARKETPLACE_HELPER_SRC) — not embedded.
 marketplace_helper_write_install_script() {
   local out="$1"
   local grant_user="\${CTAK_HELPER_GRANT_USER:-takwerx}"
@@ -766,9 +769,10 @@ marketplace_helper_write_install_script() {
     echo "HELPER=$(printf '%q' "$CTAK_MARKETPLACE_HELPER")"
     echo "GRANT_FILE=$(printf '%q' "$CTAK_MARKETPLACE_HELPER_SUDOERS")"
     echo "GRANT_USER=$(printf '%q' "$grant_user")"
-    echo "B64=$(printf '%q' "$CTAK_MARKETPLACE_HELPER_B64")"
+    echo "SRC=$(printf '%q' "$CTAK_MARKETPLACE_HELPER_SRC")"
+    echo 'test -f "$SRC" || { echo "marketplace helper source missing: $SRC" >&2; exit 1; }'
     echo 'mkdir -p "$(dirname "$HELPER")"'
-    echo 'printf "%s\\n" "$B64" | base64 -d > "$HELPER"'
+    echo 'cp "$SRC" "$HELPER"'
     echo 'chmod 755 "$HELPER"'
     echo 'chown root:root "$HELPER" 2>/dev/null || true'
     echo 'TMP=$(mktemp)'
@@ -786,8 +790,8 @@ install_marketplace_helper() {
   local script
   marketplace_should_auto_deploy_helper || return 1
   if marketplace_helper_available; then return 0; fi
-  if [ -z "\${CTAK_MARKETPLACE_HELPER_B64:-}" ]; then
-    echo "elevate: marketplace helper source missing; cannot auto-deploy" >&2
+  if [ ! -f "\${CTAK_MARKETPLACE_HELPER_SRC:-}" ]; then
+    echo "elevate: marketplace helper source not staged at \${CTAK_MARKETPLACE_HELPER_SRC:-}; cannot auto-deploy" >&2
     return 1
   fi
   script=$(mktemp /tmp/ctak-helper-install.XXXXXX)
@@ -814,13 +818,11 @@ install_marketplace_helper() {
 
   # Docker: write helper binary under /usr/local/libexec only (no sudoers.d mount — #68).
   if resolve_docker_bin; then
-    local img staging helper_dir ec
+    local img helper_dir ec
     helper_dir=$(dirname "$CTAK_MARKETPLACE_HELPER")
-    staging=$(mktemp /tmp/ctak-helper.XXXXXX)
-    printf '%s\\n' "$CTAK_MARKETPLACE_HELPER_B64" | base64 -d > "$staging" || { rm -f "$staging" "$script"; return 1; }
     img=$(docker_cli images -q 2>/dev/null | head -n 1 || true)
     if [ -z "$img" ]; then
-      docker_cli pull alpine:3.20 || { rm -f "$staging" "$script"; return 1; }
+      docker_cli pull alpine:3.20 || { rm -f "$script"; return 1; }
       img="alpine:3.20"
     else
       img=$(docker_cli images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | awk 'NF && index($0,"none")==0 {print; exit}' || true)
@@ -830,13 +832,12 @@ install_marketplace_helper() {
     set +e
     docker_cli run --rm -u 0 \\
       -v "$helper_dir:$helper_dir:rw" \\
-      -v "$staging:$staging:ro" \\
+      -v "$CTAK_MARKETPLACE_HELPER_SRC:$CTAK_MARKETPLACE_HELPER_SRC:ro" \\
       --entrypoint /bin/sh \\
       "$img" \\
-      -c "mkdir -p '$helper_dir' && cp '$staging' '$CTAK_MARKETPLACE_HELPER' && chmod 755 '$CTAK_MARKETPLACE_HELPER'"
+      -c "mkdir -p '$helper_dir' && cp '$CTAK_MARKETPLACE_HELPER_SRC' '$CTAK_MARKETPLACE_HELPER' && chmod 755 '$CTAK_MARKETPLACE_HELPER'"
     ec=$?
     set -e
-    rm -f "$staging" || true
     if [ "$ec" -eq 0 ] && [ -x "$CTAK_MARKETPLACE_HELPER" ]; then
       echo "elevate: marketplace helper binary present at $CTAK_MARKETPLACE_HELPER"
       if marketplace_helper_available; then rm -f "$script" || true; return 0; fi
@@ -3790,14 +3791,69 @@ async function runLogged(jobIds, command, timeoutMs) {
   return result;
 }
 
+/** Run a large remote bash script via SFTP + exec (avoids ARG_MAX). */
+async function runLoggedScript(jobIds, script, timeoutMs) {
+  const ids = (Array.isArray(jobIds) ? jobIds : [jobIds]).filter(Boolean);
+  const log = (line) => ids.forEach((id) => appendJobLog(id, line));
+  let streamed = false;
+  const result = await ssh.runBashScript(script, timeoutMs, (line) => {
+    streamed = true;
+    log(line);
+  });
+  if (!streamed) {
+    if (result.stdout) {
+      String(result.stdout)
+        .split("\n")
+        .forEach((line) => log(line));
+    }
+    if (!result.ok && result.stderr) {
+      String(result.stderr)
+        .split("\n")
+        .forEach((line) => log(line));
+    }
+  }
+  if (result.cancelled || _cancelRequested) {
+    throw cancelledError();
+  }
+  if (!result.ok) {
+    throw new Error(result.message || "SSH command failed");
+  }
+  return result;
+}
+
+/**
+ * For takwerx (infra-TAK): stage marketplace-helper source on the host over SFTP
+ * so install scripts can auto-deploy without embedding the file in bash argv.
+ */
+async function stageMarketplaceHelperSource(jobIds) {
+  if (!isTakwerxMarketplaceUser()) return { ok: true, skipped: true };
+  const ids = (Array.isArray(jobIds) ? jobIds : [jobIds]).filter(Boolean);
+  const log = (line) => ids.forEach((id) => appendJobLog(id, line));
+  let source;
+  try {
+    source = takSshSvc.readMarketplaceHelperSource();
+  } catch (err) {
+    log(`elevate: could not read marketplace helper source: ${err && err.message ? err.message : err}`);
+    return { ok: false, message: err && err.message ? err.message : String(err) };
+  }
+  log(`Staging marketplace helper source at ${MARKETPLACE_HELPER_STAGED_SRC}`);
+  const up = await ssh.uploadUtf8(MARKETPLACE_HELPER_STAGED_SRC, source, 60000);
+  if (!up.ok) {
+    log(`elevate: failed to stage marketplace helper: ${up.message || "upload failed"}`);
+    return up;
+  }
+  return { ok: true };
+}
+
 async function performInstall(job, plugin) {
   if (!safeDestName(plugin.web.dest)) throw new Error("Invalid plugin dest folder");
   const loc = await ensureCheckoutPath();
   if (!loc.ok) throw new Error(loc.message || "CloudTAK path not found");
   appendJobLog(job.id, `Using CloudTAK at ${loc.path}`);
-  const result = await runLogged(
+  await stageMarketplaceHelperSource(job.id);
+  const result = await runLoggedScript(
     job.id,
-    `bash -lc ${ssh.shellQuote(installRemoteScript(loc.path, plugin, { composeService: loc.composeService }))}`,
+    installRemoteScript(loc.path, plugin, { composeService: loc.composeService }),
     INSTALL_TIMEOUT_MS
   );
   const shaLine = String(result.stdout || "")
@@ -3839,7 +3895,12 @@ async function performUninstall(job, dest, plugin) {
   }
   const runtimeId = (plugin && plugin.id) || dest;
   appendJobLog(job.id, `Removing ${dest} from the CloudTAK plugins directory`);
-  await runLogged(job.id, `bash -lc ${ssh.shellQuote(uninstallRemoteScript(loc.path, dest, routeGuess, runtimeId, { composeService: loc.composeService }))}`, 5 * 60 * 1000);
+  await stageMarketplaceHelperSource(job.id);
+  await runLoggedScript(
+    job.id,
+    uninstallRemoteScript(loc.path, dest, routeGuess, runtimeId, { composeService: loc.composeService }),
+    5 * 60 * 1000
+  );
   const rec = store.readInstalled();
   if (plugin) {
     delete rec.plugins[plugin.id];
@@ -3871,7 +3932,8 @@ async function performRebuild(jobs, ctPath, service) {
   );
   ids.slice(1).forEach((id) => appendJobLog(id, "CloudTAK rebuild output is on the first job in this batch."));
   try {
-    await runLogged(primary ? [primary] : [], `bash -lc ${ssh.shellQuote(rebuildRemoteScript(ctPath, service))}`, timeoutMs);
+    await stageMarketplaceHelperSource(ids);
+    await runLoggedScript(primary ? [primary] : [], rebuildRemoteScript(ctPath, service), timeoutMs);
   } catch (err) {
     if (/timed out/i.test(String(err && err.message))) {
       throw new Error(
