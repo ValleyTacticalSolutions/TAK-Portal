@@ -4542,13 +4542,13 @@ function escapeHtml(value) {
 
 /**
  * Email a marketplace plugin submission request to Valley Tactical.
- * @param {{ requestorName: string, repoUrl: string, comments?: string, submittedBy?: string }} opts
+ * @param {{ requestorName: string, repoUrl: string, comments?: string, originUrl?: string }} opts
  */
 async function submitPluginRequest(opts) {
   const requestorName = String((opts && opts.requestorName) || "").trim();
   const repoUrl = String((opts && opts.repoUrl) || "").trim();
   const comments = String((opts && opts.comments) || "").trim();
-  const submittedBy = String((opts && opts.submittedBy) || "").trim();
+  const originUrl = String((opts && opts.originUrl) || "").trim();
 
   if (!requestorName) {
     return { ok: false, error: "Requestor Name is required." };
@@ -4568,7 +4568,7 @@ async function submitPluginRequest(opts) {
     "",
     `Requestor Name: ${requestorName}`,
     `GitHub Repo URL: ${repoUrl}`,
-    `Submitted By (portal user): ${submittedBy || "(unknown)"}`,
+    `Origin URL: ${originUrl || "(unknown)"}`,
     `Additional Comments: ${comments || "(none)"}`,
   ];
   const text = lines.join("\n");
@@ -4577,7 +4577,9 @@ async function submitPluginRequest(opts) {
     "<ul>",
     `<li><strong>Requestor Name:</strong> ${escapeHtml(requestorName)}</li>`,
     `<li><strong>GitHub Repo URL:</strong> <a href="${escapeHtml(repoUrl)}">${escapeHtml(repoUrl)}</a></li>`,
-    `<li><strong>Submitted By (portal user):</strong> ${escapeHtml(submittedBy || "(unknown)")}</li>`,
+    originUrl
+      ? `<li><strong>Origin URL:</strong> <a href="${escapeHtml(originUrl)}">${escapeHtml(originUrl)}</a></li>`
+      : "<li><strong>Origin URL:</strong> (unknown)</li>",
     `<li><strong>Additional Comments:</strong> ${comments ? escapeHtml(comments).replace(/\n/g, "<br>") : "(none)"}</li>`,
     "</ul>",
   ].join("\n");

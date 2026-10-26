@@ -462,14 +462,28 @@ router.post("/notify/test", async (req, res) => {
   }
 });
 
+function requestOriginUrl(req, bodyOrigin) {
+  const fromBody = String(bodyOrigin || "").trim();
+  if (/^https?:\/\//i.test(fromBody)) return fromBody;
+  const origin = String(req.get("origin") || "").trim();
+  if (/^https?:\/\//i.test(origin)) return `${origin.replace(/\/+$/, "")}/cloudtak-marketplace`;
+  const referer = String(req.get("referer") || "").trim();
+  if (/^https?:\/\//i.test(referer)) return referer;
+  const host = String(req.get("x-forwarded-host") || req.get("host") || "").trim();
+  if (!host) return "";
+  const proto = String(req.get("x-forwarded-proto") || req.protocol || "https").split(",")[0].trim() || "https";
+  return `${proto}://${host}/cloudtak-marketplace`;
+}
+
 router.post("/submit-plugin", async (req, res) => {
   try {
     const body = req.body || {};
+    const originUrl = requestOriginUrl(req, body.originUrl || body.origin || body.pageUrl);
     const result = await marketplace.submitPluginRequest({
       requestorName: body.requestorName || body.name,
       repoUrl: body.repoUrl || body.repo || body.githubUrl,
       comments: body.comments || body.additionalComments,
-      submittedBy: username(req),
+      originUrl,
     });
     if (!result.ok) {
       const status = result.emailConfigured === false ? 503 : 400;
@@ -487,13 +501,15 @@ router.post("/submit-plugin", async (req, res) => {
         summary: "Submitted a CloudTAK marketplace plugin request by email.",
         requestorName: String(body.requestorName || body.name || "").trim(),
         repoUrl: String(body.repoUrl || body.repo || body.githubUrl || "").trim(),
+        originUrl,
+        submittedBy: username(req),
       },
     });
     res.json({
       ok: true,
       sent: true,
       emailConfigured: true,
-      message: "Submission sent. Thanks — we will review the repository.",
+      message: "Thank you for your submission! We will review the repository.",
     });
   } catch (err) {
     res.status(500).json({

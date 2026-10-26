@@ -1446,7 +1446,8 @@
       body: JSON.stringify({
         requestorName: ($("mpSubmitRequestor").value || "").trim(),
         repoUrl: ($("mpSubmitRepoUrl").value || "").trim(),
-        comments: ($("mpSubmitComments").value || "").trim()
+        comments: ($("mpSubmitComments").value || "").trim(),
+        originUrl: String(window.location.href || "").trim()
       })
     })
       .then(function (r) {
