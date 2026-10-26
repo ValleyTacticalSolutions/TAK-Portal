@@ -371,6 +371,17 @@ function feedPtyChunk(hold, chunk) {
       if (cleaned) lines.push(cleaned);
       current = "";
     } else if (ch === "\r") {
+      // BuildKit/docker often refresh the same TTY line with CR. Emit docker/npm
+      // progress so the marketplace rebuild log keeps moving; still collapse git
+      // "Counting objects: N%" style churn until the final newline.
+      const cleaned = stripAnsi(current).replace(/\s+$/, "");
+      if (
+        cleaned &&
+        cleaned.length >= 12 &&
+        /^(?:#\d+|\[+\]|={3}| =>|Step \d|RUN |npm |yarn |pnpm |vite |eslint |tsc |#\s*\d)/.test(cleaned)
+      ) {
+        lines.push(cleaned);
+      }
       current = "";
     } else {
       current += ch;

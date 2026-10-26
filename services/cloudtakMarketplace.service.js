@@ -2125,7 +2125,7 @@ async function onEnabled(opts = {}) {
   return { ok: true };
 }
 
-const MAX_JOB_LOG_LINES = 2500;
+const MAX_JOB_LOG_LINES = 5000;
 
 function isNoisyBuildLine(s) {
   const t = String(s || "")
@@ -2133,12 +2133,12 @@ function isNoisyBuildLine(s) {
     .replace(/^#\s*/, "")
     .trim();
   if (!t) return true;
+  // Keep lint paths (/home/etl/...), problem summaries, and stage DONE — those are how
+  // operators follow a live CloudTAK rebuild. Only drop high-volume asset/type spam.
   if (/^dist\/(?:assets\/|\.vite\/)/.test(t) || /\/dist\/(?:assets\/|\.vite\/)/.test(t)) return true;
   if (/\bkB\b/.test(t) && /gzip:/i.test(t)) return true;
   if (/Unexpected any\. Specify a different type/.test(t)) return true;
   if (/^\d+:\d+\s+warning\b/.test(t)) return true;
-  if (/^\/home\/etl\//.test(t)) return true;
-  if (/^✖ \d+ problems/.test(t)) return true;
   return false;
 }
 
@@ -2157,13 +2157,17 @@ function formatRemoteLogLine(line) {
     if (/^(DONE|CACHED)\b/.test(m[2])) return ` => ${m[1]} ${m[2]}`;
     return ` => ${m[1]} ${m[2]}`;
   }
-  if (/^#\d+\s+DONE\s+/.test(s) || /^#\d+\s+CACHED$/.test(s)) return "";
+  // Keep bare stage completion markers so the live log advances during long RUN steps.
+  m = s.match(/^#(\d+)\s+(DONE\s+.*)$/);
+  if (m) return ` => #${m[1]} ${m[2]}`;
+  if (/^#\d+\s+CACHED$/.test(s)) return s.replace(/^#(\d+)\s+CACHED$/, " => #$1 CACHED");
   m = s.match(/^#\d+\s+\d+(?:\.\d+)?\s+(.*)$/);
-  if (m) s = ` => => # ${m[1]}`;
+  if (m) s = m[1] ? ` => => # ${m[1]}` : "";
   else {
     m = s.match(/^#\d+\s+(.*)$/);
-    if (m) s = ` => => # ${m[1]}`;
+    if (m) s = m[1] ? ` => => # ${m[1]}` : "";
   }
+  if (!s) return "";
   m = s.match(/^Image\s+(.+)\s+Building$/);
   if (m) return `[+] Building ${m[1]}`;
   if (isNoisyBuildLine(s)) return "";
@@ -3795,8 +3799,11 @@ cd "$CT"
 ensure_marketplace_sudoers || true
 # A plugin copied earlier can still fail vue-tsc and block this rebuild.
 ${pluginHostAlignRunnerBash()}
+echo "=== CloudTAK rebuild: aligning marketplace plugins ==="
 align_plugins_to_host "$CT"
+echo "=== CloudTAK rebuild: docker compose build --no-cache (live output below) ==="
 if marketplace_helper_run rebuild "$CT" "$SVC"; then
+  echo "CloudTAK image build finished (marketplace-helper)."
   echo "Waiting for $SVC to be running"
   n=0
   while [ "$n" -lt 90 ]; do
@@ -3872,9 +3879,18 @@ fi
 export BUILDKIT_PROGRESS=plain
 export COMPOSE_ANSI=never
 export COMPOSE_PROGRESS=plain
+export DOCKER_BUILDKIT=1
 # docker() is shadowed by pluginPrivilegeBash to use $CTAK_PRIV docker when needed.
-docker compose --progress=plain "\${COMPOSE_ARGS[@]}" build --no-cache "$SVC"
+# Line-buffer through stdbuf/cat so the Portal job log keeps advancing during long RUN steps
+# (npm install / vue-tsc) instead of looking silenced until the step finishes.
+set -o pipefail
+if command -v stdbuf >/dev/null 2>&1; then
+  docker compose --progress=plain "\${COMPOSE_ARGS[@]}" build --no-cache "$SVC" < /dev/null | stdbuf -oL -eL cat
+else
+  docker compose --progress=plain "\${COMPOSE_ARGS[@]}" build --no-cache "$SVC" < /dev/null
+fi
 echo "CloudTAK image build finished."
+echo "=== CloudTAK rebuild: recreating containers ==="
 docker compose --progress=plain "\${COMPOSE_ARGS[@]}" up -d --force-recreate "$SVC"
 echo "CloudTAK container recreate finished."
 echo "Waiting for $SVC to be running"
@@ -4474,6 +4490,7 @@ module.exports = {
   deployStaged,
   selectLogJobs,
   summarizeCommandError,
+  formatRemoteLogLine,
   listJobs,
   clearIdleJobs,
   cancelCurrentJobs,

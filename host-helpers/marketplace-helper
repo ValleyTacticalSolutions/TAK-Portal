@@ -163,8 +163,16 @@ cmd_rebuild() {
   export BUILDKIT_PROGRESS=plain
   export COMPOSE_ANSI=never
   export COMPOSE_PROGRESS=plain
-  docker compose --progress=plain "${args[@]}" build --no-cache "$svc"
+  export DOCKER_BUILDKIT=1
+  echo "=== CloudTAK rebuild: docker compose build --no-cache (live output below) ==="
+  set -o pipefail
+  if command -v stdbuf >/dev/null 2>&1; then
+    docker compose --progress=plain "${args[@]}" build --no-cache "$svc" < /dev/null | stdbuf -oL -eL cat
+  else
+    docker compose --progress=plain "${args[@]}" build --no-cache "$svc" < /dev/null
+  fi
   echo "CloudTAK image build finished."
+  echo "=== CloudTAK rebuild: recreating containers ==="
   docker compose --progress=plain "${args[@]}" up -d --force-recreate "$svc"
   echo "CloudTAK container recreate finished."
   echo "REBUILD_OK"

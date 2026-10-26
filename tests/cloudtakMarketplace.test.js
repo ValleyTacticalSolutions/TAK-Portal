@@ -612,6 +612,18 @@ assert.match(installScript, /app\/plugins/);
 assert.match(installScript, /Moving \$DEST from api\/web\/plugins to app\/plugins/);
 assert.match(installScript, /Removing leftover api\/web\/plugins\/\$DEST/);
 assert.match(installScript, /docker compose --progress=plain/);
+{
+  const rebuild = marketplace.rebuildRemoteScript("/root/CloudTAK", "api");
+  assert.match(rebuild, /=== CloudTAK rebuild: docker compose build/);
+  assert.match(rebuild, /stdbuf -oL -eL cat/);
+  assert.match(marketplace.formatRemoteLogLine("#12 DONE 45.2s"), /DONE 45\.2s/);
+  assert.match(
+    marketplace.formatRemoteLogLine(" => => # /home/etl/api/common/hub/index.ts"),
+    /\/home\/etl\/api\/common\/hub\/index\.ts/
+  );
+  assert.match(marketplace.formatRemoteLogLine(" => => # ✖ 2 problems (2 errors, 0 warnings)"), /✖ 2 problems/);
+  assert.strictEqual(marketplace.formatRemoteLogLine("dist/assets/index-abc.js  600.12 kB │ gzip: 180.01 kB"), "");
+}
 const uninstallScript = marketplace.uninstallRemoteScript("/root/CloudTAK", "livewx-radar", [], "livewx");
 assert.match(uninstallScript, /\$CT\/app\/plugins\/\$DEST/);
 assert.match(uninstallScript, /\$CT\/api\/web\/plugins\/\$DEST/);
