@@ -1086,7 +1086,24 @@ function relaxMarketplaceServerRoutes(apiDir) {
   } catch (_) {
     return changes;
   }
-  const patterns = ["stateless/routes/plugin-*.ts"].concat(nocheckExtras);
+  // Always ignore Replay (and similar) additive server files — CloudTAK's image
+  // lint runs eslint on stateful/stateless/test and will fail the docker build on
+  // plugin house-style / optional test copies even when runtime code is fine.
+  const alwaysIgnore = [
+    "stateless/routes/plugin-*.ts",
+    "stateless/routes/replay.ts",
+    "stateless/lib/replay*.ts",
+    "stateless/lib/retention/replay.ts",
+    "stateful/lib/replay*.ts",
+    "test/replay*.ts",
+  ];
+  const patterns = [];
+  const seenPat = new Set();
+  for (const p of alwaysIgnore.concat(nocheckExtras)) {
+    if (!p || seenPat.has(p)) continue;
+    seenPat.add(p);
+    patterns.push(p);
+  }
   const block = routeIgnoreBlock(patterns);
   const blockRe = /[ \t]*\/\* cloudtak-marketplace-routes \*\/\r?\n[ \t]*\{ ignores: \[[^\]]*\] \},/;
   let next = config;

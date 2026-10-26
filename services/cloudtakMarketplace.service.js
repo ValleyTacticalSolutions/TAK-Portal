@@ -3663,6 +3663,29 @@ chmod a+rX "$REPO_DIR/.ctak-normalize-plugin.sh" 2>/dev/null || true
 run_as_writer "sh $(printf '%q' "$REPO_DIR/.ctak-normalize-plugin.sh") $(printf '%q' "$TARGET")"
 rm -f "$REPO_DIR/.ctak-normalize-plugin.sh" || true
 
+# Plugin unit/srv tests are not shipped in the CloudTAK image path and often trip
+# host eslint (Replay copies api/test/replay-*.ts). Drop them before align/rebuild.
+strip_marketplace_plugin_tests() {
+  local ct="$1"
+  local f removed=0
+  [ -n "$ct" ] && [ -d "$ct/api/test" ] || return 0
+  shopt -s nullglob
+  for f in "$ct"/api/test/replay*.ts "$ct"/api/test/replay*.js; do
+    [ -e "$f" ] || continue
+    if declare -F run_as_writer >/dev/null 2>&1; then
+      run_as_writer "rm -f $(printf '%q' "$f")" || true
+    else
+      rm -f "$f" || true
+    fi
+    if [ ! -e "$f" ]; then
+      echo "Removed plugin test from image build: $f"
+    fi
+  done
+  shopt -u nullglob
+  return 0
+}
+strip_marketplace_plugin_tests "$CT"
+
 # Match plugin calls and imports to this CloudTAK checkout before vue-tsc.
 # Applies to every plugin already on disk, not only the one being installed.
 ${pluginHostAlignRunnerBash()}

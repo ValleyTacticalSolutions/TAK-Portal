@@ -116,6 +116,7 @@ assert.match(replayInstall, /marketplace-install-status/);
 assert.match(replayInstall, /exit "\$ec"/, "install.sh wrapper must exit with install status so elevation retries");
 assert.match(replayInstall, /api\/stateless\/lib/, "reclaim/can_write cover Replay server lib paths");
 assert.match(replayInstall, /install_ec" != 0[\s\S]*apply_plugin_patches/, "drifted patches only after install.sh failure");
+assert.match(replayInstall, /strip_marketplace_plugin_tests/, "Replay api/test copies are stripped before image rebuild");
 assert.ok(pluginPatch.isOptionalPatchTarget("api/test/fixtures/get_schema.json"));
 assert.ok(!pluginPatch.isOptionalPatchTarget("app/src/workers/atlas-database.ts"));
 const helloworld = normalized.plugins.find((p) => p.id === "helloworld");
@@ -877,6 +878,8 @@ assert.doesNotMatch(fs.readFileSync(path.join(retentionDir, "chat.ts"), "utf8"),
 assert.ok(!fs.existsSync(path.join(apiLintRoot, "api", ".marketplace-owned-ts")));
 const apiEslint = fs.readFileSync(path.join(apiLintRoot, "api", "eslint.config.js"), "utf8");
 assert.match(apiEslint, /stateless\/routes\/plugin-\*\.ts/);
+assert.match(apiEslint, /stateless\/routes\/replay\.ts/);
+assert.match(apiEslint, /test\/replay\*\.ts/);
 assert.match(apiEslint, /stateless\/routes\/helper-sync\.ts/);
 assert.match(apiEslint, /stateless\/lib\/retention\/replay\.ts/);
 assert.doesNotMatch(apiEslint, /video\.ts/);
