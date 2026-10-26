@@ -3788,44 +3788,79 @@ echo UNINSTALL_OK
 }
 
 function hubReplayRepairRunnerBash() {
-  // Compact copy of repairOrphanedHubReplay — runs elevated before every rebuild so a
-  // root-owned hub/index.ts left by a prior docker elevate still gets fixed.
+  // Compact copy of repairReplayDriftArtifacts — elevated before every rebuild so
+  // root-owned leftovers from a prior docker elevate (hub + cots) still get fixed.
   return `
 repair_replay_hub_orphan() {
   local ct="\$1"
-  local f="\$ct/api/common/hub/index.ts"
-  [ -n "\$ct" ] && [ -f "\$f" ] || return 0
+  [ -n "\$ct" ] && [ -d "\$ct" ] || return 0
   local script="/tmp/ctak-repair-hub-replay.cjs"
   cat <<'CTAK_REPAIR_HUB_JS' > "\$script"
 const fs = require("fs");
 const path = require("path");
 const ct = process.argv[2];
-const typeFile = path.join(ct, "api/common/hub/index.ts");
-if (!fs.existsSync(typeFile)) process.exit(0);
-let text = fs.readFileSync(typeFile, "utf8");
-let changed = false;
-const orphanRe = /(\\n\\};\\r?\\n)(?:\\r?\\n)?((?:[ \\t]*\\/\\/[^\\n]*\\r?\\n)*[ \\t]*replay\\?: boolean;\\r?\\n)(export interface HubClient\\b)/;
-if (orphanRe.test(text)) {
-  text = text.replace(orphanRe, "\$1\\n\$3");
-  console.log("Repaired api/common/hub/index.ts (removed orphaned replay field)");
-  changed = true;
+const notes = [];
+function wantsReplay(changed) {
+  return (
+    fs.existsSync(path.join(ct, "api/stateful/lib/replay-recorder.ts")) ||
+    fs.existsSync(path.join(ct, "app/plugins/replay")) ||
+    fs.existsSync(path.join(ct, "api/web/plugins/replay")) ||
+    !!changed
+  );
 }
-const match = text.match(/export type SubmitCotsRequest = \\{[\\s\\S]*?\\n\\};/);
-const wants =
-  fs.existsSync(path.join(ct, "api/stateful/lib/replay-recorder.ts")) ||
-  fs.existsSync(path.join(ct, "app/plugins/replay")) ||
-  fs.existsSync(path.join(ct, "api/web/plugins/replay")) ||
-  changed;
-if (match && wants && !/replay\\?: boolean/.test(match[0])) {
-  text = text.replace(match[0], match[0].replace(/\\n\\};\\$/, "\\n    replay?: boolean;\\n};"));
-  console.log("Repaired api/common/hub/index.ts (replay field inside SubmitCotsRequest)");
-  changed = true;
-}
-if (changed) fs.writeFileSync(typeFile, text);
-else console.log("Replay hub/index.ts ok (no orphaned replay field)");
+(function repairHub() {
+  const typeFile = path.join(ct, "api/common/hub/index.ts");
+  if (!fs.existsSync(typeFile)) return;
+  let text = fs.readFileSync(typeFile, "utf8");
+  let changed = false;
+  const orphanRe = /(\\n\\};\\r?\\n)(?:\\r?\\n)?((?:[ \\t]*\\/\\/[^\\n]*\\r?\\n)*[ \\t]*replay\\?: boolean;\\r?\\n)(export interface HubClient\\b)/;
+  if (orphanRe.test(text)) {
+    text = text.replace(orphanRe, "\$1\\n\$3");
+    notes.push("api/common/hub/index.ts (removed orphaned replay field)");
+    changed = true;
+  }
+  const match = text.match(/export type SubmitCotsRequest = \\{[\\s\\S]*?\\n\\};/);
+  if (match && wantsReplay(changed) && !/replay\\?: boolean/.test(match[0])) {
+    text = text.replace(match[0], match[0].replace(/\\n\\};\\$/, "\\n    replay?: boolean;\\n};"));
+    notes.push("api/common/hub/index.ts (replay field inside SubmitCotsRequest)");
+    changed = true;
+  }
+  if (changed) fs.writeFileSync(typeFile, text);
+})();
+(function repairCots() {
+  const file = path.join(ct, "api/stateful/routes/cots.ts");
+  if (!fs.existsSync(file)) return;
+  let text = fs.readFileSync(file, "utf8");
+  let changed = false;
+  const orphanOpt = /(ifPooled: Type\\.Optional\\(Type\\.Boolean\\(\\)\\),\\r?\\n)([ \\t]*\\}\\),\\r?\\n)([ \\t]*replay: Type\\.Optional\\(Type\\.Boolean\\(\\)\\),\\r?\\n)/;
+  if (orphanOpt.test(text)) {
+    text = text.replace(orphanOpt, "\$1\$3\$2");
+    notes.push("api/stateful/routes/cots.ts (moved replay body field before closing })");
+    changed = true;
+  }
+  if (wantsReplay(changed) && /ifPooled: Type\\.Optional\\(Type\\.Boolean\\(\\)\\)/.test(text) && !/replay: Type\\.Optional\\(Type\\.Boolean\\(\\)\\)/.test(text)) {
+    text = text.replace(
+      /^([ \\t]*)ifPooled: Type\\.Optional\\(Type\\.Boolean\\(\\)\\),\\r?\\n([ \\t]*\\}\\),)/m,
+      "\$1ifPooled: Type.Optional(Type.Boolean()),\\n\$1replay: Type.Optional(Type.Boolean()),\\n\$2"
+    );
+    notes.push("api/stateful/routes/cots.ts (added replay body field)");
+    changed = true;
+  }
+  if (wantsReplay(changed) && /ifPooled: req\\.body\\.ifPooled/.test(text) && !/replay: req\\.body\\.replay/.test(text)) {
+    text = text.replace(
+      /^([ \\t]*)ifPooled: req\\.body\\.ifPooled,\\r?\\n/m,
+      "\$1ifPooled: req.body.ifPooled,\\n\$1replay: req.body.replay,\\n"
+    );
+    notes.push("api/stateful/routes/cots.ts (added replay submitCots field)");
+    changed = true;
+  }
+  if (changed) fs.writeFileSync(file, text);
+})();
+if (notes.length) notes.forEach((n) => console.log("Repaired " + n));
+else console.log("Replay drift artifacts ok (hub/cots)");
 CTAK_REPAIR_HUB_JS
   chmod a+r "\$script" 2>/dev/null || true
-  echo "=== CloudTAK rebuild: repairing Replay hub orphan (if present) ==="
+  echo "=== CloudTAK rebuild: repairing Replay drift artifacts (hub/cots) ==="
   if command -v node >/dev/null 2>&1 && node "\$script" "\$ct"; then
     return 0
   fi
@@ -3843,7 +3878,7 @@ CTAK_REPAIR_HUB_JS
       return 0
     fi
   fi
-  echo "WARNING: could not repair hub/index.ts; API lint may still fail if an orphaned replay field remains" >&2
+  echo "WARNING: could not repair Replay hub/cots drift; API lint may still fail" >&2
   return 0
 }
 `.trim();

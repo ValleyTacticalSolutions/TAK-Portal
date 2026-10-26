@@ -295,7 +295,25 @@ assert.doesNotMatch(
   assert.doesNotMatch(fixed, /\};\n\n    (?:\/\/[^\n]*\n)*    replay\?: boolean;\nexport interface/);
   const rb = marketplace.rebuildRemoteScript("/root/CloudTAK", "api");
   assert.match(rb, /repair_replay_hub_orphan/);
+  assert.match(rb, /stateful\/routes\/cots/);
   assert.ok(rb.indexOf("repair_replay_hub_orphan") < rb.indexOf("docker compose --progress=plain"));
+  fs.mkdirSync(path.join(tmp, "api/stateful/routes"), { recursive: true });
+  fs.writeFileSync(
+    path.join(tmp, "api/stateful/routes/cots.ts"),
+    [
+      "            ifPooled: Type.Optional(Type.Boolean()),",
+      "        }),",
+      "            replay: Type.Optional(Type.Boolean()),",
+      "        // comment",
+      "",
+    ].join("\n")
+  );
+  const cotsNotes = pluginPatch.repairOrphanedCotsReplay(tmp);
+  assert.ok(cotsNotes.some((n) => /moved replay body/.test(n)));
+  assert.match(
+    fs.readFileSync(path.join(tmp, "api/stateful/routes/cots.ts"), "utf8"),
+    /ifPooled: Type\.Optional\(Type\.Boolean\(\)\),\n            replay: Type\.Optional\(Type\.Boolean\(\)\),\n        \}\),/
+  );
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 assert.ok(!ids.includes("lightning"));

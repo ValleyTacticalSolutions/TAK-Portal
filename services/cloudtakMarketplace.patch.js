@@ -265,10 +265,70 @@ function repairOrphanedHubReplay(ctRoot) {
   return notes;
 }
 
+/**
+ * Same drifted-apply bug as hub: `replay: Type.Optional(...)` landed AFTER the
+ * body Type.Object's `}),`, so eslint sees 12-space indent at the wrong nesting
+ * (`Expected indentation of 8 spaces but found 12` on cots.ts).
+ */
+function repairOrphanedCotsReplay(ctRoot) {
+  const file = path.join(ctRoot, "api/stateful/routes/cots.ts");
+  if (!fs.existsSync(file)) return [];
+  let text = fs.readFileSync(file, "utf8");
+  const notes = [];
+  let changed = false;
+
+  const orphanOpt =
+    /(ifPooled: Type\.Optional\(Type\.Boolean\(\)\),\r?\n)([ \t]*\}\),\r?\n)([ \t]*replay: Type\.Optional\(Type\.Boolean\(\)\),\r?\n)/;
+  if (orphanOpt.test(text)) {
+    text = text.replace(orphanOpt, "$1$3$2");
+    notes.push("api/stateful/routes/cots.ts (moved replay body field before closing })");
+    changed = true;
+  }
+
+  const wantsReplay =
+    fs.existsSync(path.join(ctRoot, "api/stateful/lib/replay-recorder.ts")) ||
+    fs.existsSync(path.join(ctRoot, "app/plugins/replay")) ||
+    fs.existsSync(path.join(ctRoot, "api/web/plugins/replay")) ||
+    notes.length > 0;
+
+  if (
+    wantsReplay &&
+    /ifPooled: Type\.Optional\(Type\.Boolean\(\)\)/.test(text) &&
+    !/replay: Type\.Optional\(Type\.Boolean\(\)\)/.test(text)
+  ) {
+    text = text.replace(
+      /^([ \t]*)ifPooled: Type\.Optional\(Type\.Boolean\(\)\),\r?\n([ \t]*\}\),)/m,
+      "$1ifPooled: Type.Optional(Type.Boolean()),\n$1replay: Type.Optional(Type.Boolean()),\n$2"
+    );
+    notes.push("api/stateful/routes/cots.ts (added replay body field)");
+    changed = true;
+  }
+
+  if (
+    wantsReplay &&
+    /ifPooled: req\.body\.ifPooled/.test(text) &&
+    !/replay: req\.body\.replay/.test(text)
+  ) {
+    text = text.replace(
+      /^([ \t]*)ifPooled: req\.body\.ifPooled,\r?\n/m,
+      "$1ifPooled: req.body.ifPooled,\n$1replay: req.body.replay,\n"
+    );
+    notes.push("api/stateful/routes/cots.ts (added replay submitCots field)");
+    changed = true;
+  }
+
+  if (changed) fs.writeFileSync(file, text);
+  return notes;
+}
+
+function repairReplayDriftArtifacts(ctRoot) {
+  return repairOrphanedHubReplay(ctRoot).concat(repairOrphanedCotsReplay(ctRoot));
+}
+
 function wireCotsReplayFlag(ctRoot) {
   // Always attempt orphan heal first — do not gate on connection-pool (a half-failed
   // install can leave hub broken while pool was reverted or is unreadable).
-  const notes = repairOrphanedHubReplay(ctRoot);
+  const notes = repairReplayDriftArtifacts(ctRoot);
   const pool = path.join(ctRoot, "api/stateful/lib/connection-pool.ts");
   if (!fs.existsSync(pool)) return notes;
   const poolText = fs.readFileSync(pool, "utf8");
@@ -359,5 +419,7 @@ module.exports = {
   applyRepoPatches,
   wireCotsReplayFlag,
   repairOrphanedHubReplay,
+  repairOrphanedCotsReplay,
+  repairReplayDriftArtifacts,
   isOptionalPatchTarget,
 };
