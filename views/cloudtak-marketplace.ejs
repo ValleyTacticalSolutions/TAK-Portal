@@ -2,7 +2,10 @@
 <%- include("partials/sidebar") %>
 
 <main class="main">
-  <h1>CloudTAK Plugin Marketplace</h1>
+  <div class="mp-page-header">
+    <h1>CloudTAK Plugin Marketplace</h1>
+    <button type="button" class="btn" id="mpSubmitPluginOpen">Submit Plugin To Marketplace</button>
+  </div>
 
   <div id="mpBanners"></div>
 
@@ -65,7 +68,78 @@
   </div>
 </div>
 
+<div class="modalOverlay" id="mpSubmitPluginModal" style="display:none;" aria-hidden="true">
+  <div class="modal mp-submit-plugin-dialog" role="dialog" aria-modal="true" aria-labelledby="mpSubmitPluginTitle">
+    <div class="modalHeader">
+      <h2 id="mpSubmitPluginTitle">Submit Plugin To Marketplace</h2>
+      <button type="button" class="btn" id="mpSubmitPluginClose">Close</button>
+    </div>
+    <div class="modalBody">
+      <p class="muted" style="margin-top:0;">Request that a GitHub CloudTAK plugin be reviewed for the marketplace catalog.</p>
+      <div id="mpSubmitPluginEmailWarn" class="mp-banner warn" style="display:none;margin-bottom:12px;">
+        Email/SMTP is not configured. Enable Email under Settings → Email and set SMTP host and From address before submitting.
+      </div>
+      <label class="mp-submit-field">Requestor Name
+        <input type="text" id="mpSubmitRequestor" maxlength="120" autocomplete="name" placeholder="Your name" />
+      </label>
+      <label class="mp-submit-field">GitHub Repo URL
+        <input type="url" id="mpSubmitRepoUrl" maxlength="500" autocomplete="off" placeholder="https://github.com/org/cloudtak-plugin-example" />
+      </label>
+      <label class="mp-submit-field">Additional Comments <span class="muted">(optional)</span>
+        <textarea id="mpSubmitComments" rows="4" maxlength="4000" placeholder="Anything reviewers should know…"></textarea>
+      </label>
+      <div class="row mp-submit-actions">
+        <div id="mpSubmitPluginMsg" class="msg" style="flex:1;margin:0;"></div>
+        <button type="button" class="btn" id="mpSubmitPluginSend" disabled>Submit</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <style>
+  .mp-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .mp-page-header h1 {
+    margin: 0;
+  }
+  .mp-submit-plugin-dialog {
+    width: min(560px, 96vw);
+  }
+  .mp-submit-field {
+    display: block;
+    margin-top: 12px;
+    font-weight: 600;
+  }
+  .mp-submit-field input,
+  .mp-submit-field textarea {
+    display: block;
+    width: 100%;
+    margin-top: 6px;
+    font-weight: 400;
+  }
+  .mp-submit-actions {
+    margin-top: 16px;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  #mpSubmitPluginSend:disabled {
+    background: #6b7280;
+    color: #f3f4f6;
+    cursor: not-allowed;
+    box-shadow: none;
+    filter: none;
+    opacity: 0.9;
+  }
+  #mpSubmitPluginSend:disabled:hover {
+    filter: none;
+  }
   .mp-toolbar {
     flex-wrap: wrap;
     gap: 12px;
@@ -390,7 +464,10 @@
   var activeJobs = [];
   var jobBusy = false;
   var jobPoll = null;
+  var emailConfigured = <%= typeof emailConfigured !== "undefined" && emailConfigured ? "true" : "false" %>;
   var WAIT_HINT = "Wait until the current job is complete and containers are recreated and running";
+  var EMAIL_NOT_CONFIGURED =
+    "Email/SMTP is not configured. Enable Email under Settings → Email and set SMTP host and From address before submitting.";
 
   function titleCase(value) {
     return String(value || "").replace(/(^|[^A-Za-z0-9])([a-z])/g, function (_all, pre, ch) {
@@ -611,6 +688,7 @@
   }
 
   function renderBanners(status, snapshot) {
+    if (status && status.emailConfigured != null) emailConfigured = !!status.emailConfigured;
     var html = "";
     if (jobBusy) {
       html += '<div class="mp-banner wait">' + WAIT_HINT + ".</div>";
@@ -628,6 +706,66 @@
       html += '<div class="mp-banner warn">Host scan is stale or SSH failed. Showing the last good scan.</div>';
     }
     $("mpBanners").innerHTML = html;
+    syncSubmitPluginEmailWarn();
+  }
+
+  function isGithubRepoUrl(value) {
+    var s = String(value || "").trim();
+    return /github\.com[:/]+[^/\s]+\/[^/\s]+/i.test(s);
+  }
+
+  function submitPluginFormReady() {
+    var name = ($("mpSubmitRequestor") && $("mpSubmitRequestor").value || "").trim();
+    var repo = ($("mpSubmitRepoUrl") && $("mpSubmitRepoUrl").value || "").trim();
+    return !!(name && repo && isGithubRepoUrl(repo));
+  }
+
+  function syncSubmitPluginEmailWarn() {
+    var warn = $("mpSubmitPluginEmailWarn");
+    if (warn) warn.style.display = emailConfigured ? "none" : "";
+  }
+
+  function setSubmitPluginMsg(text, isError) {
+    var el = $("mpSubmitPluginMsg");
+    if (!el) return;
+    el.textContent = text || "";
+    el.style.color = isError ? "#c44" : "";
+  }
+
+  function syncSubmitPluginButton() {
+    var btn = $("mpSubmitPluginSend");
+    if (!btn) return;
+    var ready = submitPluginFormReady() && emailConfigured && !btn.dataset.sending;
+    btn.disabled = !ready;
+    if (ready) btn.classList.add("success");
+    else btn.classList.remove("success");
+  }
+
+  function closeSubmitPluginModal() {
+    var overlay = $("mpSubmitPluginModal");
+    if (!overlay) return;
+    overlay.style.display = "none";
+    overlay.setAttribute("aria-hidden", "true");
+  }
+
+  function openSubmitPluginModal() {
+    var overlay = $("mpSubmitPluginModal");
+    if (!overlay) return;
+    if ($("mpSubmitRequestor")) $("mpSubmitRequestor").value = "";
+    if ($("mpSubmitRepoUrl")) $("mpSubmitRepoUrl").value = "";
+    if ($("mpSubmitComments")) $("mpSubmitComments").value = "";
+    setSubmitPluginMsg("");
+    syncSubmitPluginEmailWarn();
+    if (!emailConfigured) setSubmitPluginMsg(EMAIL_NOT_CONFIGURED, true);
+    syncSubmitPluginButton();
+    overlay.style.display = "flex";
+    overlay.setAttribute("aria-hidden", "false");
+    if ($("mpSubmitRequestor")) $("mpSubmitRequestor").focus();
+  }
+
+  function submitPluginFormOverlayOpen() {
+    var overlay = $("mpSubmitPluginModal");
+    return !!(overlay && overlay.style.display !== "none");
   }
 
   function renderCards() {
@@ -1273,8 +1411,75 @@
   $("mpExtraConfigModal").addEventListener("click", function (e) {
     if (e.target === $("mpExtraConfigModal")) closeExtraConfigModal();
   });
+  $("mpSubmitPluginOpen").addEventListener("click", openSubmitPluginModal);
+  $("mpSubmitPluginClose").addEventListener("click", closeSubmitPluginModal);
+  $("mpSubmitPluginModal").addEventListener("click", function (e) {
+    if (e.target === $("mpSubmitPluginModal")) closeSubmitPluginModal();
+  });
+  ["mpSubmitRequestor", "mpSubmitRepoUrl", "mpSubmitComments"].forEach(function (id) {
+    var el = $(id);
+    if (!el) return;
+    el.addEventListener("input", syncSubmitPluginButton);
+    el.addEventListener("change", syncSubmitPluginButton);
+  });
+  $("mpSubmitPluginSend").addEventListener("click", function () {
+    var btn = $("mpSubmitPluginSend");
+    if (!btn || btn.disabled || btn.dataset.sending) return;
+    if (!emailConfigured) {
+      setSubmitPluginMsg(EMAIL_NOT_CONFIGURED, true);
+      syncSubmitPluginButton();
+      return;
+    }
+    if (!submitPluginFormReady()) {
+      setSubmitPluginMsg("Requestor Name and a valid GitHub Repo URL are required.", true);
+      syncSubmitPluginButton();
+      return;
+    }
+    btn.dataset.sending = "1";
+    btn.disabled = true;
+    btn.textContent = "Sending…";
+    btn.classList.remove("success");
+    setSubmitPluginMsg("Sending submission…");
+    fetch("/api/cloudtak-marketplace/submit-plugin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        requestorName: ($("mpSubmitRequestor").value || "").trim(),
+        repoUrl: ($("mpSubmitRepoUrl").value || "").trim(),
+        comments: ($("mpSubmitComments").value || "").trim()
+      })
+    })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          return { httpOk: r.ok, ok: r.ok && j && j.ok, json: j || {} };
+        });
+      })
+      .then(function (out) {
+        if (out.json && out.json.emailConfigured != null) {
+          emailConfigured = !!out.json.emailConfigured;
+          syncSubmitPluginEmailWarn();
+        }
+        if (!out.ok) {
+          setSubmitPluginMsg((out.json && out.json.error) || "Failed to send submission.", true);
+          return;
+        }
+        setSubmitPluginMsg((out.json && out.json.message) || "Submission sent.", false);
+        setMsg((out.json && out.json.message) || "Plugin submission sent.");
+        setTimeout(closeSubmitPluginModal, 1200);
+      })
+      .catch(function (err) {
+        setSubmitPluginMsg(err.message || "Failed to send submission.", true);
+      })
+      .finally(function () {
+        delete btn.dataset.sending;
+        btn.textContent = "Submit";
+        syncSubmitPluginButton();
+      });
+  });
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && extraConfigOverlayOpen()) closeExtraConfigModal();
+    if (e.key !== "Escape") return;
+    if (submitPluginFormOverlayOpen()) closeSubmitPluginModal();
+    else if (extraConfigOverlayOpen()) closeExtraConfigModal();
   });
 
   loadAll();

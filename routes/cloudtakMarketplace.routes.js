@@ -68,6 +68,7 @@ router.get("/status", async (req, res) => {
       enabled: marketplace.isEnabled(),
       ssh: ssh.sshStatus(),
       catalogUrl: marketplace.defaultCatalogUrl(),
+      emailConfigured: marketplace.isEmailConfigured(),
       worker: workerHealthCache.worker,
       busy: marketplace.hasBusyChangeJobs(),
       jobs: allJobs.slice(0, 20).map((job) => presentJob(job, false)),
@@ -458,6 +459,48 @@ router.post("/notify/test", async (req, res) => {
     res.json({ ok: !!result.sent, ...result });
   } catch (err) {
     res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+router.post("/submit-plugin", async (req, res) => {
+  try {
+    const body = req.body || {};
+    const result = await marketplace.submitPluginRequest({
+      requestorName: body.requestorName || body.name,
+      repoUrl: body.repoUrl || body.repo || body.githubUrl,
+      comments: body.comments || body.additionalComments,
+      submittedBy: username(req),
+    });
+    if (!result.ok) {
+      const status = result.emailConfigured === false ? 503 : 400;
+      return res.status(status).json({
+        ok: false,
+        error: result.error || "Unable to submit plugin request.",
+        emailConfigured: marketplace.isEmailConfigured(),
+      });
+    }
+    auditSvc.auditFromRequest(req, {
+      action: "CLOUDTAK_MARKETPLACE_SUBMIT_PLUGIN",
+      targetType: "marketplace",
+      targetId: "submit-plugin",
+      details: {
+        summary: "Submitted a CloudTAK marketplace plugin request by email.",
+        requestorName: String(body.requestorName || body.name || "").trim(),
+        repoUrl: String(body.repoUrl || body.repo || body.githubUrl || "").trim(),
+      },
+    });
+    res.json({
+      ok: true,
+      sent: true,
+      emailConfigured: true,
+      message: "Submission sent. Thanks — we will review the repository.",
+    });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: err?.message || String(err),
+      emailConfigured: marketplace.isEmailConfigured(),
+    });
   }
 });
 

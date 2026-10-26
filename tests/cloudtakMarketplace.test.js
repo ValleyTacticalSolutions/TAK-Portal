@@ -1313,7 +1313,36 @@ async function assertOnboardValidation() {
   );
 }
 
+async function assertSubmitPluginValidation() {
+  assert.strictEqual(typeof marketplace.isEmailConfigured, "function");
+  assert.strictEqual(typeof marketplace.submitPluginRequest, "function");
+  assert.strictEqual(marketplace.PLUGIN_SUBMIT_TO, "justin@valleytactical.io");
+  const missingName = await marketplace.submitPluginRequest({
+    requestorName: "",
+    repoUrl: "https://github.com/clptak/cloudtak-plugin-measure",
+  });
+  assert.strictEqual(missingName.ok, false);
+  assert.match(missingName.error || "", /requestor name/i);
+  const badRepo = await marketplace.submitPluginRequest({
+    requestorName: "Tester",
+    repoUrl: "https://example.com/not-github",
+  });
+  assert.strictEqual(badRepo.ok, false);
+  assert.match(badRepo.error || "", /github/i);
+  if (!marketplace.isEmailConfigured()) {
+    const noSmtp = await marketplace.submitPluginRequest({
+      requestorName: "Tester",
+      repoUrl: "https://github.com/clptak/cloudtak-plugin-measure",
+      comments: "please add",
+    });
+    assert.strictEqual(noSmtp.ok, false);
+    assert.strictEqual(noSmtp.emailConfigured, false);
+    assert.match(noSmtp.error || "", /smtp|email/i);
+  }
+}
+
 assertOnboardValidation()
+  .then(() => assertSubmitPluginValidation())
   .then(() => {
     console.log("cloudtakMarketplace tests passed");
   })

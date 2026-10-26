@@ -1188,7 +1188,12 @@ app.get(
   "/cloudtak-marketplace",
   requireGlobalAdminRole,
   requireCloudtakMarketplaceEnabled,
-  (req, res) => res.render("cloudtak-marketplace")
+  (req, res) => {
+    const emailCfg = emailSvc.getSmtpConfig();
+    return res.render("cloudtak-marketplace", {
+      emailConfigured: !!(emailSvc.isEmailEnabled() && emailCfg.host && emailCfg.from),
+    });
+  }
 );
 
 // Beta: Getting Started (global admins only, beta mode)

@@ -4523,6 +4523,84 @@ async function sendTestEmail() {
   return { sent: true };
 }
 
+const PLUGIN_SUBMIT_TO = "justin@valleytactical.io";
+
+function isEmailConfigured() {
+  const cfg = emailSvc.getSmtpConfig();
+  return !!(emailSvc.isEmailEnabled() && cfg.host && cfg.from);
+}
+
+function emailNotConfiguredMessage() {
+  return "Email/SMTP is not configured. Enable Email under Settings → Email and set SMTP host and From address before submitting a plugin.";
+}
+
+function escapeHtml(value) {
+  return String(value || "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]
+  );
+}
+
+/**
+ * Email a marketplace plugin submission request to Valley Tactical.
+ * @param {{ requestorName: string, repoUrl: string, comments?: string, submittedBy?: string }} opts
+ */
+async function submitPluginRequest(opts) {
+  const requestorName = String((opts && opts.requestorName) || "").trim();
+  const repoUrl = String((opts && opts.repoUrl) || "").trim();
+  const comments = String((opts && opts.comments) || "").trim();
+  const submittedBy = String((opts && opts.submittedBy) || "").trim();
+
+  if (!requestorName) {
+    return { ok: false, error: "Requestor Name is required." };
+  }
+  if (!repoUrl) {
+    return { ok: false, error: "GitHub Repo URL is required." };
+  }
+  if (!parseGitHubRepo(repoUrl)) {
+    return { ok: false, error: "Enter a valid GitHub repository URL (e.g. https://github.com/org/repo)." };
+  }
+  if (!isEmailConfigured()) {
+    return { ok: false, error: emailNotConfiguredMessage(), emailConfigured: false };
+  }
+
+  const lines = [
+    "CloudTAK Plugin Marketplace — plugin submission request",
+    "",
+    `Requestor Name: ${requestorName}`,
+    `GitHub Repo URL: ${repoUrl}`,
+    `Submitted By (portal user): ${submittedBy || "(unknown)"}`,
+    `Additional Comments: ${comments || "(none)"}`,
+  ];
+  const text = lines.join("\n");
+  const html = [
+    "<p><strong>CloudTAK Plugin Marketplace — plugin submission request</strong></p>",
+    "<ul>",
+    `<li><strong>Requestor Name:</strong> ${escapeHtml(requestorName)}</li>`,
+    `<li><strong>GitHub Repo URL:</strong> <a href="${escapeHtml(repoUrl)}">${escapeHtml(repoUrl)}</a></li>`,
+    `<li><strong>Submitted By (portal user):</strong> ${escapeHtml(submittedBy || "(unknown)")}</li>`,
+    `<li><strong>Additional Comments:</strong> ${comments ? escapeHtml(comments).replace(/\n/g, "<br>") : "(none)"}</li>`,
+    "</ul>",
+  ].join("\n");
+
+  const result = await emailSvc.sendMail({
+    to: PLUGIN_SUBMIT_TO,
+    subject: `CloudTAK Marketplace plugin submission: ${requestorName}`,
+    text,
+    html,
+  });
+  if (result.skipped) {
+    return { ok: false, error: emailNotConfiguredMessage(), emailConfigured: false };
+  }
+  if (!result.sent) {
+    return {
+      ok: false,
+      error: result.error || "Failed to send email. Check SMTP settings and server logs.",
+      emailConfigured: true,
+    };
+  }
+  return { ok: true, sent: true, emailConfigured: true };
+}
+
 async function workerTick() {
   if (!isEnabled()) return;
   try {
@@ -4628,6 +4706,10 @@ module.exports = {
   workerTick,
   workerBackground,
   sendTestEmail,
+  isEmailConfigured,
+  emailNotConfiguredMessage,
+  submitPluginRequest,
+  PLUGIN_SUBMIT_TO,
   maybeNotify,
   rememberSeenCatalog,
   notifyRecipients,
