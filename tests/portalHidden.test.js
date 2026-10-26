@@ -19,6 +19,22 @@ assert.strictEqual(
   portalHidden.isUserHidden({ username: "normal.user", attributes: {} }),
   false
 );
+assert.ok(
+  portalHidden.BUILTIN_USER_HIDDEN_PREFIXES.includes("ak-outpost"),
+  "ak-outpost must stay in built-in hide prefixes"
+);
+assert.ok(
+  portalHidden.hiddenUserPrefixes().includes("ak-outpost"),
+  "hiddenUserPrefixes must always include ak-outpost"
+);
+assert.strictEqual(
+  portalHidden.isUserHidden({ username: "ak-outpost-proxy-abc", attributes: {} }),
+  true
+);
+assert.strictEqual(
+  portalHidden.isUserHidden({ username: "AK-Outpost-Service", attributes: {} }),
+  true
+);
 assert.strictEqual(
   portalHidden.isUserHidden({
     username: "nodered-global-x",

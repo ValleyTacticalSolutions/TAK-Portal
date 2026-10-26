@@ -7,6 +7,10 @@ const { extractUserColumns, extractGroupColumns, membershipHash } = require("./u
 const agenciesStore = require("./agencies.service");
 const accessSvc = require("./access.service");
 const { parseAuthentikLastLogin } = require("./userLoginStatus.service");
+const {
+  usernameMatchesHiddenPrefix,
+  markHiddenAttributes,
+} = require("./portalHidden.util");
 
 let _snapshotRunning = false;
 let _backupPause = 0;
@@ -281,7 +285,15 @@ async function upsertAuthentikUser(akUser, pending, groupUuidByPk) {
   if (pending.byPk.has(String(pk)) || pending.byUsername.has(username.toLowerCase())) {
     return;
   }
-  const attrs = akUser.attributes || {};
+  // Keep built-in hide prefixes (e.g. ak-outpost*) stamped locally so inbound
+  // sync cannot resurface them after USERS_HIDDEN_PREFIXES was cleared.
+  let attrs =
+    akUser.attributes && typeof akUser.attributes === "object"
+      ? { ...akUser.attributes }
+      : {};
+  if (usernameMatchesHiddenPrefix(username)) {
+    attrs = markHiddenAttributes(attrs);
+  }
   const cols = extractUserColumns(attrs, akUser);
   const hasGroupsField = Array.isArray(akUser.groups);
   const groupPks = hasGroupsField ? akUser.groups.map(String) : [];

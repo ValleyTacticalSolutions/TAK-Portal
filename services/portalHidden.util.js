@@ -3,6 +3,13 @@ const { getString } = require("./env");
 const ATTR_KEY = "tak_portal_hidden";
 const MUTUAL_AID_GROUP_PREFIX = "ma -";
 
+/**
+ * Always-on username prefixes hidden from Users page / dashboard counts,
+ * even after USERS_HIDDEN_PREFIXES is cleared by the one-time migration.
+ * Authentik outpost service accounts use ak-outpost*.
+ */
+const BUILTIN_USER_HIDDEN_PREFIXES = ["ak-outpost"];
+
 function isTruthyHiddenAttr(value) {
   if (value === true) return true;
   const s = String(value == null ? "" : value)
@@ -24,8 +31,21 @@ function parsePrefixList(raw) {
     .filter(Boolean);
 }
 
+function normalizePrefixList(list) {
+  return [
+    ...new Set(
+      (Array.isArray(list) ? list : [])
+        .map((p) => String(p || "").trim().toLowerCase())
+        .filter(Boolean)
+    ),
+  ];
+}
+
 function hiddenUserPrefixes() {
-  return parsePrefixList(getString("USERS_HIDDEN_PREFIXES", ""));
+  return normalizePrefixList([
+    ...BUILTIN_USER_HIDDEN_PREFIXES,
+    ...parsePrefixList(getString("USERS_HIDDEN_PREFIXES", "")),
+  ]);
 }
 
 function hiddenGroupPrefixes({ includeMutualAid = false } = {}) {
@@ -121,6 +141,7 @@ function isGroupHidden(groupOrName, opts = {}) {
 module.exports = {
   ATTR_KEY,
   MUTUAL_AID_GROUP_PREFIX,
+  BUILTIN_USER_HIDDEN_PREFIXES,
   isTruthyHiddenAttr,
   markHiddenAttributes,
   hiddenUserPrefixes,

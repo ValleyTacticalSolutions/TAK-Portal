@@ -29,8 +29,8 @@ function userPathClause(params) {
 }
 
 /**
- * Exclude portal-hidden users (typed column) plus legacy prefix fallback while
- * USERS_HIDDEN_PREFIXES is still non-empty during migration.
+ * Exclude portal-hidden users (typed column) plus username prefix fallback
+ * (built-in prefixes like ak-outpost, plus USERS_HIDDEN_PREFIXES when set).
  * @param {any[]} params
  * @param {boolean} includeHiddenPrefixes
  * @param {string} [tableAlias] optional alias (e.g. "u") for joined queries
