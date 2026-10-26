@@ -9,7 +9,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
-### v2.0.19 - TBD
+### v2.0.19 - 10/25/26
 ✨ `Enhancement` - CloudTAK Marketplace no longer installs a host `NOPASSWD: ALL` sudoers drop-in; uses a fixed-verb `/usr/local/libexec/tak-portal/marketplace-helper`, removes leftover `tak-portal-marketplace` sudoers on update/handshake, and stops mounting `/etc/sudoers.d` into elevate containers (#68)<br>
 ✨ `Enhancement` - CloudTAK Marketplace: when SSH user is `takwerx` (infra-TAK), auto-deploy `marketplace-helper` before stripping leftover broad sudoers, and prefer `/opt/infratak/.shims` on PATH so docker works without a Portal SSH handshake<br>
 🐛 `Bug Fix` - Fixes issue with CloudTAK Plugin Marketplace causing errors with package-lock.json<br>
