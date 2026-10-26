@@ -1305,7 +1305,227 @@ function rewriteComposeDepends(text, externalNames, project) {
   return { text: withUrls, notes };
 }
 
-function fixComposeDependsFile(overlayPath, basePaths, project) {
+/**
+ * Parse a compose ports/expose list entry into host/container parts.
+ * Supports 5010, "5010:5010", "127.0.0.1:5010:5010", '5010'.
+ */
+function parseComposePortEntry(raw) {
+  const value = String(raw == null ? "" : raw)
+    .replace(/^['"]|['"]$/g, "")
+    .trim();
+  if (!value) return null;
+  const parts = value.split(":");
+  if (parts.length === 1 && /^\d+$/.test(parts[0])) {
+    return { hostIp: "", hostPort: parts[0], containerPort: parts[0], raw: value };
+  }
+  if (parts.length === 2 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1])) {
+    return { hostIp: "", hostPort: parts[0], containerPort: parts[1], raw: value };
+  }
+  if (parts.length === 3 && /^\d+$/.test(parts[1]) && /^\d+$/.test(parts[2])) {
+    return { hostIp: parts[0], hostPort: parts[1], containerPort: parts[2], raw: value };
+  }
+  return null;
+}
+
+function collectYamlScalarList(lines, keyIndex, keyIndent) {
+  const items = [];
+  const keyLine = lines[keyIndex] || "";
+  const inline = keyLine.match(/^([ \t]*[A-Za-z0-9._-]+:)[ \t]*(.*)$/);
+  const rest = inline ? String(inline[2] || "").replace(/\s+#.*$/, "").trim() : "";
+  if (rest && rest !== "|" && rest !== ">") {
+    if (rest.startsWith("[") && rest.endsWith("]")) {
+      rest
+        .slice(1, -1)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .forEach((value, idx) => items.push({ index: keyIndex, inline: true, pos: idx, value }));
+    }
+    return items;
+  }
+  for (let i = keyIndex + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+    if (indentOf(line) <= keyIndent) break;
+    const item = line.match(/^([ \t]*)-\s+(.*)$/);
+    if (!item || item[1].length <= keyIndent) break;
+    items.push({
+      index: i,
+      inline: false,
+      value: String(item[2] || "").replace(/\s+#.*$/, "").trim(),
+      indent: item[1],
+    });
+  }
+  return items;
+}
+
+/**
+ * Host/systemd Caddy cannot resolve compose DNS names. Publish each exposed
+ * (or unbound-published) container port on 127.0.0.1 so reverse_proxy can use it.
+ */
+function ensureLoopbackPublish(text) {
+  const raw = String(text == null ? "" : text);
+  const trailingNl = raw.endsWith("\n");
+  const lines = raw.split(/\r?\n/);
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  const notes = [];
+
+  let servicesAt = -1;
+  let servicesIndent = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = lines[i].match(/^([ \t]*)services:\s*(?:#.*)?$/);
+    if (m) {
+      servicesAt = i;
+      servicesIndent = m[1].length;
+      break;
+    }
+  }
+  if (servicesAt < 0) return { text: raw, notes };
+
+  let serviceIndent = null;
+  for (let i = servicesAt + 1; i < lines.length; i += 1) {
+    if (!lines[i].trim() || lines[i].trim().startsWith("#")) continue;
+    if (indentOf(lines[i]) <= servicesIndent) break;
+    const m = lines[i].match(/^([ \t]+)([A-Za-z0-9._-]+):\s*(?:#.*)?$/);
+    if (m) {
+      serviceIndent = m[1].length;
+      break;
+    }
+  }
+  if (serviceIndent == null) return { text: raw, notes };
+
+  const out = lines.slice(0, servicesAt + 1);
+  let i = servicesAt + 1;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    if (indentOf(line) <= servicesIndent && !line.trim().startsWith("#")) {
+      while (i < lines.length) {
+        out.push(lines[i]);
+        i += 1;
+      }
+      break;
+    }
+    const hdr = line.match(/^([ \t]+)([A-Za-z0-9._-]+):\s*(.*)$/);
+    if (!hdr || hdr[1].length !== serviceIndent) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    const svcName = hdr[2];
+    const svcLines = [line];
+    let j = i + 1;
+    while (j < lines.length) {
+      const nxt = lines[j];
+      if (!nxt.trim()) {
+        svcLines.push(nxt);
+        j += 1;
+        continue;
+      }
+      if (indentOf(nxt) <= serviceIndent) break;
+      svcLines.push(nxt);
+      j += 1;
+    }
+    out.push(...patchServiceLoopbackPublish(svcLines, serviceIndent, svcName, notes));
+    i = j;
+  }
+
+  let joined = out.join("\n");
+  if (trailingNl) joined += "\n";
+  return { text: joined, notes };
+}
+
+function patchServiceLoopbackPublish(svcLines, serviceIndent, svcName, notes) {
+  let bodyIndent = null;
+  for (let i = 1; i < svcLines.length; i += 1) {
+    if (!svcLines[i].trim() || svcLines[i].trim().startsWith("#")) continue;
+    const m = svcLines[i].match(/^([ \t]+)([A-Za-z0-9._-]+):\s*(.*)$/);
+    if (m && m[1].length > serviceIndent) {
+      bodyIndent = m[1].length;
+      break;
+    }
+  }
+  if (bodyIndent == null) bodyIndent = serviceIndent + 2;
+  const listIndent = " ".repeat(bodyIndent + 2);
+
+  let exposeAt = -1;
+  let portsAt = -1;
+  for (let i = 1; i < svcLines.length; i += 1) {
+    const m = svcLines[i].match(/^([ \t]+)([A-Za-z0-9._-]+):\s*(.*)$/);
+    if (!m || m[1].length !== bodyIndent) continue;
+    if (m[2] === "expose") exposeAt = i;
+    if (m[2] === "ports") portsAt = i;
+  }
+
+  const containerPorts = new Set();
+  if (exposeAt >= 0) {
+    for (const item of collectYamlScalarList(svcLines, exposeAt, bodyIndent)) {
+      const parsed = parseComposePortEntry(item.value);
+      if (parsed && parsed.containerPort) containerPorts.add(parsed.containerPort);
+    }
+  }
+
+  const portItems = portsAt >= 0 ? collectYamlScalarList(svcLines, portsAt, bodyIndent) : [];
+  const loopbackFor = new Set();
+  const rewritten = new Map();
+  for (const item of portItems) {
+    const parsed = parseComposePortEntry(item.value);
+    if (!parsed || !parsed.containerPort) continue;
+    containerPorts.add(parsed.containerPort);
+    if (parsed.hostIp === "127.0.0.1") {
+      loopbackFor.add(parsed.containerPort);
+      continue;
+    }
+    if (!parsed.hostIp || parsed.hostIp === "0.0.0.0") {
+      rewritten.set(item.index, {
+        indent: item.indent || listIndent,
+        value: `127.0.0.1:${parsed.hostPort || parsed.containerPort}:${parsed.containerPort}`,
+        containerPort: parsed.containerPort,
+      });
+    }
+  }
+
+  const out = svcLines.slice();
+  for (const [index, next] of rewritten.entries()) {
+    out[index] = `${next.indent}- "${next.value}"`;
+    loopbackFor.add(next.containerPort);
+    notes.push(`${svcName}: ports ${next.containerPort} -> 127.0.0.1 (loopback)`);
+  }
+
+  const missing = [...containerPorts].filter((p) => !loopbackFor.has(p)).sort((a, b) => Number(a) - Number(b));
+  if (!missing.length) return out;
+
+  if (portsAt < 0) {
+    const insertAt = exposeAt >= 0 ? exposeAt : 1;
+    const block = [`${" ".repeat(bodyIndent)}ports:`].concat(
+      missing.map((port) => `${listIndent}- "127.0.0.1:${port}:${port}"`)
+    );
+    out.splice(insertAt, 0, ...block);
+    missing.forEach((port) => notes.push(`${svcName}: publish 127.0.0.1:${port}:${port}`));
+    return out;
+  }
+
+  let insertAt = portsAt + 1;
+  while (insertAt < out.length) {
+    const line = out[insertAt];
+    if (!line.trim()) break;
+    if (indentOf(line) <= bodyIndent) break;
+    insertAt += 1;
+  }
+  out.splice(
+    insertAt,
+    0,
+    ...missing.map((port) => `${listIndent}- "127.0.0.1:${port}:${port}"`)
+  );
+  missing.forEach((port) => notes.push(`${svcName}: publish 127.0.0.1:${port}:${port}`));
+  return out;
+}
+
+function fixComposeDependsFile(overlayPath, basePaths, project, options = {}) {
   const overlay = fs.readFileSync(overlayPath, "utf8");
   const known = [];
   for (const p of basePaths || []) {
@@ -1313,9 +1533,20 @@ function fixComposeDependsFile(overlayPath, basePaths, project) {
       if (p && fs.existsSync(p)) known.push(...composeServiceNames(fs.readFileSync(p, "utf8")));
     } catch (_) {}
   }
-  const result = rewriteComposeDepends(overlay, known, project);
+  let result = rewriteComposeDepends(overlay, known, project);
+  if (options && options.loopbackPublish) {
+    const loop = ensureLoopbackPublish(result.text);
+    result = { text: loop.text, notes: (result.notes || []).concat(loop.notes || []) };
+  }
   if (result.text === overlay) return result;
   fs.writeFileSync(overlayPath, result.text);
+  return result;
+}
+
+function ensureLoopbackPublishFile(overlayPath) {
+  const overlay = fs.readFileSync(overlayPath, "utf8");
+  const result = ensureLoopbackPublish(overlay);
+  if (result.text !== overlay) fs.writeFileSync(overlayPath, result.text);
   return result;
 }
 
@@ -1417,14 +1648,32 @@ function alignInstalledPlugins(ctRoot) {
 }
 
 function main() {
+  if (process.argv[2] === "--ensure-loopback-publish") {
+    const overlayPath = process.argv[3];
+    if (!overlayPath) {
+      console.error("overlay path required");
+      process.exit(1);
+    }
+    const result = ensureLoopbackPublishFile(overlayPath);
+    if (result.notes && result.notes.length) {
+      console.log("Published plugin ports on 127.0.0.1 for host Caddy");
+      result.notes.forEach((line) => console.log("  " + line));
+    }
+    return;
+  }
   if (process.argv[2] === "--fix-compose-depends") {
     const args = process.argv.slice(3);
     const paths = [];
     let project = "";
+    let loopbackPublish = false;
     for (let i = 0; i < args.length; i += 1) {
       if (args[i] === "--project") {
         project = args[i + 1] || "";
         i += 1;
+        continue;
+      }
+      if (args[i] === "--loopback-publish") {
+        loopbackPublish = true;
         continue;
       }
       paths.push(args[i]);
@@ -1434,9 +1683,13 @@ function main() {
       console.error("overlay path required");
       process.exit(1);
     }
-    const result = fixComposeDependsFile(overlayPath, paths.slice(1), project);
+    const result = fixComposeDependsFile(overlayPath, paths.slice(1), project, { loopbackPublish });
     if (result.text && result.notes && result.notes.length) {
-      console.log("Adjusted plugin compose service refs to this CloudTAK stack");
+      console.log(
+        loopbackPublish
+          ? "Adjusted plugin compose service refs / host-Caddy loopback publish"
+          : "Adjusted plugin compose service refs to this CloudTAK stack"
+      );
       result.notes.forEach((line) => console.log("  " + line));
     }
     return;
@@ -1477,5 +1730,7 @@ module.exports = {
   relaxMarketplaceServerRoutes,
   composeServiceNames,
   rewriteComposeDepends,
+  ensureLoopbackPublish,
+  ensureLoopbackPublishFile,
   fixComposeDependsFile,
 };

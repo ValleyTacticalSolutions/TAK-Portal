@@ -9,11 +9,15 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.20 - TBD
+🐛 `Bug Fix` - CloudTAK Marketplace: for host/systemd Caddy, publish Print on `127.0.0.1:5010` and Deploy To Caddy uses loopback upstreams (existing `(cloudtak_print)` blocks still not overwritten) (#69)
+
 ### v2.0.19 - 10/25/26
 ✨ `Enhancement` - CloudTAK Marketplace no longer installs a host `NOPASSWD: ALL` sudoers drop-in; uses a fixed-verb `/usr/local/libexec/tak-portal/marketplace-helper`, removes leftover `tak-portal-marketplace` sudoers on update/handshake, and stops mounting `/etc/sudoers.d` into elevate containers (#68)<br>
 ✨ `Enhancement` - CloudTAK Marketplace: when SSH user is `takwerx` (infra-TAK), auto-deploy `marketplace-helper` before stripping leftover broad sudoers, and prefer `/opt/infratak/.shims` on PATH so docker works without a Portal SSH handshake<br>
 🐛 `Bug Fix` - Fixes issue with CloudTAK Plugin Marketplace causing errors with package-lock.json<br>
 🐛 `Bug Fix` - CloudTAK Marketplace: hide HelloWorld/uDash while their GitHub repos 404; unhide Replay; rewrite Print `API_INTERNAL_URL`/`TILES_INTERNAL_URL` to stock compose service names; clearer "plugin repository not found" on clone failure (#69)<br>
+
 ⬆️ `Dependency Update` - Body-Parser 2.4.0
 
 ### v2.0.18 - 10/22/26

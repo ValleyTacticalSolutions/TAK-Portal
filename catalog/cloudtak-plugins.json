@@ -73,13 +73,13 @@
       "additionalActions": [
         {
           "title": "Route /print-api through Caddy",
-          "text": "The print Docker service is started by Marketplace. Browsers still need Caddy (or equivalent) to reach /print-api. Deploy To Caddy also joins the Caddy container to CloudTAK's Docker network (detected at runtime) so reverse_proxy cloudtak-print works.",
+          "text": "The print Docker service is started by Marketplace. Browsers still need Caddy (or equivalent) to reach /print-api. Deploy To Caddy joins a Docker Caddy container to CloudTAK's network so reverse_proxy cloudtak-print works; for host/systemd Caddy it publishes 127.0.0.1:5010 and points the snippet at loopback instead. An existing (cloudtak_print) block is left alone.",
           "instructions": [
             "Marketplace starts the print Docker service. Do not paste the compose block by hand.",
-            "Use Deploy To Caddy when available — it pastes the snippet, reloads Caddy, and connects Caddy to whichever Docker network CloudTAK is already on (no hardcoded network name).",
-            "Or paste the snippet below at the TOP LEVEL of your Caddyfile, outside every site block.",
+            "Use Deploy To Caddy when available — it pastes the snippet, reloads Caddy, and (for Docker Caddy) connects Caddy to whichever Docker network CloudTAK is already on. For host/systemd Caddy it uses reverse_proxy 127.0.0.1:5010.",
+            "Or paste the snippet below at the TOP LEVEL of your Caddyfile, outside every site block. On host Caddy, change cloudtak-print:5010 to 127.0.0.1:5010.",
             "Inside the site block that already has reverse_proxy cloudtak-api:5000, add: import cloudtak_print",
-            "Reload Caddy: docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile",
+            "Reload Caddy: docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile (or systemctl reload caddy on the host).",
             "Check both https://YOURHOST/print-api/health and https://YOURHOST/print-api. The second must return application/json, not HTML."
           ],
           "snippet": "(cloudtak_print) {\n\t@cloudtak_print path /print-api /print-api/*\n\thandle @cloudtak_print {\n\t\treverse_proxy cloudtak-print:5010\n\t}\n}"

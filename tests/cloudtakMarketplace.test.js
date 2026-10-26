@@ -445,6 +445,8 @@ assert.doesNotMatch(printScript, /cloudtak_default/);
 assert.match(printScript, /\.ctak-runtime-plugin\.sh[\s\S]*resolve_docker_bin[\s\S]*fix_overlay_depends/);
 assert.match(printScript, /fix_overlay_depends[\s\S]*docker_cli run --rm -u 0/);
 assert.match(printScript, /fix_overlay_depends[\s\S]*elevate_run "command -v node/);
+assert.match(printScript, /host_caddy_needs_loopback/);
+assert.match(printScript, /--loopback-publish/);
 assert.match(printScript, /plugin repository not found or not accessible/);
 assert.match(printScript, /GIT_TERMINAL_PROMPT=0 git_ok clone/);
 
@@ -510,6 +512,22 @@ assert.strictEqual(caddy.applyCaddySnippets(withPrint.text, [printSnippet]).chan
   assert.match(keepHost.text, /reverse_proxy 127\.0\.0\.1:5010/);
   assert.doesNotMatch(keepHost.text, /reverse_proxy cloudtak-print:5010/);
   assert.ok(caddy.appliedKeys([print], hostPrint).length > 0);
+
+  // Fresh host/systemd Deploy To Caddy rewrites catalog DNS → loopback.
+  assert.deepStrictEqual(caddy.snippetsForCaddyVia([printSnippet], "docker"), [printSnippet]);
+  const hostSnips = caddy.snippetsForCaddyVia([printSnippet], "systemd");
+  assert.strictEqual(hostSnips.length, 1);
+  assert.match(hostSnips[0], /reverse_proxy 127\.0\.0\.1:5010/);
+  assert.doesNotMatch(hostSnips[0], /cloudtak-print/);
+  assert.deepStrictEqual(caddy.containerUpstreamsFromSnippets(hostSnips), []);
+  const fileSnips = caddy.snippetsForCaddyVia([printSnippet], "file");
+  assert.match(fileSnips[0], /reverse_proxy 127\.0\.0\.1:5010/);
+  const freshHost = caddy.applyCaddySnippets(caddyFile, hostSnips);
+  assert.strictEqual(freshHost.ok, true);
+  assert.match(freshHost.text, /reverse_proxy 127\.0\.0\.1:5010/);
+  assert.doesNotMatch(freshHost.text, /reverse_proxy cloudtak-print:5010/);
+  // Re-deploy with loopback snippet must still leave an existing infra-TAK block alone.
+  assert.strictEqual(caddy.applyCaddySnippets(hostPrint, hostSnips).changed, false);
 }
 assert.strictEqual(caddy.applyCaddySnippets("a.example.com {\n\treverse_proxy other:1\n}\n\nb.example.com {\n\treverse_proxy other:2\n}\n", [udashSnippet]).ok, false);
 const hostFile = [
@@ -1023,6 +1041,32 @@ assert.deepStrictEqual(fixedAgain.notes, []);
 const stackFolder = align.rewriteComposeDepends(overlay, baseServices, "tak-stack");
 assert.match(stackFolder.text, /API_INTERNAL_URL=http:\/\/api:5000/);
 assert.match(stackFolder.text, /-\s+api/);
+
+// Host/systemd Caddy: Print-style expose-only overlay gets 127.0.0.1 publish.
+const printExpose = [
+  "services:",
+  "  cloudtak-print:",
+  "    image: print",
+  "    expose:",
+  '      - "5010"',
+  "    environment:",
+  "      - API_INTERNAL_URL=http://api:5000",
+].join("\n") + "\n";
+const looped = align.ensureLoopbackPublish(printExpose);
+assert.match(looped.text, /ports:\n\s+- "127\.0\.0\.1:5010:5010"/);
+assert.ok(looped.notes.some((n) => /127\.0\.0\.1:5010:5010/.test(n)));
+assert.strictEqual(align.ensureLoopbackPublish(looped.text).text, looped.text);
+const unbound = align.ensureLoopbackPublish(
+  [
+    "services:",
+    "  cloudtak-print:",
+    "    image: print",
+    "    ports:",
+    '      - "5010:5010"',
+  ].join("\n") + "\n"
+);
+assert.match(unbound.text, /- "127\.0\.0\.1:5010:5010"/);
+assert.doesNotMatch(unbound.text, /- "5010:5010"/);
 
 const inline = align.rewriteComposeDepends(
   "services:\n  sidecar:\n    depends_on: [cloudtak-api, cloudtak-missing]\n",

@@ -1537,11 +1537,13 @@ async function deployPluginCaddy(pluginId) {
   if (!probe.hostPath || !probe.file) {
     return { ok: false, message: "Caddy is running, but its Caddyfile was not found on the host." };
   }
-  const edited = caddyMod.applyCaddySnippets(
-    probe.file,
+  // Host/systemd Caddy: use 127.0.0.1 upstreams (compose DNS names do not resolve on the host).
+  const snippets = caddyMod.snippetsForCaddyVia(
     actions.map((action) => action.snippet),
-    { host: cloudtakPublicHost() }
+    probe.via
   );
+  const viaActions = actions.map((action, i) => ({ ...action, snippet: snippets[i] }));
+  const edited = caddyMod.applyCaddySnippets(probe.file, snippets, { host: cloudtakPublicHost() });
   const appliedNow = caddyMod.appliedKeys(catalog.plugins, edited.ok ? edited.text : probe.file, { host: cloudtakPublicHost() });
   if (!edited.ok) {
     saveCaddyCache({ ...probe, applied: caddyMod.appliedKeys(catalog.plugins, probe.file, { host: cloudtakPublicHost() }) });
@@ -1567,7 +1569,7 @@ async function deployPluginCaddy(pluginId) {
     }
     caddyChanged = true;
   }
-  const network = await ensureCaddySharesCloudtakNetwork(probe, actions);
+  const network = await ensureCaddySharesCloudtakNetwork(probe, viaActions);
   saveCaddyCache({ ...probe, applied: appliedNow });
   refreshUiSnapshot();
   if (!network.ok) {
@@ -2943,21 +2945,47 @@ function pluginRuntimeExtrasBash() {
     "  fi",
     "  return 0",
     "}",
+    // Host/systemd Caddy (no Caddy container): publish plugin ports on 127.0.0.1.
+    "host_caddy_needs_loopback() {",
+    '  local runtime="" id name image',
+    '  if command -v docker >/dev/null 2>&1; then runtime=docker',
+    '  elif command -v podman >/dev/null 2>&1; then runtime=podman',
+    "  fi",
+    '  if [ -n "$runtime" ]; then',
+    "    run_hc() {",
+    '      if "$runtime" "$@"; then return 0; fi',
+    '      if "${CTAK_PRIV:-sudo}" -n "$runtime" "$@" 2>/dev/null; then return 0; fi',
+    "      return 1",
+    "    }",
+    '    for id in $(run_hc ps -q 2>/dev/null || true); do',
+    '      [ -n "$id" ] || continue',
+    '      name=$(run_hc inspect -f \'{{.Name}}\' "$id" 2>/dev/null | sed \'s#^/##\' || true)',
+    '      image=$(run_hc inspect -f \'{{.Config.Image}}\' "$id" 2>/dev/null || true)',
+    '      if printf \'%s %s\' "$name" "$image" | grep -qi caddy; then return 1; fi',
+    "    done",
+    "  fi",
+    '  if systemctl is-active --quiet caddy 2>/dev/null; then return 0; fi',
+    "  return 1",
+    "}",
     "fix_overlay_depends() {",
     '  [ -f "$OVERRIDE" ] || return 0',
     '  local script="/tmp/ctak-marketplace-align.cjs"',
     '  [ -f "$script" ] || return 0',
     '  local base="$STACK/$CF"',
-    '  local proj',
+    '  local proj loopback_flag=""',
     '  proj=$(basename "$STACK")',
+    '  if host_caddy_needs_loopback; then',
+    '    loopback_flag="--loopback-publish"',
+    '    echo "Host Caddy (no container); will publish plugin ports on 127.0.0.1"',
+    "  fi",
     '  echo "Checking plugin compose dependencies against the CloudTAK stack"',
     '  if command -v node >/dev/null 2>&1; then',
-    '    if node "$script" --fix-compose-depends "$OVERRIDE" "$base" --project "$proj"; then return 0; fi',
+    '    if node "$script" --fix-compose-depends "$OVERRIDE" "$base" --project "$proj" $loopback_flag; then return 0; fi',
     '    echo "WARNING: host node could not rewrite plugin depends_on; trying elevate/docker" >&2',
     "  fi",
     // Host may lack node while privileged/root still has it (same pattern as align_plugins_to_host).
     '  if declare -F elevate_run >/dev/null 2>&1; then',
-    '    if elevate_run "command -v node >/dev/null 2>&1 && node $(printf \'%q\' "$script") --fix-compose-depends $(printf \'%q\' "$OVERRIDE") $(printf \'%q\' "$base") --project $(printf \'%q\' "$proj")"; then',
+    '    if elevate_run "command -v node >/dev/null 2>&1 && node $(printf \'%q\' "$script") --fix-compose-depends $(printf \'%q\' "$OVERRIDE") $(printf \'%q\' "$base") --project $(printf \'%q\' "$proj") ${loopback_flag}"; then',
     "      return 0",
     "    fi",
     "  fi",
@@ -2972,7 +3000,7 @@ function pluginRuntimeExtrasBash() {
     '      -v "$tmp_ov:/overlay.yml" \\',
     '      -v "$tmp_base:/base.yml:ro" \\',
     "      node:22-alpine \\",
-    '      node /align.cjs --fix-compose-depends /overlay.yml /base.yml --project "$proj"; then',
+    '      node /align.cjs --fix-compose-depends /overlay.yml /base.yml --project "$proj" $loopback_flag; then',
     '      cp "$tmp_ov" "$OVERRIDE"',
     '      rm -f "$tmp_ov" "$tmp_base"',
     "      return 0",
@@ -2989,7 +3017,7 @@ function pluginRuntimeExtrasBash() {
     '      -v "$tmp_ov:/overlay.yml" \\',
     '      -v "$tmp_base:/base.yml:ro" \\',
     "      node:22-alpine \\",
-    '      node /align.cjs --fix-compose-depends /overlay.yml /base.yml --project "$proj"; then',
+    '      node /align.cjs --fix-compose-depends /overlay.yml /base.yml --project "$proj" $loopback_flag; then',
     '      cp "$tmp_ov" "$OVERRIDE"',
     '      rm -f "$tmp_ov" "$tmp_base"',
     "      return 0",

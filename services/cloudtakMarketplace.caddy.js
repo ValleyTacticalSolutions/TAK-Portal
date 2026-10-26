@@ -605,6 +605,30 @@ function containerUpstreamsFromSnippets(snippets) {
 }
 
 /**
+ * Host/systemd (or bare-file) Caddy cannot resolve compose service DNS names.
+ * Rewrite reverse_proxy cloudtak-print:5010 → reverse_proxy 127.0.0.1:5010.
+ * Docker Caddy keeps catalog snippets unchanged. Existing named snippets are
+ * still preserved by placeNamedSnippet (infra-TAK loopback blocks stay put).
+ */
+function rewriteSnippetUpstreamToLoopback(snippet) {
+  return String(snippet || "").replace(
+    /(^|\n)([ \t]*reverse_proxy[ \t]+)([A-Za-z0-9][A-Za-z0-9_-]*)(:\d+)\b/g,
+    (match, lead, prefix, host, port) => {
+      if (host === "localhost") return match;
+      if (host.includes(".")) return match;
+      return `${lead}${prefix}127.0.0.1${port}`;
+    }
+  );
+}
+
+function snippetsForCaddyVia(snippets, via) {
+  const mode = String(via || "").trim().toLowerCase();
+  const list = (Array.isArray(snippets) ? snippets : []).map((s) => String(s || ""));
+  if (mode !== "systemd" && mode !== "file") return list;
+  return list.map(rewriteSnippetUpstreamToLoopback);
+}
+
+/**
  * Connect the Caddy container to whatever Docker network CloudTAK (or a
  * plugin upstream) already uses. No hardcoded network names — project names
  * differ across installs (cloudtak_default, tak-stack_default, …).
@@ -763,6 +787,8 @@ module.exports = {
   discoverScript,
   applyScript,
   containerUpstreamsFromSnippets,
+  rewriteSnippetUpstreamToLoopback,
+  snippetsForCaddyVia,
   ensureSharedNetworkScript,
   parseNetworkResult,
 };
