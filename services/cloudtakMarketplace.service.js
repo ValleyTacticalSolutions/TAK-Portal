@@ -1087,7 +1087,9 @@ reclaim_cloudtak_plugin_paths() {
   fi
   # Include cloudtak-marketplace-plugins (runtime persist) and plugin compose overlays —
   # prior root SSH installs leave those root-owned and break takwerx rm/cp.
-  if ! elevate_run "mkdir -p '$CT/app/plugins' '$CT/api/web/plugins' '$CT/app/src/plugins' '$CT/api/web/src/plugins' '$CT/api/stateless/routes' '$CT/cloudtak-marketplace-plugins' '$HOME/.cache/cloudtak-marketplace' && chown -R '$me:$grp' '$CT/app/plugins' '$CT/api/web/plugins' '$CT/app/src/plugins' '$CT/api/web/src/plugins' '$CT/api/stateless/routes' '$CT/cloudtak-marketplace-plugins' '$HOME/.cache/cloudtak-marketplace' && chmod -R u+rwX '$CT/app/plugins' '$CT/api/web/plugins' '$CT/app/src/plugins' '$CT/api/web/src/plugins' '$CT/api/stateless/routes' '$CT/cloudtak-marketplace-plugins' '$HOME/.cache/cloudtak-marketplace' && { chown '$me:$grp' '$CT'/docker-compose.plugin-*.yml '$CT'/docker-compose.marketplace.yml 2>/dev/null || true; }"; then
+  # Also reclaim api/*/lib + api/test — Replay install.sh copies server files there
+  # (routes alone is not enough; Permission denied on replay-player.ts is common).
+  if ! elevate_run "mkdir -p '$CT/app/plugins' '$CT/api/web/plugins' '$CT/app/src/plugins' '$CT/api/web/src/plugins' '$CT/api/stateless/routes' '$CT/api/stateless/lib' '$CT/api/stateful/lib' '$CT/api/test' '$CT/cloudtak-marketplace-plugins' '$HOME/.cache/cloudtak-marketplace' && chown -R '$me:$grp' '$CT/app/plugins' '$CT/api/web/plugins' '$CT/app/src/plugins' '$CT/api/web/src/plugins' '$CT/api/stateless/routes' '$CT/api/stateless/lib' '$CT/api/stateful/lib' '$CT/api/test' '$CT/cloudtak-marketplace-plugins' '$HOME/.cache/cloudtak-marketplace' && chmod -R u+rwX '$CT/app/plugins' '$CT/api/web/plugins' '$CT/app/src/plugins' '$CT/api/web/src/plugins' '$CT/api/stateless/routes' '$CT/api/stateless/lib' '$CT/api/stateful/lib' '$CT/api/test' '$CT/cloudtak-marketplace-plugins' '$HOME/.cache/cloudtak-marketplace' && { chown '$me:$grp' '$CT'/docker-compose.plugin-*.yml '$CT'/docker-compose.marketplace.yml 2>/dev/null || true; }"; then
     echo "WARNING: could not reclaim plugin paths; continuing and elevating per-operation" >&2
     return 0
   fi
@@ -3339,6 +3341,7 @@ function pluginPatchRunnerBash() {
 apply_plugin_patches() {
   local ct="$1"
   local repo="$2"
+  local tried_runtime=0
   [ -n "$ct" ] && [ -n "$repo" ] && [ -d "$ct" ] && [ -d "$repo" ] || return 0
   local script="/tmp/ctak-marketplace-patch.cjs"
   cat <<'CTAK_PLUGIN_PATCH_JS' > "$script"
@@ -3348,21 +3351,25 @@ CTAK_PLUGIN_PATCH_JS
   echo "Applying plugin patches onto this CloudTAK checkout"
   if command -v node >/dev/null 2>&1; then
     if declare -F run_as_writer >/dev/null 2>&1; then
+      tried_runtime=1
       if run_as_writer "command -v node >/dev/null 2>&1 && node $(printf '%q' "$script") $(printf '%q' "$repo") $(printf '%q' "$ct")"; then
         return 0
       fi
       echo "Plugin owner has no usable node; applying patches via elevated node/docker"
     else
+      tried_runtime=1
       node "$script" "$repo" "$ct"
       return 0
     fi
   fi
   if declare -F elevate_run >/dev/null 2>&1; then
+    tried_runtime=1
     if elevate_run "command -v node >/dev/null 2>&1 && node $(printf '%q' "$script") $(printf '%q' "$repo") $(printf '%q' "$ct")"; then
       return 0
     fi
   fi
   if declare -F docker_cli >/dev/null 2>&1 && resolve_docker_bin; then
+    tried_runtime=1
     if declare -F marketplace_is_infratak >/dev/null 2>&1 && marketplace_is_infratak; then
       echo "Applying plugin patches via docker compose run (infra-TAK)"
       local svc="\${CTAK_COMPOSE_SERVICE:-api}"
@@ -3377,26 +3384,33 @@ CTAK_PLUGIN_PATCH_JS
       fi
     else
       echo "Applying plugin patches via docker (root)"
-      docker_cli run --rm -u 0 \\
+      if docker_cli run --rm -u 0 \\
         -v "$ct:$ct" \\
         -v "$repo:$repo" \\
         -v "$script:/patch.cjs:ro" \\
         node:22-alpine \\
-        node /patch.cjs "$repo" "$ct"
-      return 0
+        node /patch.cjs "$repo" "$ct"; then
+        return 0
+      fi
     fi
   fi
   if command -v docker >/dev/null 2>&1 && ! { declare -F marketplace_is_infratak >/dev/null 2>&1 && marketplace_is_infratak; }; then
+    tried_runtime=1
     echo "Applying plugin patches via docker (root)"
-    docker run --rm -u 0 \\
+    if docker run --rm -u 0 \\
       -v "$ct:$ct" \\
       -v "$repo:$repo" \\
       -v "$script:/patch.cjs:ro" \\
       node:22-alpine \\
-      node /patch.cjs "$repo" "$ct"
-    return 0
+      node /patch.cjs "$repo" "$ct"; then
+      return 0
+    fi
   fi
-  echo "ERROR: cannot apply plugin patches; node and docker are unavailable" >&2
+  if [ "$tried_runtime" = 1 ]; then
+    echo "ERROR: plugin patches failed under elevated node/docker (see patch errors above)" >&2
+  else
+    echo "ERROR: cannot apply plugin patches; node and docker are unavailable" >&2
+  fi
   return 1
 }
 `.trim();
@@ -3459,14 +3473,20 @@ reclaim_cloudtak_plugin_paths || true
 
 can_write_plugins() {
   local plugins="$PLUGIN_ROOT"
-  local parent routes
+  local parent d
   parent=$(dirname "$plugins")
-  routes="$CT/api/stateless/routes"
   [ -d "$parent" ] && [ -w "$parent" ] || return 1
   if [ -d "$plugins" ] && [ ! -w "$plugins" ]; then return 1; fi
   if [ -e "$plugins/$DEST" ] && [ ! -w "$plugins/$DEST" ]; then return 1; fi
-  # install.sh also writes route files; root-owned routes break dispatcher etc.
-  if [ -d "$routes" ] && [ ! -w "$routes" ]; then return 1; fi
+  # install.sh (Replay etc.) also writes routes, api/*/lib, and api/test.
+  for d in \
+    "$CT/api/stateless/routes" \
+    "$CT/api/stateless/lib" \
+    "$CT/api/stateful/lib" \
+    "$CT/api/test"
+  do
+    if [ -d "$d" ] && [ ! -w "$d" ]; then return 1; fi
+  done
   return 0
 }
 
@@ -3534,6 +3554,8 @@ if [ -f "$REPO_DIR/install.sh" ]; then
   if grep -q -- '--no-pull' "$REPO_DIR/install.sh"; then flags="$flags --no-pull"; fi
   echo "Found install.sh; running: bash ./install.sh$flags $CT"
   chmod +x "$REPO_DIR/install.sh" 2>/dev/null || true
+  # Exit with install.sh status so run_as_writer elevates on Permission denied
+  # (a prior always-exit-0 wrapper left half-copied Replay installs as takwerx).
   cat > "$REPO_DIR/.ctak-run-install.sh" <<'EOS'
 #!/bin/bash
 set +e
@@ -3542,8 +3564,9 @@ ct="$2"
 shift 2
 cd "$repo" || exit 1
 bash ./install.sh "$@" "$ct"
-echo $? > "$repo/.marketplace-install-status"
-exit 0
+ec=$?
+echo "$ec" > "$repo/.marketplace-install-status"
+exit "$ec"
 EOS
   chmod a+rX "$REPO_DIR/.ctak-run-install.sh" 2>/dev/null || true
   run_as_writer "bash $(printf '%q' "$REPO_DIR/.ctak-run-install.sh") $(printf '%q' "$REPO_DIR") $(printf '%q' "$CT")$flags"
@@ -3556,14 +3579,17 @@ EOS
     echo "ERROR: install.sh failed before plugin files were copied" >&2
     exit 1
   fi
-  if [ -d "$TARGET" ] && find "$REPO_DIR" -name '*.patch' -not -path '*/node_modules/*' -print -quit | grep -q .; then
-    if [ "$install_ec" != 0 ]; then
+  # Only fall back to drifted patch apply when install.sh itself failed (e.g. git
+  # apply --check). Successful install.sh already applied patches; re-running the
+  # drifted applicator can fail on test fixtures and mark a good install as failed.
+  if [ "$install_ec" != 0 ]; then
+    if [ -d "$TARGET" ] && find "$REPO_DIR" -name '*.patch' -not -path '*/node_modules/*' -print -quit | grep -q .; then
       echo "install.sh exited $install_ec; applying patches that did not match this CloudTAK checkout"
+      apply_plugin_patches "$CT" "$REPO_DIR"
+    else
+      echo "ERROR: install.sh failed" >&2
+      exit 1
     fi
-    apply_plugin_patches "$CT" "$REPO_DIR"
-  elif [ "$install_ec" != 0 ]; then
-    echo "ERROR: install.sh failed" >&2
-    exit 1
   fi
 elif [ -n "$INSTALL" ]; then
   echo "Running installer: cd $REPO_DIR && bash $INSTALL $CT"

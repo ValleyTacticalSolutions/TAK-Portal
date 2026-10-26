@@ -77,17 +77,20 @@ cmd_reclaim() {
     "$ct/app/plugins" "$ct/api/web/plugins" \
     "$ct/app/src/plugins" "$ct/api/web/src/plugins" \
     "$ct/api/stateless/routes" \
+    "$ct/api/stateless/lib" "$ct/api/stateful/lib" "$ct/api/test" \
     "$ct/cloudtak-marketplace-plugins"
 
   chown -R "$user:$group" \
     "$ct/app/plugins" "$ct/api/web/plugins" \
     "$ct/app/src/plugins" "$ct/api/web/src/plugins" \
     "$ct/api/stateless/routes" \
+    "$ct/api/stateless/lib" "$ct/api/stateful/lib" "$ct/api/test" \
     "$ct/cloudtak-marketplace-plugins"
   chmod -R u+rwX \
     "$ct/app/plugins" "$ct/api/web/plugins" \
     "$ct/app/src/plugins" "$ct/api/web/src/plugins" \
     "$ct/api/stateless/routes" \
+    "$ct/api/stateless/lib" "$ct/api/stateful/lib" "$ct/api/test" \
     "$ct/cloudtak-marketplace-plugins"
   chown "$user:$group" "$ct"/docker-compose.plugin-*.yml "$ct"/docker-compose.marketplace.yml 2>/dev/null || true
   echo "reclaim ok"

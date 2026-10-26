@@ -212,6 +212,16 @@ function listPatches(dir, out = []) {
   return out;
 }
 
+/** Test / fixture targets are optional — runtime does not need them. */
+function isOptionalPatchTarget(target) {
+  const t = String(target || "").replace(/\\/g, "/");
+  if (!t) return false;
+  if (/(^|\/)test\//.test(t)) return true;
+  if (/(^|\/)fixtures\//.test(t)) return true;
+  if (/\.test\.(ts|js|mjs|cjs|json)$/.test(t)) return true;
+  return false;
+}
+
 function wireCotsReplayFlag(ctRoot) {
   const pool = path.join(ctRoot, "api/stateful/lib/connection-pool.ts");
   if (!fs.existsSync(pool)) return [];
@@ -244,14 +254,18 @@ function wireCotsReplayFlag(ctRoot) {
 function applyRepoPatches(repoDir, ctRoot) {
   const patches = listPatches(repoDir);
   const skipped = [];
+  const optionalSkipped = [];
   let applied = 0;
   for (const patchPath of patches) {
     const parsed = parsePatch(fs.readFileSync(patchPath, "utf8"));
     for (const file of parsed) {
       if (!file.target) continue;
+      const optional = isOptionalPatchTarget(file.target);
       const target = path.join(ctRoot, file.target);
       if (!fs.existsSync(target)) {
-        skipped.push(`${file.target}: target file is missing`);
+        const msg = `${file.target}: target file is missing`;
+        if (optional) optionalSkipped.push(msg);
+        else skipped.push(msg);
         continue;
       }
       const source = fs.readFileSync(target, "utf8");
@@ -261,16 +275,23 @@ function applyRepoPatches(repoDir, ctRoot) {
         applied += result.applied;
         console.log(`Applied ${result.applied} drifted hunk(s) in ${file.target}`);
       }
-      for (const reason of result.skipped) skipped.push(`${file.target} ${reason}`);
+      for (const reason of result.skipped) {
+        const msg = `${file.target} ${reason}`;
+        if (optional) optionalSkipped.push(msg);
+        else skipped.push(msg);
+      }
     }
   }
   const wired = wireCotsReplayFlag(ctRoot);
   for (const note of wired) console.log(`Forwarded replay flag through ${note}`);
+  for (const reason of optionalSkipped) {
+    console.warn(`WARNING: optional test/fixture patch skipped: ${reason}`);
+  }
   if (skipped.length) {
     for (const reason of skipped) console.error(`ERROR: patch did not apply cleanly: ${reason}`);
-    return { ok: false, applied, skipped, wired };
+    return { ok: false, applied, skipped, optionalSkipped, wired };
   }
-  return { ok: true, applied, skipped, wired };
+  return { ok: true, applied, skipped, optionalSkipped, wired };
 }
 
 if (require.main === module) {
@@ -289,4 +310,5 @@ module.exports = {
   applyPatchToText,
   applyRepoPatches,
   wireCotsReplayFlag,
+  isOptionalPatchTarget,
 };
