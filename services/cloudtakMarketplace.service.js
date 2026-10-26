@@ -3787,6 +3787,68 @@ echo UNINSTALL_OK
 `.trim();
 }
 
+function hubReplayRepairRunnerBash() {
+  // Compact copy of repairOrphanedHubReplay — runs elevated before every rebuild so a
+  // root-owned hub/index.ts left by a prior docker elevate still gets fixed.
+  return `
+repair_replay_hub_orphan() {
+  local ct="\$1"
+  local f="\$ct/api/common/hub/index.ts"
+  [ -n "\$ct" ] && [ -f "\$f" ] || return 0
+  local script="/tmp/ctak-repair-hub-replay.cjs"
+  cat <<'CTAK_REPAIR_HUB_JS' > "\$script"
+const fs = require("fs");
+const path = require("path");
+const ct = process.argv[2];
+const typeFile = path.join(ct, "api/common/hub/index.ts");
+if (!fs.existsSync(typeFile)) process.exit(0);
+let text = fs.readFileSync(typeFile, "utf8");
+let changed = false;
+const orphanRe = /(\\n\\};\\r?\\n)(?:\\r?\\n)?((?:[ \\t]*\\/\\/[^\\n]*\\r?\\n)*[ \\t]*replay\\?: boolean;\\r?\\n)(export interface HubClient\\b)/;
+if (orphanRe.test(text)) {
+  text = text.replace(orphanRe, "\$1\\n\$3");
+  console.log("Repaired api/common/hub/index.ts (removed orphaned replay field)");
+  changed = true;
+}
+const match = text.match(/export type SubmitCotsRequest = \\{[\\s\\S]*?\\n\\};/);
+const wants =
+  fs.existsSync(path.join(ct, "api/stateful/lib/replay-recorder.ts")) ||
+  fs.existsSync(path.join(ct, "app/plugins/replay")) ||
+  fs.existsSync(path.join(ct, "api/web/plugins/replay")) ||
+  changed;
+if (match && wants && !/replay\\?: boolean/.test(match[0])) {
+  text = text.replace(match[0], match[0].replace(/\\n\\};\\$/, "\\n    replay?: boolean;\\n};"));
+  console.log("Repaired api/common/hub/index.ts (replay field inside SubmitCotsRequest)");
+  changed = true;
+}
+if (changed) fs.writeFileSync(typeFile, text);
+else console.log("Replay hub/index.ts ok (no orphaned replay field)");
+CTAK_REPAIR_HUB_JS
+  chmod a+r "\$script" 2>/dev/null || true
+  echo "=== CloudTAK rebuild: repairing Replay hub orphan (if present) ==="
+  if command -v node >/dev/null 2>&1 && node "\$script" "\$ct"; then
+    return 0
+  fi
+  if declare -F elevate_run >/dev/null 2>&1; then
+    if elevate_run "command -v node >/dev/null 2>&1 && node \$(printf '%q' "\$script") \$(printf '%q' "\$ct")"; then
+      return 0
+    fi
+  fi
+  if declare -F docker_cli >/dev/null 2>&1 && resolve_docker_bin; then
+    local svc="\${CTAK_COMPOSE_SERVICE:-api}"
+    if declare -F marketplace_is_infratak >/dev/null 2>&1 && marketplace_is_infratak; then
+      ( cd "\$ct" && docker_cli compose run --rm --no-deps -u 0 \\
+        -v "\$ct:\$ct" -v "\$script:/repair.cjs:ro" --entrypoint node "\$svc" /repair.cjs "\$ct" ) && return 0
+    elif docker_cli run --rm -u 0 -v "\$ct:\$ct" -v "\$script:/repair.cjs:ro" node:22-alpine node /repair.cjs "\$ct"; then
+      return 0
+    fi
+  fi
+  echo "WARNING: could not repair hub/index.ts; API lint may still fail if an orphaned replay field remains" >&2
+  return 0
+}
+`.trim();
+}
+
 function rebuildRemoteScript(ct, service) {
   const svc = service || "api";
   return `
@@ -3797,10 +3859,13 @@ ${pluginPrivilegeBash({ composeService: svc })}
 cd "$CT"
 # Prefer fixed marketplace-helper rebuild (narrow sudoers). Fall back to docker compose.
 ensure_marketplace_sudoers || true
+${hubReplayRepairRunnerBash()}
+repair_replay_hub_orphan "$CT" || true
 # A plugin copied earlier can still fail vue-tsc and block this rebuild.
 ${pluginHostAlignRunnerBash()}
 echo "=== CloudTAK rebuild: aligning marketplace plugins ==="
 align_plugins_to_host "$CT"
+repair_replay_hub_orphan "$CT" || true
 echo "=== CloudTAK rebuild: docker compose build --no-cache (live output below) ==="
 if marketplace_helper_run rebuild "$CT" "$SVC"; then
   echo "CloudTAK image build finished (marketplace-helper)."

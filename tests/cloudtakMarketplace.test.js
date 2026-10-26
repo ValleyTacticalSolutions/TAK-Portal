@@ -2,6 +2,7 @@
 
 const assert = require("assert");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const marketplace = require("../services/cloudtakMarketplace.service");
 const pluginPatch = require("../services/cloudtakMarketplace.patch");
@@ -267,6 +268,36 @@ assert.doesNotMatch(
   /\};\n\n    \/\/ Tags every emitted[\s\S]*replay\?: boolean;\nexport interface/,
   "replay field must not be orphaned after closing brace"
 );
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hub-orphan-"));
+  fs.mkdirSync(path.join(tmp, "api/common/hub"), { recursive: true });
+  fs.mkdirSync(path.join(tmp, "app/plugins/replay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(tmp, "api/common/hub/index.ts"),
+    [
+      "export type SubmitCotsRequest = {",
+      "    ifPooled?: boolean;",
+      "};",
+      "",
+      "    // Tags every emitted feature's properties.replay - set explicitly (see",
+      "    // ConnectionPool.cots()) so a stale replay:true from an earlier playback",
+      "    // never survives on a CoT UID that's now genuinely live.",
+      "    replay?: boolean;",
+      "export interface HubClient {",
+      "}",
+      "",
+    ].join("\n")
+  );
+  const notes = pluginPatch.repairOrphanedHubReplay(tmp);
+  const fixed = fs.readFileSync(path.join(tmp, "api/common/hub/index.ts"), "utf8");
+  assert.ok(notes.some((n) => /orphaned/.test(n)));
+  assert.match(fixed, /ifPooled\?: boolean;\n    replay\?: boolean;\n\};/);
+  assert.doesNotMatch(fixed, /\};\n\n    (?:\/\/[^\n]*\n)*    replay\?: boolean;\nexport interface/);
+  const rb = marketplace.rebuildRemoteScript("/root/CloudTAK", "api");
+  assert.match(rb, /repair_replay_hub_orphan/);
+  assert.ok(rb.indexOf("repair_replay_hub_orphan") < rb.indexOf("docker compose --progress=plain"));
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
 assert.ok(!ids.includes("lightning"));
 
 const gh = marketplace.parseGitHubRepo(
@@ -575,7 +606,6 @@ assert.deepStrictEqual(
 const bundled = store.readBundledCatalog();
 assert.ok(Array.isArray(bundled.plugins) && bundled.plugins.length >= 10);
 
-const os = require("os");
 const livewx = normalized.plugins.find((p) => p.id === "livewx");
 assert.ok(livewx);
 assert.ok(livewx.csp && livewx.csp["img-src"].includes("https://mesonet.agron.iastate.edu"));

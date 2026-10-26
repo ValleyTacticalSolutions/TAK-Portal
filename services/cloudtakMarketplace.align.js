@@ -1402,11 +1402,16 @@ function alignInstalledPlugins(ctRoot) {
   // SubmitCotsRequest (breaks API image eslint with Parsing error: Expression expected).
   try {
     const patch = require("./cloudtakMarketplace.patch");
-    for (const note of patch.wireCotsReplayFlag(root) || []) {
+    for (const note of patch.repairOrphanedHubReplay(root) || []) {
       changes.push(note);
     }
-  } catch (_) {
-    /* optional */
+    for (const note of patch.wireCotsReplayFlag(root) || []) {
+      if (!changes.includes(note)) changes.push(note);
+    }
+  } catch (err) {
+    changes.push(
+      "WARNING: Replay hub repair failed: " + String((err && err.message) || err || "unknown")
+    );
   }
   return { ok: true, changes };
 }

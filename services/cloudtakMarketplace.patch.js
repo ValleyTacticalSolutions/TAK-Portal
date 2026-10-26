@@ -227,24 +227,57 @@ function isOptionalPatchTarget(target) {
   return false;
 }
 
-function wireCotsReplayFlag(ctRoot) {
-  const pool = path.join(ctRoot, "api/stateful/lib/connection-pool.ts");
-  if (!fs.existsSync(pool)) return [];
-  const poolText = fs.readFileSync(pool, "utf8");
-  if (!/opts\s*:\s*\{\s*replay\?: boolean\s*\}/.test(poolText) && !/opts\.replay/.test(poolText)) return [];
+/**
+ * Fix a prior drifted-apply bug: Replay's `replay?: boolean` (and its comments)
+ * landed after SubmitCotsRequest's closing `};`, which breaks API image eslint
+ * with `Parsing error: Expression expected` at that line. Always safe to run.
+ */
+function repairOrphanedHubReplay(ctRoot) {
+  const typeFile = path.join(ctRoot, "api/common/hub/index.ts");
+  if (!fs.existsSync(typeFile)) return [];
+  let text = fs.readFileSync(typeFile, "utf8");
   const notes = [];
+  let changed = false;
+
+  // Comments (optional) + indented replay field sitting between `};` and HubClient.
+  const orphanRe =
+    /(\n\};\r?\n)(?:\r?\n)?((?:[ \t]*\/\/[^\n]*\r?\n)*[ \t]*replay\?: boolean;\r?\n)(export interface HubClient\b)/;
+  if (orphanRe.test(text)) {
+    text = text.replace(orphanRe, "$1\n$3");
+    notes.push("api/common/hub/index.ts (removed orphaned replay field)");
+    changed = true;
+  }
+
+  const match = text.match(/export type SubmitCotsRequest = \{[\s\S]*?\n\};/);
+  const wantsReplay =
+    fs.existsSync(path.join(ctRoot, "api/stateful/lib/replay-recorder.ts")) ||
+    fs.existsSync(path.join(ctRoot, "app/plugins/replay")) ||
+    fs.existsSync(path.join(ctRoot, "api/web/plugins/replay")) ||
+    notes.some((n) => /orphaned/.test(n));
+  if (match && wantsReplay && !/replay\?: boolean/.test(match[0])) {
+    const block = match[0].replace(/\n\};$/, "\n    replay?: boolean;\n};");
+    text = text.replace(match[0], block);
+    notes.push("api/common/hub/index.ts (replay field inside SubmitCotsRequest)");
+    changed = true;
+  }
+
+  if (changed) fs.writeFileSync(typeFile, text);
+  return notes;
+}
+
+function wireCotsReplayFlag(ctRoot) {
+  // Always attempt orphan heal first — do not gate on connection-pool (a half-failed
+  // install can leave hub broken while pool was reverted or is unreadable).
+  const notes = repairOrphanedHubReplay(ctRoot);
+  const pool = path.join(ctRoot, "api/stateful/lib/connection-pool.ts");
+  if (!fs.existsSync(pool)) return notes;
+  const poolText = fs.readFileSync(pool, "utf8");
+  if (!/opts\s*:\s*\{\s*replay\?: boolean\s*\}/.test(poolText) && !/opts\.replay/.test(poolText)) {
+    return notes;
+  }
   const typeFile = path.join(ctRoot, "api/common/hub/index.ts");
   if (fs.existsSync(typeFile)) {
     let text = fs.readFileSync(typeFile, "utf8");
-    // Heal a prior drifted-apply bug that left Replay's field/comments after the
-    // SubmitCotsRequest closing brace (eslint: Parsing error: Expression expected).
-    const orphanRe =
-      /\n\};\r?\n\r?\n(    \/\/ Tags every emitted feature's properties\.replay[\s\S]*?\n    replay\?: boolean;\r?\n)(export interface HubClient)/;
-    if (orphanRe.test(text)) {
-      text = text.replace(orphanRe, "\n};\n\n$2");
-      fs.writeFileSync(typeFile, text);
-      notes.push("api/common/hub/index.ts (removed orphaned replay field)");
-    }
     const match = text.match(/export type SubmitCotsRequest = \{[\s\S]*?\n\};/);
     if (match && !/replay\?: boolean/.test(match[0])) {
       const block = match[0].replace(/\n\};$/, "\n    replay?: boolean;\n};");
@@ -325,5 +358,6 @@ module.exports = {
   applyPatchToText,
   applyRepoPatches,
   wireCotsReplayFlag,
+  repairOrphanedHubReplay,
   isOptionalPatchTarget,
 };
