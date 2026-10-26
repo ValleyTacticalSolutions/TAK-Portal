@@ -149,17 +149,22 @@ function applyHunk(lines, hunk) {
       block.push(hunk.ops[cursor].text);
       cursor += 1;
     }
+    // Prefer inserting immediately after the previous matched context/delete
+    // line. Looking forward first skips weak context like `};` (filtered out of
+    // anchors) and can drop the block after a type/interface closes — which is
+    // exactly how Replay's hub/index.ts patch produced `replay?: boolean` as a
+    // parse error between SubmitCotsRequest and HubClient.
     let dest = null;
-    for (let i = cursor; i < hunk.ops.length; i++) {
+    for (let i = start - 1; i >= 0; i--) {
       if (at.has(i)) {
-        dest = at.get(i);
+        dest = at.get(i) + 1;
         break;
       }
     }
     if (dest == null) {
-      for (let i = start - 1; i >= 0; i--) {
+      for (let i = cursor; i < hunk.ops.length; i++) {
         if (at.has(i)) {
-          dest = at.get(i) + 1;
+          dest = at.get(i);
           break;
         }
       }
@@ -230,11 +235,21 @@ function wireCotsReplayFlag(ctRoot) {
   const notes = [];
   const typeFile = path.join(ctRoot, "api/common/hub/index.ts");
   if (fs.existsSync(typeFile)) {
-    const text = fs.readFileSync(typeFile, "utf8");
+    let text = fs.readFileSync(typeFile, "utf8");
+    // Heal a prior drifted-apply bug that left Replay's field/comments after the
+    // SubmitCotsRequest closing brace (eslint: Parsing error: Expression expected).
+    const orphanRe =
+      /\n\};\r?\n\r?\n(    \/\/ Tags every emitted feature's properties\.replay[\s\S]*?\n    replay\?: boolean;\r?\n)(export interface HubClient)/;
+    if (orphanRe.test(text)) {
+      text = text.replace(orphanRe, "\n};\n\n$2");
+      fs.writeFileSync(typeFile, text);
+      notes.push("api/common/hub/index.ts (removed orphaned replay field)");
+    }
     const match = text.match(/export type SubmitCotsRequest = \{[\s\S]*?\n\};/);
     if (match && !/replay\?: boolean/.test(match[0])) {
       const block = match[0].replace(/\n\};$/, "\n    replay?: boolean;\n};");
-      fs.writeFileSync(typeFile, text.replace(match[0], block));
+      text = text.replace(match[0], block);
+      fs.writeFileSync(typeFile, text);
       notes.push("api/common/hub/index.ts");
     }
   }

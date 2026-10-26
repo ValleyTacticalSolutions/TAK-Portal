@@ -1398,6 +1398,16 @@ function alignInstalledPlugins(ctRoot) {
     changes.push(...relaxHostPluginCheck(web));
   }
   changes.push(...relaxMarketplaceServerRoutes(path.join(root, "api")));
+  // Heal Replay hub/index.ts if a prior drifted patch left `replay?: boolean` outside
+  // SubmitCotsRequest (breaks API image eslint with Parsing error: Expression expected).
+  try {
+    const patch = require("./cloudtakMarketplace.patch");
+    for (const note of patch.wireCotsReplayFlag(root) || []) {
+      changes.push(note);
+    }
+  } catch (_) {
+    /* optional */
+  }
   return { ok: true, changes };
 }
 

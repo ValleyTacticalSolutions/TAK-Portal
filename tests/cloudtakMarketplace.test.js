@@ -222,6 +222,51 @@ assert.ok(!driftedOnce.text.includes("Sinks"));
 const driftedTwice = pluginPatch.applyPatchToText(driftedOnce.text, driftedPatch);
 assert.strictEqual(driftedTwice.applied, 0);
 assert.strictEqual(driftedTwice.text, driftedOnce.text);
+
+// Replay hub patch: inserts must land BEFORE `};`, not after it (skipped weak anchor).
+const hubSrc = [
+  "export type SubmitCotsRequest = {",
+  "    connection: number | string;",
+  "    cots: CoT[];",
+  "    write?: boolean;",
+  "    broadcast?: boolean;",
+  "    ensureProfile?: boolean;",
+  "    ifPooled?: boolean;",
+  "};",
+  "",
+  "export interface HubClient {",
+  "    submitCots(req: SubmitCotsRequest): Promise<void>;",
+  "}",
+  "",
+].join("\n");
+const hubPatch = [
+  "--- a/api/common/hub/index.ts",
+  "+++ b/api/common/hub/index.ts",
+  "@@ -53,6 +53,10 @@ export type SubmitCotsRequest = {",
+  "     broadcast?: boolean;",
+  "     ensureProfile?: boolean;",
+  "     ifPooled?: boolean;",
+  "+    // Tags every emitted feature's properties.replay - set explicitly (see",
+  "+    // ConnectionPool.cots()) so a stale replay:true from an earlier playback",
+  "+    // never survives on a CoT UID that's now genuinely live.",
+  "+    replay?: boolean;",
+  " };",
+  " ",
+  " export interface HubClient {",
+  "",
+].join("\n");
+const hubOnce = pluginPatch.applyPatchToText(hubSrc, hubPatch);
+assert.ok(hubOnce.ok, "hub patch applies");
+assert.match(
+  hubOnce.text,
+  /ifPooled\?: boolean;\n    \/\/ Tags every emitted[\s\S]*?\n    replay\?: boolean;\n\};/,
+  "replay field stays inside SubmitCotsRequest"
+);
+assert.doesNotMatch(
+  hubOnce.text,
+  /\};\n\n    \/\/ Tags every emitted[\s\S]*replay\?: boolean;\nexport interface/,
+  "replay field must not be orphaned after closing brace"
+);
 assert.ok(!ids.includes("lightning"));
 
 const gh = marketplace.parseGitHubRepo(
