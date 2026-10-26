@@ -9,7 +9,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
-### v2.0.20 - TBD
+### v2.0.20 - 10/25/26
 🐛 `Bug Fix` - CloudTAK Marketplace: for host/systemd Caddy, publish Print on `127.0.0.1:5010` and Deploy To Caddy uses loopback upstreams (existing `(cloudtak_print)` blocks still not overwritten) (#69)
 
 ### v2.0.19 - 10/25/26
