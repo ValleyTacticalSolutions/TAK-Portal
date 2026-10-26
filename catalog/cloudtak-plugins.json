@@ -195,7 +195,6 @@
       "repo": "https://github.com/dfndr13/cloudtak-replay-plugin.git",
       "added": "2026-09-25",
       "maintainer": "dfndr13",
-      "notes": "Upstream v1.4.0 supports CloudTAK v13.109.3–v13.113.0 (app/ layout). install.sh refuses if core patches (e.g. atlas-database.ts) do not apply — requires a stock checkout in that range.",
       "web": { "dest": "replay" },
       "detect": [
         "api/web/plugins/replay/index.ts",
@@ -231,6 +230,70 @@
       "detect": [
         "api/web/plugins/sidebar-configurator/index.ts",
         "app/plugins/sidebar-configurator/index.ts"
+      ]
+    },
+    {
+      "id": "skydio",
+      "name": "Skydio",
+      "description": "Skydio Cloud integration: flight telemetry, missions from map objects, alerts, and DataSync log entries.",
+      "repo": "https://github.com/clptak/cloudtak-plugin-skydio.git",
+      "added": "2026-10-26",
+      "maintainer": "clptak",
+      "web": { "dest": "skydio" },
+      "exclude": ["docs", "stubs", "**/*.md"],
+      "sidecars": [{ "dir": "relay-server", "port": 8081 }],
+      "additionalActions": [
+        {
+          "title": "Route /skydio-relay through Caddy",
+          "text": "Marketplace starts the telemetry relay sidecar (default port 8081). Browsers still need Caddy (or equivalent) to reach /skydio-relay so large-flight telemetry can bypass the Plugin Proxy ~1MB limit.",
+          "instructions": [
+            "Marketplace starts relay-server/ in Docker as cloudtak-plugin-skydio-sidecar. You do not need to run npm start yourself.",
+            "Use Deploy To Caddy when available — it pastes the snippet, reloads Caddy, and (for Docker Caddy) connects Caddy to CloudTAK's network. For host/systemd Caddy it uses reverse_proxy 127.0.0.1:8081.",
+            "In the Skydio plugin Settings, set Skydio Telemetry Relay URL to https://YOURHOST/skydio-relay/skydio (same origin as CloudTAK).",
+            "Also enable CloudTAK Admin → Plugin Proxy and whitelist https://api.skydio.com plus any Authentik/webhook hosts you configure in Settings."
+          ],
+          "snippet": "handle_path /skydio-relay* {\n\treverse_proxy cloudtak-plugin-skydio-sidecar:8081\n}"
+        },
+        {
+          "title": "Optional: real-time alerts via webhook SSE",
+          "text": "SSE alerts need an external webhook server and Authentik OAuth (not started by Marketplace). Without them the plugin can poll Skydio with the API key only.",
+          "instructions": [
+            "Deploy a webhook server that accepts Skydio POSTs and exposes GET /events/skydio with CORS for your CloudTAK origin.",
+            "In Settings → Webhook SSE, enter Authentik client ID/secret, token URL, SSE URL, and webhook URL; register that webhook with Skydio."
+          ]
+        }
+      ],
+      "detect": [
+        "api/web/plugins/skydio/index.ts",
+        "app/plugins/skydio/index.ts"
+      ]
+    },
+    {
+      "id": "search-containment",
+      "name": "Search Containment",
+      "description": "Find trail-network containment points on a search boundary (ATAK Chokepoint-style).",
+      "repo": "https://github.com/clptak/cloudtak-plugin-search-containment.git",
+      "added": "2026-10-26",
+      "maintainer": "clptak",
+      "web": { "dest": "search-containment" },
+      "exclude": ["docs", "**/*.md"],
+      "detect": [
+        "api/web/plugins/search-containment/index.ts",
+        "app/plugins/search-containment/index.ts"
+      ]
+    },
+    {
+      "id": "measure",
+      "name": "Measure",
+      "description": "Measure distances and bearings along a line, with optional terrain profile, without creating a CoT.",
+      "repo": "https://github.com/clptak/cloudtak-plugin-measure.git",
+      "added": "2026-10-26",
+      "maintainer": "clptak",
+      "web": { "dest": "measure" },
+      "exclude": ["docs", "test", "scripts", "**/*.md"],
+      "detect": [
+        "api/web/plugins/measure/index.ts",
+        "app/plugins/measure/index.ts"
       ]
     }
   ]

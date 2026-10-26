@@ -626,6 +626,15 @@ assert.ok(!udash.additionalActions.some((a) => /does not start/i.test(JSON.strin
 const udashScript = marketplace.installRemoteScript("/root/CloudTAK", udash);
 assert.match(udashScript, /plugin node sidecar/);
 
+const skydio = normalized.plugins.find((p) => p.id === "skydio");
+assert.ok(skydio);
+assert.ok(Array.isArray(skydio.sidecars) && skydio.sidecars.some((s) => s && s.dir === "relay-server"));
+assert.ok(skydio.additionalActions.some((a) => caddy.isCaddyAction(a) && /skydio-relay/.test(a.snippet)));
+const skydioScript = marketplace.installRemoteScript("/root/CloudTAK", skydio);
+assert.match(skydioScript, /plugin node sidecar/);
+assert.match(skydioScript, /SIDECAR_DIR_HINT='relay-server'/);
+assert.match(skydioScript, /SIDECAR_PORT_HINT='8081'/);
+
 assert.deepStrictEqual(
   marketplace.normalizeAdditionalActions({
     sidecars: [{ note: "Add Caddy /example" }],
