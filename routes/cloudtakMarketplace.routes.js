@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const router = require("express").Router();
 const multer = require("multer");
@@ -10,9 +11,34 @@ const store = require("../services/cloudtakMarketplace.store");
 const settingsSvc = require("../services/settings.service");
 const stackHealth = require("../services/stackHealth.service");
 const auditSvc = require("../services/auditLog.service");
+const appVersion = require("../services/appVersion.service");
+const pkg = require("../package.json");
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 * 1024 } });
 let workerHealthCache = { at: 0, worker: { ok: true } };
+
+/** Portal/host facts for Save .txt troubleshooting footers. */
+function marketplaceDiagnostics() {
+  let hostname = "";
+  try {
+    hostname = os.hostname() || "";
+  } catch (_) {}
+  const packageVersion = String((pkg && pkg.version) || "").trim() || "unknown";
+  const running = appVersion.runningVersion(pkg);
+  return {
+    portalVersion: running,
+    packageVersion,
+    betaVersion: String((pkg && pkg["beta-version"]) || "").trim() || null,
+    node: process.version,
+    platform: process.platform,
+    arch: process.arch,
+    osRelease: os.release(),
+    hostname,
+    containerHostname: String(process.env.HOSTNAME || "").trim() || null,
+    cwd: process.cwd(),
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+  };
+}
 
 function username(req) {
   return req.authentikUser && req.authentikUser.username ? req.authentikUser.username : "";
@@ -71,6 +97,7 @@ router.get("/status", async (req, res) => {
       emailConfigured: marketplace.isEmailConfigured(),
       worker: workerHealthCache.worker,
       busy: marketplace.hasBusyChangeJobs(),
+      diagnostics: marketplaceDiagnostics(),
       jobs: allJobs.slice(0, 20).map((job) => presentJob(job, false)),
       logJobs: marketplace.selectLogJobs(allJobs).map((job) => presentJob(job, true)),
     });

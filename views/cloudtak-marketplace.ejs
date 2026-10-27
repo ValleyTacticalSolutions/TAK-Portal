@@ -464,7 +464,9 @@
   var activeJobs = [];
   var jobBusy = false;
   var jobPoll = null;
+  var lastStatus = null;
   var emailConfigured = <%= typeof emailConfigured !== "undefined" && emailConfigured ? "true" : "false" %>;
+  var PORTAL_VERSION = <%= JSON.stringify(typeof APP_VERSION !== "undefined" ? String(APP_VERSION) : "") %>;
   var WAIT_HINT = "Wait until the current job is complete and containers are recreated and running";
   var EMAIL_NOT_CONFIGURED =
     "Email/SMTP is not configured. Enable Email under Settings → Email and set SMTP host and From address before submitting.";
@@ -1114,6 +1116,55 @@
     return jobLogFullText || ($("mpJobs") && $("mpJobs").textContent) || "";
   }
 
+  function pushDiag(lines, label, value) {
+    var v = value == null ? "" : String(value).trim();
+    if (!v) return;
+    lines.push(label + ": " + v);
+  }
+
+  /** Footer appended only on Save .txt — version + instance facts for support. */
+  function jobLogDiagnosticsFooter(status) {
+    var d = (status && status.diagnostics) || {};
+    var ssh = (status && status.ssh) || {};
+    var worker = (status && status.worker) || {};
+    var lines = ["", "----------", "Environment (for troubleshooting)"];
+    var portalVer = d.portalVersion || PORTAL_VERSION || "unknown";
+    lines.push("TAK Portal version: " + portalVer);
+    if (d.packageVersion && d.packageVersion !== portalVer) {
+      pushDiag(lines, "TAK Portal package version", d.packageVersion);
+    }
+    if (d.betaVersion && d.betaVersion !== portalVer && d.betaVersion !== d.packageVersion) {
+      pushDiag(lines, "TAK Portal beta-version", d.betaVersion);
+    }
+    pushDiag(lines, "Exported at", new Date().toISOString());
+    pushDiag(lines, "Portal URL", window.location && window.location.href);
+    pushDiag(lines, "User agent", navigator && navigator.userAgent);
+    pushDiag(lines, "Portal Node", d.node);
+    if (d.platform || d.arch || d.osRelease) {
+      lines.push(
+        "Portal OS: " +
+          [d.platform, d.arch, d.osRelease].filter(Boolean).join(" / ")
+      );
+    }
+    pushDiag(lines, "Portal hostname", d.hostname);
+    if (d.containerHostname && d.containerHostname !== d.hostname) {
+      pushDiag(lines, "Container HOSTNAME", d.containerHostname);
+    }
+    pushDiag(lines, "Portal cwd", d.cwd);
+    pushDiag(lines, "Timezone", d.timezone);
+    pushDiag(lines, "Worker", worker.ok === false ? "not running" : (worker.ok ? "ok" : ""));
+    pushDiag(lines, "Marketplace busy", status && status.busy != null ? String(!!status.busy) : "");
+    pushDiag(lines, "Catalog URL", status && status.catalogUrl);
+    pushDiag(lines, "SSH configured", ssh.configured != null ? String(!!ssh.configured) : "");
+    pushDiag(lines, "SSH source", ssh.source);
+    pushDiag(lines, "SSH host", ssh.host);
+    if (ssh.port) pushDiag(lines, "SSH port", ssh.port);
+    pushDiag(lines, "SSH user", ssh.username);
+    pushDiag(lines, "CloudTAK checkout", ssh.checkoutPath);
+    pushDiag(lines, "Compose service", ssh.composeService);
+    return lines.join("\n");
+  }
+
   function copyJobLog() {
     var text = jobLogText();
     var btn = $("mpJobsCopyBtn");
@@ -1161,7 +1212,8 @@
     }
     try {
       var stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      var blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+      var body = text.replace(/\s+$/, "") + jobLogDiagnosticsFooter(lastStatus) + "\n";
+      var blob = new Blob([body], { type: "text/plain;charset=utf-8" });
       var url = URL.createObjectURL(blob);
       var a = document.createElement("a");
       a.href = url;
@@ -1193,6 +1245,7 @@
       if (gen !== loadGen) return;
       var snap = pair[0];
       var status = pair[1];
+      lastStatus = status || null;
       plugins = (snap && snap.plugins) || [];
       jobBusy = !!(status && (status.busy || changeJobsBusy(status.jobs)));
       if (jobBusy) uninstallArmedId = "";
