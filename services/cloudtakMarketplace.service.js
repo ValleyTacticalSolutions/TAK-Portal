@@ -3213,6 +3213,94 @@ const MARKETPLACE_GIT_RESTORE_PATHS = [
   "api/eslint.config.js",
 ];
 
+/** Pinned to cloudtak-plugin-rubbersheet install.sh (PDF page rendering). */
+const RUBBER_SHEET_PDFJS_VERSION = "4.10.38";
+
+/**
+ * Bash: if Rubber Sheet is on disk, ensure app/package.json lists pdfjs-dist.
+ * Does not run npm on the host (lock stays clean); Docker build npm install fetches it.
+ */
+function ensureMarketplaceHostNpmDepsBash() {
+  return `
+ensure_marketplace_host_npm_deps() {
+  local ct="$1"
+  local pkg="$ct/app/package.json"
+  local version="${RUBBER_SHEET_PDFJS_VERSION}"
+  local tmp out
+  [ -n "$ct" ] && [ -f "$pkg" ] || return 0
+  [ -d "$ct/app/plugins/rubber-sheet" ] || return 0
+
+  _ctak_write_pdfjs_dep() {
+    local target="$1"
+    if command -v node >/dev/null 2>&1; then
+      node - "$target" "$version" <<'NODE'
+const fs = require("fs");
+const path = process.argv[1];
+const version = process.argv[2];
+const data = JSON.parse(fs.readFileSync(path, "utf8"));
+data.dependencies = data.dependencies || {};
+if (data.dependencies["pdfjs-dist"]) {
+  process.stdout.write("present");
+  process.exit(0);
+}
+data.dependencies["pdfjs-dist"] = version;
+fs.writeFileSync(path, JSON.stringify(data, null, 2) + "\\n");
+process.stdout.write("added");
+NODE
+      return $?
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+      python3 - "$target" "$version" <<'PY'
+import json, sys
+path, version = sys.argv[1], sys.argv[2]
+with open(path) as handle:
+    data = json.load(handle)
+deps = data.setdefault("dependencies", {})
+if deps.get("pdfjs-dist"):
+    sys.stdout.write("present")
+    raise SystemExit(0)
+deps["pdfjs-dist"] = version
+with open(path, "w") as handle:
+    json.dump(data, handle, indent=2)
+    handle.write("\\n")
+sys.stdout.write("added")
+PY
+      return $?
+    fi
+    echo "WARNING: cannot ensure pdfjs-dist for Rubber Sheet (node/python3 missing)" >&2
+    return 1
+  }
+
+  out="$(_ctak_write_pdfjs_dep "$pkg" 2>/dev/null)" && {
+    if [ "$out" = "added" ]; then
+      echo "Added pdfjs-dist@\${version} to app/package.json (required by Rubber Sheet)"
+    fi
+    return 0
+  }
+
+  tmp="$(mktemp /tmp/ctak-app-package.XXXXXX)"
+  if ! cp "$pkg" "$tmp" 2>/dev/null; then
+    rm -f "$tmp" || true
+    return 0
+  fi
+  out="$(_ctak_write_pdfjs_dep "$tmp" 2>/dev/null || true)"
+  if [ "$out" != "added" ]; then
+    rm -f "$tmp" || true
+    return 0
+  fi
+  if declare -F run_as_writer >/dev/null 2>&1 && run_as_writer "cp $(printf '%q' "$tmp") $(printf '%q' "$pkg")"; then
+    echo "Added pdfjs-dist@\${version} to app/package.json (required by Rubber Sheet)"
+  elif declare -F elevate_run >/dev/null 2>&1 && elevate_run "cp $(printf '%q' "$tmp") $(printf '%q' "$pkg")"; then
+    echo "Added pdfjs-dist@\${version} to app/package.json (required by Rubber Sheet)"
+  else
+    echo "WARNING: Rubber Sheet is installed but pdfjs-dist is missing from app/package.json (could not write $pkg)" >&2
+  fi
+  rm -f "$tmp" || true
+  return 0
+}
+`.trim();
+}
+
 /**
  * Host helper: restore marketplace-touched tracked files, git pull, then re-align.
  * Written to cloudtak-marketplace-plugins/_host/wrap-git-pull.sh on every align.
@@ -3229,6 +3317,8 @@ HOST_DIR="$SCRIPT_DIR"
 RESTORE_PATHS=(
 ${pathLines}
 )
+
+${ensureMarketplaceHostNpmDepsBash()}
 
 resolve_cloudtak() {
   local cand
@@ -3290,7 +3380,8 @@ elif [ -f "$ALIGN_JS" ]; then
   echo "WARNING: node not found; skip post-pull align. Run a marketplace rebuild to re-apply shields." >&2
 fi
 
-echo "Note: plugins that add host npm deps (e.g. Rubber Sheet / pdfjs-dist) may need a marketplace reinstall after this pull."
+# Restoring app/package.json above drops Rubber Sheet's pdfjs-dist; put it back.
+ensure_marketplace_host_npm_deps "$CT"
 `.trim();
 }
 
@@ -3301,6 +3392,8 @@ function pluginMarketplaceGitHygieneBash() {
     throw new Error("wrap-git-pull script contains the heredoc delimiter");
   }
   return `
+${ensureMarketplaceHostNpmDepsBash()}
+
 restore_marketplace_package_lock() {
   local ct="$1"
   [ -n "$ct" ] && [ -d "$ct/.git" ] || return 0
@@ -3384,6 +3477,8 @@ ${pluginMarketplaceGitHygieneBash()}
 align_plugins_to_host() {
   local ct="$1"
   [ -n "$ct" ] || return 0
+  # Rubber Sheet imports pdfjs-dist from the CloudTAK app; keep it listed before rebuild.
+  ensure_marketplace_host_npm_deps "$ct"
   if [ -f "$ct/app/package.json" ] && [ -d "$ct/app/src" ] && [ -d "$ct/app/plugins" ]; then
     :
   elif [ -d "$ct/api/web/src" ] && [ -d "$ct/api/web/plugins" ]; then
@@ -3408,6 +3503,7 @@ CTAK_PLUGIN_ALIGN_JS
       if run_as_writer "command -v node >/dev/null 2>&1 && node $(printf '%q' "$script") $(printf '%q' "$ct")"; then
         ensure_marketplace_git_pull_wrap "$ct" "$script"
         restore_marketplace_package_lock "$ct"
+        ensure_marketplace_host_npm_deps "$ct"
         return 0
       fi
       echo "Plugin owner has no usable node; aligning via elevated node/docker"
@@ -3415,6 +3511,7 @@ CTAK_PLUGIN_ALIGN_JS
       node "$script" "$ct"
       ensure_marketplace_git_pull_wrap "$ct" "$script"
       restore_marketplace_package_lock "$ct"
+      ensure_marketplace_host_npm_deps "$ct"
       return 0
     fi
   fi
@@ -3423,6 +3520,7 @@ CTAK_PLUGIN_ALIGN_JS
     if elevate_run "command -v node >/dev/null 2>&1 && node $(printf '%q' "$script") $(printf '%q' "$ct")"; then
       ensure_marketplace_git_pull_wrap "$ct" "$script"
       restore_marketplace_package_lock "$ct"
+      ensure_marketplace_host_npm_deps "$ct"
       return 0
     fi
   fi
@@ -3439,6 +3537,7 @@ CTAK_PLUGIN_ALIGN_JS
         /align.cjs "$ct" ); then
         ensure_marketplace_git_pull_wrap "$ct" "$script"
         restore_marketplace_package_lock "$ct"
+        ensure_marketplace_host_npm_deps "$ct"
         return 0
       fi
       echo "WARNING: docker compose align failed; trying node image via compose" >&2
@@ -3451,6 +3550,7 @@ CTAK_PLUGIN_ALIGN_JS
         node /align.cjs "$ct"; then
         ensure_marketplace_git_pull_wrap "$ct" "$script"
         restore_marketplace_package_lock "$ct"
+        ensure_marketplace_host_npm_deps "$ct"
         return 0
       fi
     fi
@@ -3464,11 +3564,13 @@ CTAK_PLUGIN_ALIGN_JS
       node /align.cjs "$ct"
     ensure_marketplace_git_pull_wrap "$ct" "$script"
     restore_marketplace_package_lock "$ct"
+    ensure_marketplace_host_npm_deps "$ct"
     return 0
   fi
   echo "WARNING: skipped plugin API alignment; node and docker are unavailable" >&2
   ensure_marketplace_git_pull_wrap "$ct" "$script"
   restore_marketplace_package_lock "$ct"
+  ensure_marketplace_host_npm_deps "$ct"
   return 0
 }
 `.trim();
@@ -4856,5 +4958,7 @@ module.exports = {
   isTakwerxMarketplaceUser,
   MARKETPLACE_HELPER_SUDOERS,
   MARKETPLACE_GIT_RESTORE_PATHS,
+  RUBBER_SHEET_PDFJS_VERSION,
+  ensureMarketplaceHostNpmDepsBash,
   marketplaceWrapGitPullScript,
 };

@@ -1169,19 +1169,27 @@ assert.match(installAligned, /Aligning marketplace plugins to the installed Clou
 assert.match(installAligned, /readSubscriptionLoadKeys/);
 assert.doesNotMatch(installAligned, /incident-manager/);
 assert.match(installAligned, /restore_marketplace_package_lock/);
+assert.match(installAligned, /ensure_marketplace_host_npm_deps/);
 assert.match(installAligned, /ensure_marketplace_git_pull_wrap/);
 assert.match(installAligned, /cloudtak-marketplace-plugins\/_host\/wrap-git-pull\.sh/);
 assert.match(installAligned, /app\/package-lock\.json/);
+assert.match(installAligned, /pdfjs-dist/);
+assert.match(installAligned, /rubber-sheet/);
 // Command is `git -C "$ct" … restore …` (flags between git and restore), not bare `git restore`.
 assert.match(installAligned, /git -C .* restore /);
 const wrapPull = marketplace.marketplaceWrapGitPullScript();
 assert.match(wrapPull, /app\/package-lock\.json/);
 assert.match(wrapPull, /git -C "\$CT".*pull/);
+assert.match(wrapPull, /ensure_marketplace_host_npm_deps "\$CT"/);
+assert.match(wrapPull, /pdfjs-dist/);
 assert.ok(marketplace.MARKETPLACE_GIT_RESTORE_PATHS.includes("app/package-lock.json"));
+assert.strictEqual(marketplace.RUBBER_SHEET_PDFJS_VERSION, "4.10.38");
+assert.match(marketplace.ensureMarketplaceHostNpmDepsBash(), /pdfjs-dist/);
 const rebuildAligned = marketplace.rebuildRemoteScript("/root/CloudTAK", "api");
 assert.match(rebuildAligned, /CloudTAK image build finished\./);
 assert.match(rebuildAligned, /CloudTAK container recreate finished\./);
 assert.match(rebuildAligned, /align_plugins_to_host/);
+assert.match(rebuildAligned, /ensure_marketplace_host_npm_deps/);
 assert.match(rebuildAligned, /node:22-alpine/);
 assert.match(rebuildAligned, /docker(_cli)? run --rm -u 0/);
 assert.match(rebuildAligned, /cloudtak-marketplace-plugins\/_host\/wrap-git-pull\.sh/);

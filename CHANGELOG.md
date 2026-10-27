@@ -16,7 +16,8 @@ All notable changes to this project will be documented in this file.  Minor qual
 🐛 `Bug Fix` - CloudTAK Marketplace: when leftover `cots.ts` still passes `replay` but `SubmitCotsRequest` lacks it, healers add the type field so API image `tsc` no longer fails with TS2353<br>
 🐛 `Bug Fix` - CloudTAK Marketplace page was blank after Save .txt diagnostics: EJS escaped the portal version as `&quot;…&quot;`, which broke the page script<br>
 🐛 `Bug Fix` - CloudTAK Marketplace Deploy To Caddy on takwerx/infra-TAK no longer fails with `sudo: a password is required` backing up `/etc/caddy/Caddyfile`; uses marketplace-helper `apply-caddyfile`<br>
-✨ `Enhancement` - CloudTAK Marketplace shows Redeploy To Caddy when routes are already present (rewrites the Caddyfile entry and reloads)
+✨ `Enhancement` - CloudTAK Marketplace shows Redeploy To Caddy when routes are already present (rewrites the Caddyfile entry and reloads)<br>
+🐛 `Bug Fix` - CloudTAK Marketplace: when Rubber Sheet is installed, rebuilds (e.g. LiveWX update) no longer fail vite resolve of `pdfjs-dist` — host `app/package.json` is re-seeded before image build
 
 ### v2.0.22 - 10/26/26
 🐛 `Bug Fix` - CloudTAK Marketplace: Replay drift repair no longer warns `Cannot find module './cloudtakMarketplace.patch'` when align runs from `/tmp` (#73)<br>
