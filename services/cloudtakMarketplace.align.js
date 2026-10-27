@@ -1631,12 +1631,14 @@ function alignInstalledPlugins(ctRoot) {
   changes.push(...relaxMarketplaceServerRoutes(path.join(root, "api")));
   // Heal Replay hub/index.ts if a prior drifted patch left `replay?: boolean` outside
   // SubmitCotsRequest (breaks API image eslint with Parsing error: Expression expected).
+  // Keep these healers inlined (do not require cloudtakMarketplace.patch): this file is
+  // staged alone as /tmp/ctak-marketplace-align.cjs (and /align.cjs in docker), so a
+  // relative require can never resolve there.
   try {
-    const patch = require("./cloudtakMarketplace.patch");
-    for (const note of patch.repairReplayDriftArtifacts(root) || []) {
+    for (const note of repairReplayDriftArtifacts(root) || []) {
       changes.push(note);
     }
-    for (const note of patch.wireCotsReplayFlag(root) || []) {
+    for (const note of wireCotsReplayFlag(root) || []) {
       if (!changes.includes(note)) changes.push(note);
     }
   } catch (err) {
@@ -1645,6 +1647,129 @@ function alignInstalledPlugins(ctRoot) {
     );
   }
   return { ok: true, changes };
+}
+
+/**
+ * Keep in sync with services/cloudtakMarketplace.patch.js — same healers, inlined so the
+ * align script stays self-contained when written to /tmp on the CloudTAK host.
+ */
+function repairOrphanedHubReplay(ctRoot) {
+  const typeFile = path.join(ctRoot, "api/common/hub/index.ts");
+  if (!fs.existsSync(typeFile)) return [];
+  let text = fs.readFileSync(typeFile, "utf8");
+  const notes = [];
+  let changed = false;
+
+  const orphanRe =
+    /(\n\};\r?\n)(?:\r?\n)?((?:[ \t]*\/\/[^\n]*\r?\n)*[ \t]*replay\?: boolean;\r?\n)(export interface HubClient\b)/;
+  if (orphanRe.test(text)) {
+    text = text.replace(orphanRe, "$1\n$3");
+    notes.push("api/common/hub/index.ts (removed orphaned replay field)");
+    changed = true;
+  }
+
+  const match = text.match(/export type SubmitCotsRequest = \{[\s\S]*?\n\};/);
+  const wantsReplay =
+    fs.existsSync(path.join(ctRoot, "api/stateful/lib/replay-recorder.ts")) ||
+    fs.existsSync(path.join(ctRoot, "app/plugins/replay")) ||
+    fs.existsSync(path.join(ctRoot, "api/web/plugins/replay")) ||
+    notes.some((n) => /orphaned/.test(n));
+  if (match && wantsReplay && !/replay\?: boolean/.test(match[0])) {
+    const block = match[0].replace(/\n\};$/, "\n    replay?: boolean;\n};");
+    text = text.replace(match[0], block);
+    notes.push("api/common/hub/index.ts (replay field inside SubmitCotsRequest)");
+    changed = true;
+  }
+
+  if (changed) fs.writeFileSync(typeFile, text);
+  return notes;
+}
+
+function repairOrphanedCotsReplay(ctRoot) {
+  const file = path.join(ctRoot, "api/stateful/routes/cots.ts");
+  if (!fs.existsSync(file)) return [];
+  let text = fs.readFileSync(file, "utf8");
+  const notes = [];
+  let changed = false;
+
+  const orphanOpt =
+    /(ifPooled: Type\.Optional\(Type\.Boolean\(\)\),\r?\n)([ \t]*\}\),\r?\n)([ \t]*replay: Type\.Optional\(Type\.Boolean\(\)\),\r?\n)/;
+  if (orphanOpt.test(text)) {
+    text = text.replace(orphanOpt, "$1$3$2");
+    notes.push("api/stateful/routes/cots.ts (moved replay body field before closing })");
+    changed = true;
+  }
+
+  const wantsReplay =
+    fs.existsSync(path.join(ctRoot, "api/stateful/lib/replay-recorder.ts")) ||
+    fs.existsSync(path.join(ctRoot, "app/plugins/replay")) ||
+    fs.existsSync(path.join(ctRoot, "api/web/plugins/replay")) ||
+    notes.length > 0;
+
+  if (
+    wantsReplay &&
+    /ifPooled: Type\.Optional\(Type\.Boolean\(\)\)/.test(text) &&
+    !/replay: Type\.Optional\(Type\.Boolean\(\)\)/.test(text)
+  ) {
+    text = text.replace(
+      /^([ \t]*)ifPooled: Type\.Optional\(Type\.Boolean\(\)\),\r?\n([ \t]*\}\),)/m,
+      "$1ifPooled: Type.Optional(Type.Boolean()),\n$1replay: Type.Optional(Type.Boolean()),\n$2"
+    );
+    notes.push("api/stateful/routes/cots.ts (added replay body field)");
+    changed = true;
+  }
+
+  if (
+    wantsReplay &&
+    /ifPooled: req\.body\.ifPooled/.test(text) &&
+    !/replay: req\.body\.replay/.test(text)
+  ) {
+    text = text.replace(
+      /^([ \t]*)ifPooled: req\.body\.ifPooled,\r?\n/m,
+      "$1ifPooled: req.body.ifPooled,\n$1replay: req.body.replay,\n"
+    );
+    notes.push("api/stateful/routes/cots.ts (added replay submitCots field)");
+    changed = true;
+  }
+
+  if (changed) fs.writeFileSync(file, text);
+  return notes;
+}
+
+function repairReplayDriftArtifacts(ctRoot) {
+  return repairOrphanedHubReplay(ctRoot).concat(repairOrphanedCotsReplay(ctRoot));
+}
+
+function wireCotsReplayFlag(ctRoot) {
+  const notes = repairReplayDriftArtifacts(ctRoot);
+  const pool = path.join(ctRoot, "api/stateful/lib/connection-pool.ts");
+  if (!fs.existsSync(pool)) return notes;
+  const poolText = fs.readFileSync(pool, "utf8");
+  if (!/opts\s*:\s*\{\s*replay\?: boolean\s*\}/.test(poolText) && !/opts\.replay/.test(poolText)) {
+    return notes;
+  }
+  const typeFile = path.join(ctRoot, "api/common/hub/index.ts");
+  if (fs.existsSync(typeFile)) {
+    let text = fs.readFileSync(typeFile, "utf8");
+    const match = text.match(/export type SubmitCotsRequest = \{[\s\S]*?\n\};/);
+    if (match && !/replay\?: boolean/.test(match[0])) {
+      const block = match[0].replace(/\n\};$/, "\n    replay?: boolean;\n};");
+      text = text.replace(match[0], block);
+      fs.writeFileSync(typeFile, text);
+      notes.push("api/common/hub/index.ts");
+    }
+  }
+  const localFile = path.join(ctRoot, "api/stateful/lib/hub/local.ts");
+  if (fs.existsSync(localFile)) {
+    const text = fs.readFileSync(localFile, "utf8");
+    const from = ".cots(client.config, req.cots)";
+    const to = ".cots(client.config, req.cots, { replay: req.replay === true })";
+    if (text.includes(from) && !text.includes("{ replay: req.replay === true }")) {
+      fs.writeFileSync(localFile, text.replace(from, to));
+      notes.push("api/stateful/lib/hub/local.ts");
+    }
+  }
+  return notes;
 }
 
 function main() {
@@ -1733,4 +1858,8 @@ module.exports = {
   ensureLoopbackPublish,
   ensureLoopbackPublishFile,
   fixComposeDependsFile,
+  repairReplayDriftArtifacts,
+  wireCotsReplayFlag,
+  repairOrphanedHubReplay,
+  repairOrphanedCotsReplay,
 };

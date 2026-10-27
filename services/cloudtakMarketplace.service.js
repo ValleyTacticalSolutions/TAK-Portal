@@ -22,6 +22,10 @@ let _cancelRequested = false;
 let _lastBackgroundAt = 0;
 let _uiSnapshot = null;
 let _uiSnapshotAt = 0;
+/** One-shot: clear queued/running jobs left over from a previous process. */
+let _recoveredInterruptedJobs = false;
+/** Job ids that were queued/running when this process first loaded the store. */
+let _interruptedJobIdsAtBoot = null;
 
 function cancelledError() {
   const err = new Error("Cancelled.");
@@ -2312,6 +2316,72 @@ function cancelCurrentJobs() {
   if (!count) _cancelRequested = false;
   return { ok: true, count, jobs: result.jobs };
 }
+
+const INTERRUPTED_BY_RESTART = "Interrupted by restart.";
+
+function bootInterruptedJobIds() {
+  if (_interruptedJobIdsAtBoot) return _interruptedJobIdsAtBoot;
+  try {
+    _interruptedJobIdsAtBoot = new Set(
+      store
+        .readJobs()
+        .jobs.filter((j) => {
+          const status = String((j && j.status) || "");
+          return status === "queued" || status === "running";
+        })
+        .map((j) => j.id)
+        .filter(Boolean)
+    );
+  } catch (_) {
+    _interruptedJobIdsAtBoot = new Set();
+  }
+  return _interruptedJobIdsAtBoot;
+}
+
+/**
+ * Mark busy jobs as failed ("Interrupted by restart."). When `jobIds` is set,
+ * only those ids are touched (used on startup so post-boot enqueues survive).
+ */
+function failInterruptedJobs(opts = {}) {
+  const filterIds = opts.jobIds || null;
+  if (filterIds && !filterIds.size) {
+    return { ok: true, count: 0, jobs: store.readJobs().jobs };
+  }
+  const now = new Date().toISOString();
+  let count = 0;
+  const result = store.withJobs((jobs) =>
+    jobs.map((j) => {
+      if (!isBusyJob(j)) return j;
+      if (filterIds && !filterIds.has(j.id)) return j;
+      count += 1;
+      const log = Array.isArray(j.log) ? j.log.slice() : [];
+      if (!log.length || log[log.length - 1] !== INTERRUPTED_BY_RESTART) {
+        log.push(INTERRUPTED_BY_RESTART);
+      }
+      return {
+        ...j,
+        status: "failed",
+        finishedAt: now,
+        error: INTERRUPTED_BY_RESTART,
+        log,
+      };
+    })
+  );
+  if (count) {
+    console.warn(`[cloudtak-marketplace] marked ${count} leftover job(s) as failed (interrupted by restart)`);
+  }
+  return { ok: true, count, jobs: result.jobs };
+}
+
+function recoverInterruptedJobsOnce() {
+  if (_recoveredInterruptedJobs) return { ok: true, count: 0, skipped: true };
+  _recoveredInterruptedJobs = true;
+  return failInterruptedJobs({ jobIds: bootInterruptedJobIds() });
+}
+
+// Capture busy job ids as soon as this module loads so later enqueues in this
+// process are not treated as leftovers from a prior restart.
+bootInterruptedJobIds();
 
 function pluginById(id) {
   return loadCatalog().plugins.find((p) => p.id === id) || null;
@@ -4606,6 +4676,7 @@ async function submitPluginRequest(opts) {
 async function workerTick() {
   if (!isEnabled()) return;
   try {
+    recoverInterruptedJobsOnce();
     await claimAndRunJobs();
   } catch (err) {
     console.warn("[cloudtak-marketplace] job tick:", err?.message || err);
@@ -4702,6 +4773,8 @@ module.exports = {
   listJobs,
   clearIdleJobs,
   cancelCurrentJobs,
+  failInterruptedJobs,
+  recoverInterruptedJobsOnce,
   isBusyJob,
   hasBusyChangeJobs,
   claimAndRunJobs,

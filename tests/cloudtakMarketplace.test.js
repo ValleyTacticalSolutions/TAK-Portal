@@ -1234,6 +1234,82 @@ assert.deepStrictEqual(after.map((j) => j.id), ["sib", "next"]);
 const onlyFinished = marketplace.selectLogJobs([done, scan]);
 assert.deepStrictEqual(onlyFinished.map((j) => j.id), ["done"]);
 
+// Restart recovery: leftover queued/running jobs must fail so the marketplace unlocks (#74).
+{
+  const prevJobs = store.readJobs().jobs;
+  try {
+    store.writeJobs({
+      jobs: [
+        {
+          id: "stuck-run",
+          kind: "install",
+          status: "running",
+          createdAt: "2026-10-26T20:07:09.000Z",
+          startedAt: "2026-10-26T20:07:09.000Z",
+          log: ["Starting plugin node sidecar ..."],
+          error: null,
+        },
+        {
+          id: "stuck-queue",
+          kind: "uninstall",
+          status: "queued",
+          createdAt: "2026-10-26T20:07:10.000Z",
+          log: [],
+          error: null,
+        },
+        {
+          id: "keep-staged",
+          kind: "install",
+          status: "staged",
+          createdAt: "2026-10-26T20:07:11.000Z",
+          log: [],
+          error: null,
+        },
+        {
+          id: "keep-done",
+          kind: "scan",
+          status: "complete",
+          finishedAt: "2026-10-26T20:00:00.000Z",
+          log: ["ok"],
+          error: null,
+        },
+      ],
+    });
+    assert.strictEqual(marketplace.hasBusyChangeJobs(), true);
+    const recovered = marketplace.failInterruptedJobs();
+    assert.strictEqual(recovered.count, 2);
+    const afterRecover = store.readJobs().jobs;
+    const stuckRun = afterRecover.find((j) => j.id === "stuck-run");
+    const stuckQueue = afterRecover.find((j) => j.id === "stuck-queue");
+    const staged = afterRecover.find((j) => j.id === "keep-staged");
+    const complete = afterRecover.find((j) => j.id === "keep-done");
+    assert.strictEqual(stuckRun.status, "failed");
+    assert.strictEqual(stuckRun.error, "Interrupted by restart.");
+    assert.ok(stuckRun.log.includes("Interrupted by restart."));
+    assert.strictEqual(stuckQueue.status, "failed");
+    assert.strictEqual(stuckQueue.error, "Interrupted by restart.");
+    assert.strictEqual(staged.status, "staged");
+    assert.strictEqual(complete.status, "complete");
+    assert.strictEqual(marketplace.hasBusyChangeJobs(), false);
+    assert.strictEqual(typeof marketplace.recoverInterruptedJobsOnce, "function");
+    marketplace.recoverInterruptedJobsOnce();
+    assert.strictEqual(marketplace.recoverInterruptedJobsOnce().skipped, true);
+  } finally {
+    store.writeJobs({ jobs: prevJobs });
+  }
+}
+
+// Align healers are self-contained (no require of patch) so /tmp staging works (#73).
+{
+  const alignSrc = fs.readFileSync(
+    path.join(__dirname, "..", "services", "cloudtakMarketplace.align.js"),
+    "utf8"
+  );
+  assert.doesNotMatch(alignSrc, /require\(["']\.\/cloudtakMarketplace\.patch["']\)/);
+  assert.strictEqual(typeof pluginAlign.repairReplayDriftArtifacts, "function");
+  assert.strictEqual(typeof pluginAlign.wireCotsReplayFlag, "function");
+}
+
 const ssh = require("../services/cloudtakMarketplace.ssh");
 assert.strictEqual(typeof ssh.onboardWithPassword, "function");
 assert.strictEqual(typeof ssh.ensureCloudtakSshKeyPair, "function");

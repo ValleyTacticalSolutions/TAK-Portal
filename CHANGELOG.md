@@ -11,6 +11,11 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.22 - TBD
+🐛 `Bug Fix` - CloudTAK Marketplace: Replay drift repair no longer warns `Cannot find module './cloudtakMarketplace.patch'` when align runs from `/tmp` (#73)<br>
+🐛 `Bug Fix` - CloudTAK Marketplace: leftover queued/running jobs are marked failed on worker startup after a portal restart, so installs are not locked until Cancel (#74)<br>
+⬆️ `Dependency Update` - sharp 0.35.5, multer 2.5.0, undici 7.30.1, axios 1.20.0, @xmldom/xmldom 0.9.12 (#72)
+
 ### v2.0.21 - 10/26/26
 ✨ `Enhancement` - Button added to CloudTAK Marketplace to request URLs to be added for new plugins<br>
 🔌 `Plugin Update` - Added Search Containment, Measure, Skydio from clptak (Skydio remains untested)
