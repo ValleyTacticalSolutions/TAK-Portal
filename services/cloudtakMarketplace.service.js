@@ -3899,11 +3899,22 @@ const path = require("path");
 const ct = process.argv[2];
 const notes = [];
 function wantsReplay(changed) {
+  let cotsUses = false;
+  try {
+    const cotsFile = path.join(ct, "api/stateful/routes/cots.ts");
+    if (fs.existsSync(cotsFile)) {
+      const t = fs.readFileSync(cotsFile, "utf8");
+      cotsUses =
+        /replay:\\s*req\\.body\\.replay/.test(t) ||
+        /replay:\\s*Type\\.Optional\\(Type\\.Boolean\\(\\)\\)/.test(t);
+    }
+  } catch (_) {}
   return (
     fs.existsSync(path.join(ct, "api/stateful/lib/replay-recorder.ts")) ||
     fs.existsSync(path.join(ct, "app/plugins/replay")) ||
     fs.existsSync(path.join(ct, "api/web/plugins/replay")) ||
-    !!changed
+    !!changed ||
+    cotsUses
   );
 }
 (function repairHub() {

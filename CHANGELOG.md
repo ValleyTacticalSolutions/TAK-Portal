@@ -11,6 +11,10 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.23 - TBD
+✨ `Enhancement` - CloudTAK Marketplace Save .txt appends TAK Portal version and host/SSH/instance details for troubleshooting<br>
+🐛 `Bug Fix` - CloudTAK Marketplace: when leftover `cots.ts` still passes `replay` but `SubmitCotsRequest` lacks it, healers add the type field so API image `tsc` no longer fails with TS2353
+
 ### v2.0.22 - 10/26/26
 🐛 `Bug Fix` - CloudTAK Marketplace: Replay drift repair no longer warns `Cannot find module './cloudtakMarketplace.patch'` when align runs from `/tmp` (#73)<br>
 🐛 `Bug Fix` - CloudTAK Marketplace: leftover queued/running jobs are marked failed on worker startup after a portal restart, so installs are not locked until Cancel (#74)<br>

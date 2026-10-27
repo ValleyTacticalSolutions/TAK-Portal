@@ -1669,11 +1669,24 @@ function repairOrphanedHubReplay(ctRoot) {
   }
 
   const match = text.match(/export type SubmitCotsRequest = \{[\s\S]*?\n\};/);
+  // Also treat leftover cots.ts usage as wantsReplay — otherwise TS2353:
+  // 'replay' does not exist in type 'SubmitCotsRequest'.
+  const cotsFile = path.join(ctRoot, "api/stateful/routes/cots.ts");
+  let cotsUsesReplay = false;
+  try {
+    if (fs.existsSync(cotsFile)) {
+      const cotsText = fs.readFileSync(cotsFile, "utf8");
+      cotsUsesReplay =
+        /replay:\s*req\.body\.replay/.test(cotsText) ||
+        /replay:\s*Type\.Optional\(Type\.Boolean\(\)\)/.test(cotsText);
+    }
+  } catch (_) {}
   const wantsReplay =
     fs.existsSync(path.join(ctRoot, "api/stateful/lib/replay-recorder.ts")) ||
     fs.existsSync(path.join(ctRoot, "app/plugins/replay")) ||
     fs.existsSync(path.join(ctRoot, "api/web/plugins/replay")) ||
-    notes.some((n) => /orphaned/.test(n));
+    notes.some((n) => /orphaned/.test(n)) ||
+    cotsUsesReplay;
   if (match && wantsReplay && !/replay\?: boolean/.test(match[0])) {
     const block = match[0].replace(/\n\};$/, "\n    replay?: boolean;\n};");
     text = text.replace(match[0], block);

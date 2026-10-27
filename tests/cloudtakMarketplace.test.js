@@ -316,6 +316,41 @@ assert.doesNotMatch(
   );
   fs.rmSync(tmp, { recursive: true, force: true });
 }
+
+// TS2353 case: cots.ts still passes replay but SubmitCotsRequest lacks it (no Replay plugin).
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hub-cots-replay-mismatch-"));
+  fs.mkdirSync(path.join(tmp, "api/common/hub"), { recursive: true });
+  fs.mkdirSync(path.join(tmp, "api/stateful/routes"), { recursive: true });
+  fs.writeFileSync(
+    path.join(tmp, "api/common/hub/index.ts"),
+    ["export type SubmitCotsRequest = {", "    ifPooled?: boolean;", "};", "", "export interface HubClient {", "}", ""].join(
+      "\n"
+    )
+  );
+  fs.writeFileSync(
+    path.join(tmp, "api/stateful/routes/cots.ts"),
+    [
+      "        ifPooled: Type.Optional(Type.Boolean()),",
+      "        replay: Type.Optional(Type.Boolean()),",
+      "    }),",
+      "    const body = {",
+      "        ifPooled: req.body.ifPooled,",
+      "        replay: req.body.replay,",
+      "    };",
+      "",
+    ].join("\n")
+  );
+  const notes = pluginPatch.repairOrphanedHubReplay(tmp);
+  assert.ok(notes.some((n) => /replay field inside SubmitCotsRequest/.test(n)));
+  assert.match(
+    fs.readFileSync(path.join(tmp, "api/common/hub/index.ts"), "utf8"),
+    /ifPooled\?: boolean;\n    replay\?: boolean;\n\};/
+  );
+  const alignNotes = pluginAlign.repairOrphanedHubReplay(tmp);
+  assert.ok(Array.isArray(alignNotes));
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
 assert.ok(!ids.includes("lightning"));
 
 const gh = marketplace.parseGitHubRepo(
