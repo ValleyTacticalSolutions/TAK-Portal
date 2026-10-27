@@ -76,21 +76,28 @@ function titleKeyPart(title) {
   return normalizeTitle(title).toLowerCase();
 }
 
-function countyKey(detail, title) {
-  return `${String(detail || "").trim().toLowerCase()}|${titleKeyPart(title)}`;
+function countyKey(detail, title, behavior) {
+  const base = `${String(detail || "").trim().toLowerCase()}|${titleKeyPart(title)}`;
+  const b = normalizeBehavior(behavior);
+  // BOTH keeps the legacy title-only key so existing ledgers still match.
+  return b === "both" ? base : `${base}|${b}`;
 }
 
-function stateKey(detail, title) {
-  return `${String(detail || "").trim().toUpperCase()}|${titleKeyPart(title)}`;
+function stateKey(detail, title, behavior) {
+  const base = `${String(detail || "").trim().toUpperCase()}|${titleKeyPart(title)}`;
+  const b = normalizeBehavior(behavior);
+  return b === "both" ? base : `${base}|${b}`;
 }
 
-function regionKey(detail, title) {
-  return `${String(detail || "").trim().toLowerCase()}|${titleKeyPart(title)}`;
+function regionKey(detail, title, behavior) {
+  const base = `${String(detail || "").trim().toLowerCase()}|${titleKeyPart(title)}`;
+  const b = normalizeBehavior(behavior);
+  return b === "both" ? base : `${base}|${b}`;
 }
 
 /**
  * Read configured group slots (title + channel behavior [+ private for agency]).
- * Title-only dedupe matches prior behavior; empty titles are skipped.
+ * Dedupe by title+behavior (the Authentik name identity); empty titles are skipped.
  */
 function readSlots(titlePrefix, { includePrivate = false } = {}) {
   const slots = [];
@@ -100,13 +107,15 @@ function readSlots(titlePrefix, { includePrivate = false } = {}) {
   for (let i = 1; i <= MAX_TITLES; i += 1) {
     const t = normalizeTitle(getString(`${titlePrefix}_${i}`, ""));
     if (!t) continue;
-    const key = t.toLowerCase();
+    const behavior = normalizeBehavior(getString(`${behaviorPrefix}_${i}`, "both"));
+    // Same title with different behaviors (e.g. Main BOTH + Main READ) are distinct groups.
+    const key = `${t.toLowerCase()}|${behavior}`;
     if (seen.has(key)) continue;
     seen.add(key);
     const slot = {
       index: i,
       title: t,
-      behavior: normalizeBehavior(getString(`${behaviorPrefix}_${i}`, "both")),
+      behavior,
     };
     if (includePrivate) {
       slot.private = normalizePrivate(getString(`${privatePrefix}_${i}`, "no"));
@@ -270,10 +279,10 @@ async function ensureGeoTitleGroup({
 }) {
   const key =
     scope === "state"
-      ? stateKey(detail, title)
+      ? stateKey(detail, title, behavior)
       : scope === "region"
-        ? regionKey(detail, title)
-        : countyKey(detail, title);
+        ? regionKey(detail, title, behavior)
+        : countyKey(detail, title, behavior);
   const bucket =
     scope === "state" ? "state" : scope === "region" ? "region" : "county";
   const createdType =
