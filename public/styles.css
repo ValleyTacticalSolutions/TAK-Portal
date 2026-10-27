@@ -3828,11 +3828,18 @@ a.settings-hub-card:visited {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .settings-auto-create-row input[type="text"] {
-  flex: 1;
+  flex: 1 1 10rem;
   min-width: 0;
+}
+
+.settings-auto-create-row select {
+  flex: 0 1 auto;
+  min-width: 10rem;
+  max-width: 100%;
 }
 
 .settings-auto-create-actions {

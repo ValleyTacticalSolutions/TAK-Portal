@@ -347,9 +347,14 @@
       for (let i = 1; i <= 3; i++) {
         autoCreateGroupKeys.push(
           `AUTO_CREATE_AGENCY_GROUP_TITLE_${i}`,
+          `AUTO_CREATE_AGENCY_GROUP_BEHAVIOR_${i}`,
+          `AUTO_CREATE_AGENCY_GROUP_PRIVATE_${i}`,
           `AUTO_CREATE_COUNTY_GROUP_TITLE_${i}`,
+          `AUTO_CREATE_COUNTY_GROUP_BEHAVIOR_${i}`,
           `AUTO_CREATE_REGION_GROUP_TITLE_${i}`,
-          `AUTO_CREATE_STATE_GROUP_TITLE_${i}`
+          `AUTO_CREATE_REGION_GROUP_BEHAVIOR_${i}`,
+          `AUTO_CREATE_STATE_GROUP_TITLE_${i}`,
+          `AUTO_CREATE_STATE_GROUP_BEHAVIOR_${i}`
         );
       }
 
@@ -2841,31 +2846,53 @@
               if (raw === "true" || raw === "false") return raw === "true";
               return !!defaultOn;
             }
-            function autoCreateTitles(prefix, defaultTitle) {
-              const titles = [];
+            function autoCreateBehavior(raw) {
+              const v = String(raw || "").trim().toLowerCase();
+              if (v === "read" || v === "write" || v === "both") return v;
+              return "both";
+            }
+            function autoCreatePrivate(raw) {
+              return String(raw || "").trim().toLowerCase() === "yes" ? "yes" : "no";
+            }
+            function autoCreateSlots(titlePrefix, defaultTitle, { includePrivate = false } = {}) {
+              const slots = [];
+              const behaviorPrefix = String(titlePrefix || "").replace(/_TITLE$/, "_BEHAVIOR");
+              const privatePrefix = String(titlePrefix || "").replace(/_TITLE$/, "_PRIVATE");
               for (let i = 1; i <= 3; i++) {
-                const t = String(settings[`${prefix}_${i}`] || "").trim();
-                if (t) titles.push(t);
+                const t = String(settings[`${titlePrefix}_${i}`] || "").trim();
+                if (!t) continue;
+                const slot = {
+                  title: t,
+                  behavior: autoCreateBehavior(settings[`${behaviorPrefix}_${i}`]),
+                };
+                if (includePrivate) {
+                  slot.private = autoCreatePrivate(settings[`${privatePrefix}_${i}`]);
+                }
+                slots.push(slot);
               }
-              if (!titles.length && defaultTitle) titles.push(defaultTitle);
-              return titles;
+              if (!slots.length && defaultTitle) {
+                const fallback = { title: defaultTitle, behavior: "both" };
+                if (includePrivate) fallback.private = "no";
+                slots.push(fallback);
+              }
+              return slots;
             }
             const autoCreateInitial = {
               agency: {
                 enabled: autoCreateEnabled("AUTO_CREATE_AGENCY_GROUPS_ENABLED", true),
-                titles: autoCreateTitles("AUTO_CREATE_AGENCY_GROUP_TITLE", "Main"),
+                titles: autoCreateSlots("AUTO_CREATE_AGENCY_GROUP_TITLE", "Main", { includePrivate: true }),
               },
               county: {
                 enabled: autoCreateEnabled("AUTO_CREATE_COUNTY_GROUPS_ENABLED", false),
-                titles: autoCreateTitles("AUTO_CREATE_COUNTY_GROUP_TITLE", "Interop"),
+                titles: autoCreateSlots("AUTO_CREATE_COUNTY_GROUP_TITLE", "Interop"),
               },
               region: {
                 enabled: autoCreateEnabled("AUTO_CREATE_REGION_GROUPS_ENABLED", false),
-                titles: autoCreateTitles("AUTO_CREATE_REGION_GROUP_TITLE", "Interop"),
+                titles: autoCreateSlots("AUTO_CREATE_REGION_GROUP_TITLE", "Interop"),
               },
               state: {
                 enabled: autoCreateEnabled("AUTO_CREATE_STATE_GROUPS_ENABLED", false),
-                titles: autoCreateTitles("AUTO_CREATE_STATE_GROUP_TITLE", "Interop"),
+                titles: autoCreateSlots("AUTO_CREATE_STATE_GROUP_TITLE", "Interop"),
               },
             };
           %>
@@ -2969,17 +2996,77 @@
                 });
               }
 
-              function createRow(section, value) {
+              function scheduleSave() {
+                notifyDataSyncGroupsChanged();
+                if (typeof window.scheduleSettingsAutoSave === 'function') {
+                  window.scheduleSettingsAutoSave();
+                }
+              }
+
+              function normalizeBehavior(v) {
+                var b = String(v || '').trim().toLowerCase();
+                if (b === 'read' || b === 'write' || b === 'both') return b;
+                return 'both';
+              }
+
+              function normalizePrivate(v) {
+                return String(v || '').trim().toLowerCase() === 'yes' ? 'yes' : 'no';
+              }
+
+              function makeBehaviorSelect(value) {
+                var sel = document.createElement('select');
+                sel.setAttribute('data-acg-behavior', '1');
+                sel.setAttribute('aria-label', 'Channel behavior');
+                [
+                  { value: 'both', label: 'BOTH - Send and Receive (default)' },
+                  { value: 'read', label: 'READ - Receive Only' },
+                  { value: 'write', label: 'WRITE - Send Only' }
+                ].forEach(function (opt) {
+                  var o = document.createElement('option');
+                  o.value = opt.value;
+                  o.textContent = opt.label;
+                  sel.appendChild(o);
+                });
+                sel.value = normalizeBehavior(value);
+                sel.addEventListener('change', scheduleSave);
+                return sel;
+              }
+
+              function makePrivateSelect(value) {
+                var sel = document.createElement('select');
+                sel.setAttribute('data-acg-private', '1');
+                sel.setAttribute('aria-label', 'Hide from agency admins');
+                [
+                  { value: 'no', label: 'Hide From Agency Admins: No' },
+                  { value: 'yes', label: 'Hide From Agency Admins: Yes' }
+                ].forEach(function (opt) {
+                  var o = document.createElement('option');
+                  o.value = opt.value;
+                  o.textContent = opt.label;
+                  sel.appendChild(o);
+                });
+                sel.value = normalizePrivate(value);
+                sel.addEventListener('change', scheduleSave);
+                return sel;
+              }
+
+              function createRow(section, slot) {
+                var type = section.getAttribute('data-acg-type') || '';
                 var list = section.querySelector('[data-acg-titles]');
                 var row = document.createElement('div');
                 row.className = 'settings-auto-create-row';
                 row.setAttribute('data-acg-row', '1');
 
+                var conf = slot && typeof slot === 'object' ? slot : { title: slot || '' };
+
                 var input = document.createElement('input');
                 input.type = 'text';
                 input.placeholder = 'Group title';
-                input.value = value || '';
+                input.value = conf.title || '';
                 input.setAttribute('data-acg-title', '1');
+
+                var behaviorSel = makeBehaviorSelect(conf.behavior);
+                var privateSel = type === 'agency' ? makePrivateSelect(conf.private) : null;
 
                 var remove = document.createElement('button');
                 remove.type = 'button';
@@ -2988,24 +3075,18 @@
                 remove.setAttribute('aria-label', 'Remove title');
                 remove.textContent = 'Remove';
 
-                input.addEventListener('input', function () {
-                  notifyDataSyncGroupsChanged();
-                  if (typeof window.scheduleSettingsAutoSave === 'function') {
-                    window.scheduleSettingsAutoSave();
-                  }
-                });
+                input.addEventListener('input', scheduleSave);
                 remove.addEventListener('click', function () {
                   var rows = section.querySelectorAll('[data-acg-row]');
                   if (rows.length <= 1) return;
                   row.remove();
                   updateSectionUi(section);
-                  notifyDataSyncGroupsChanged();
-                  if (typeof window.scheduleSettingsAutoSave === 'function') {
-                    window.scheduleSettingsAutoSave();
-                  }
+                  scheduleSave();
                 });
 
                 row.appendChild(input);
+                row.appendChild(behaviorSel);
+                if (privateSel) row.appendChild(privateSel);
                 row.appendChild(remove);
                 list.appendChild(row);
                 updateSectionUi(section);
@@ -3025,10 +3106,20 @@
                   rows.forEach(function (row, idx) {
                     var t = String((row.querySelector('[data-acg-title]') || {}).value || '').trim();
                     if (!t) return;
-                    titles.push({ index: idx + 1, title: t });
+                    var entry = {
+                      index: idx + 1,
+                      title: t,
+                      behavior: normalizeBehavior((row.querySelector('[data-acg-behavior]') || {}).value)
+                    };
+                    if (type === 'agency') {
+                      entry.private = normalizePrivate((row.querySelector('[data-acg-private]') || {}).value);
+                    }
+                    titles.push(entry);
                   });
                   if (!titles.length && enabled) {
-                    titles.push({ index: 1, title: defaults[type] });
+                    var fallback = { index: 1, title: defaults[type], behavior: 'both' };
+                    if (type === 'agency') fallback.private = 'no';
+                    titles.push(fallback);
                   }
                   out[type] = { enabled: enabled, titles: titles };
                 });
@@ -3060,18 +3151,15 @@
 
                 var titles = Array.isArray(conf.titles) && conf.titles.length
                   ? conf.titles.slice(0, MAX)
-                  : [defaults[type]];
+                  : [{ title: defaults[type], behavior: 'both', private: 'no' }];
                 titles.forEach(function (t) { createRow(section, t); });
                 updateSectionUi(section);
 
                 section.querySelector('[data-acg-add]').addEventListener('click', function () {
                   var n = section.querySelectorAll('[data-acg-row]').length;
                   if (n >= MAX) return;
-                  createRow(section, '');
-                  notifyDataSyncGroupsChanged();
-                  if (typeof window.scheduleSettingsAutoSave === 'function') {
-                    window.scheduleSettingsAutoSave();
-                  }
+                  createRow(section, { title: '', behavior: 'both', private: 'no' });
+                  scheduleSave();
                 });
               }
 
@@ -3093,24 +3181,48 @@
                   hiddenHost.appendChild(en);
 
                   var rows = [].slice.call(section.querySelectorAll('[data-acg-row]'));
-                  var titles = rows
+                  var slots = rows
                     .map(function (row) {
-                      return String((row.querySelector('[data-acg-title]') || {}).value || '').trim();
+                      var title = String((row.querySelector('[data-acg-title]') || {}).value || '').trim();
+                      if (!title) return null;
+                      var slot = {
+                        title: title,
+                        behavior: normalizeBehavior((row.querySelector('[data-acg-behavior]') || {}).value)
+                      };
+                      if (type === 'agency') {
+                        slot.private = normalizePrivate((row.querySelector('[data-acg-private]') || {}).value);
+                      }
+                      return slot;
                     })
                     .filter(Boolean)
                     .slice(0, MAX);
 
                   // Keep at least the default title slot value when enabled with empty inputs
-                  if (!titles.length && enabled) {
-                    titles = [defaults[type]];
+                  if (!slots.length && enabled) {
+                    slots = [{ title: defaults[type], behavior: 'both', private: 'no' }];
                   }
 
                   for (var i = 1; i <= MAX; i++) {
-                    var inp = document.createElement('input');
-                    inp.type = 'hidden';
-                    inp.name = 'settings[' + prefix + '_GROUP_TITLE_' + i + ']';
-                    inp.value = titles[i - 1] || '';
-                    hiddenHost.appendChild(inp);
+                    var slot = slots[i - 1] || null;
+                    var titleInp = document.createElement('input');
+                    titleInp.type = 'hidden';
+                    titleInp.name = 'settings[' + prefix + '_GROUP_TITLE_' + i + ']';
+                    titleInp.value = slot ? slot.title : '';
+                    hiddenHost.appendChild(titleInp);
+
+                    var behaviorInp = document.createElement('input');
+                    behaviorInp.type = 'hidden';
+                    behaviorInp.name = 'settings[' + prefix + '_GROUP_BEHAVIOR_' + i + ']';
+                    behaviorInp.value = slot ? normalizeBehavior(slot.behavior) : 'both';
+                    hiddenHost.appendChild(behaviorInp);
+
+                    if (type === 'agency') {
+                      var privateInp = document.createElement('input');
+                      privateInp.type = 'hidden';
+                      privateInp.name = 'settings[' + prefix + '_GROUP_PRIVATE_' + i + ']';
+                      privateInp.value = slot ? normalizePrivate(slot.private) : 'no';
+                      hiddenHost.appendChild(privateInp);
+                    }
                   }
                 });
               }
@@ -3175,9 +3287,15 @@
                   const out = [];
                   for (let i = 1; i <= 3; i++) {
                     const t = String(settings[`AUTO_CREATE_AGENCY_GROUP_TITLE_${i}`] || "").trim();
-                    if (t) out.push({ index: i, title: t });
+                    if (!t) continue;
+                    out.push({
+                      index: i,
+                      title: t,
+                      behavior: autoCreateBehavior(settings[`AUTO_CREATE_AGENCY_GROUP_BEHAVIOR_${i}`]),
+                      private: autoCreatePrivate(settings[`AUTO_CREATE_AGENCY_GROUP_PRIVATE_${i}`]),
+                    });
                   }
-                  if (!out.length) out.push({ index: 1, title: "Main" });
+                  if (!out.length) out.push({ index: 1, title: "Main", behavior: "both", private: "no" });
                   return out;
                 })(),
               },
@@ -3187,9 +3305,14 @@
                   const out = [];
                   for (let i = 1; i <= 3; i++) {
                     const t = String(settings[`AUTO_CREATE_COUNTY_GROUP_TITLE_${i}`] || "").trim();
-                    if (t) out.push({ index: i, title: t });
+                    if (!t) continue;
+                    out.push({
+                      index: i,
+                      title: t,
+                      behavior: autoCreateBehavior(settings[`AUTO_CREATE_COUNTY_GROUP_BEHAVIOR_${i}`]),
+                    });
                   }
-                  if (!out.length) out.push({ index: 1, title: "Interop" });
+                  if (!out.length) out.push({ index: 1, title: "Interop", behavior: "both" });
                   return out;
                 })(),
               },
@@ -3199,9 +3322,14 @@
                   const out = [];
                   for (let i = 1; i <= 3; i++) {
                     const t = String(settings[`AUTO_CREATE_STATE_GROUP_TITLE_${i}`] || "").trim();
-                    if (t) out.push({ index: i, title: t });
+                    if (!t) continue;
+                    out.push({
+                      index: i,
+                      title: t,
+                      behavior: autoCreateBehavior(settings[`AUTO_CREATE_STATE_GROUP_BEHAVIOR_${i}`]),
+                    });
                   }
-                  if (!out.length) out.push({ index: 1, title: "Interop" });
+                  if (!out.length) out.push({ index: 1, title: "Interop", behavior: "both" });
                   return out;
                 })(),
               },

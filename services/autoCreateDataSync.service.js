@@ -55,7 +55,7 @@ function stateKey(detail, title) {
   return `${String(detail || "").trim().toUpperCase()}|${titleKeyPart(title)}`;
 }
 
-function getLinkedGroupTitle(scope, groupTitles) {
+function getLinkedGroupSlot(scope, groupSlots) {
   const prefix =
     scope === "county"
       ? "AUTO_CREATE_COUNTY"
@@ -68,9 +68,23 @@ function getLinkedGroupTitle(scope, groupTitles) {
   const slotTitle = normalizeTitle(
     getString(`${prefix}_GROUP_TITLE_${index}`, "")
   );
-  if (slotTitle) return slotTitle;
-  const list = Array.isArray(groupTitles) ? groupTitles : [];
-  return list[0] || null;
+  const behavior = autoCreateGroupsSvc.normalizeBehavior(
+    getString(`${prefix}_GROUP_BEHAVIOR_${index}`, "both")
+  );
+  if (slotTitle) {
+    return { title: slotTitle, behavior, index };
+  }
+  const list = Array.isArray(groupSlots) ? groupSlots : [];
+  const first = list[0];
+  if (!first) return null;
+  if (typeof first === "string") {
+    return { title: first, behavior: "both", index: 1 };
+  }
+  return {
+    title: normalizeTitle(first.title),
+    behavior: autoCreateGroupsSvc.normalizeBehavior(first.behavior),
+    index: first.index || 1,
+  };
 }
 
 function getMissionTitle(scope) {
@@ -85,24 +99,30 @@ function getMissionTitle(scope) {
 
 function getAutoCreateDataSyncConfig() {
   const groups = autoCreateGroupsSvc.getAutoCreateConfig();
+  const agencySlot = getLinkedGroupSlot("agency", groups.agencySlots);
+  const countySlot = getLinkedGroupSlot("county", groups.countySlots);
+  const stateSlot = getLinkedGroupSlot("state", groups.stateSlots);
   return {
     groups,
     agency: {
       enabled: getBool("AUTO_CREATE_AGENCY_DATA_SYNC_ENABLED", false),
       missionTitle: getMissionTitle("agency"),
-      groupTitle: getLinkedGroupTitle("agency", groups.agencyTitles),
+      groupTitle: agencySlot?.title || null,
+      groupBehavior: agencySlot?.behavior || "both",
       groupIndex: getInt("AUTO_CREATE_AGENCY_DATA_SYNC_GROUP_INDEX", 1),
     },
     county: {
       enabled: getBool("AUTO_CREATE_COUNTY_DATA_SYNC_ENABLED", false),
       missionTitle: getMissionTitle("county"),
-      groupTitle: getLinkedGroupTitle("county", groups.countyTitles),
+      groupTitle: countySlot?.title || null,
+      groupBehavior: countySlot?.behavior || "both",
       groupIndex: getInt("AUTO_CREATE_COUNTY_DATA_SYNC_GROUP_INDEX", 1),
     },
     state: {
       enabled: getBool("AUTO_CREATE_STATE_DATA_SYNC_ENABLED", false),
       missionTitle: getMissionTitle("state"),
-      groupTitle: getLinkedGroupTitle("state", groups.stateTitles),
+      groupTitle: stateSlot?.title || null,
+      groupBehavior: stateSlot?.behavior || "both",
       groupIndex: getInt("AUTO_CREATE_STATE_DATA_SYNC_GROUP_INDEX", 1),
     },
   };
@@ -310,7 +330,8 @@ async function ensureAutoCreateDataSyncForAgency(agency) {
     );
     const groupName = autoCreateGroupsSvc.buildAgencyGroupName(
       agency?.groupPrefix,
-      config.agency.groupTitle
+      config.agency.groupTitle,
+      config.agency.groupBehavior
     );
     if (missionName && groupName) {
       try {
@@ -346,7 +367,8 @@ async function ensureAutoCreateDataSyncForAgency(agency) {
     const missionName = buildCountyMissionName(county, config.county.missionTitle);
     const groupName = autoCreateGroupsSvc.buildCountyGroupName(
       county,
-      config.county.groupTitle
+      config.county.groupTitle,
+      config.county.groupBehavior
     );
     if (missionName && groupName) {
       try {
@@ -387,7 +409,8 @@ async function ensureAutoCreateDataSyncForAgency(agency) {
     const missionName = buildStateMissionName(state, config.state.missionTitle);
     const groupName = autoCreateGroupsSvc.buildStateGroupName(
       state,
-      config.state.groupTitle
+      config.state.groupTitle,
+      config.state.groupBehavior
     );
     if (missionName && groupName) {
       try {
