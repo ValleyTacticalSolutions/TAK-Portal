@@ -524,6 +524,8 @@ HOST_PATH=${JSON.stringify(hostPath)}
 VIA=${JSON.stringify(via)}
 VALIDATE=${JSON.stringify(validateCmd)}
 RELOAD=${JSON.stringify(reloadCmd)}
+HELPER="\${CTAK_MARKETPLACE_HELPER:-/usr/local/libexec/tak-portal/marketplace-helper}"
+PRIV="\${CTAK_PRIV:-sudo}"
 case "\$HOST_PATH" in
   *Caddyfile*|*caddy*|*Caddy*) ;;
   *) echo "Refusing to edit \$HOST_PATH" >&2; exit 1 ;;
@@ -534,20 +536,55 @@ BAK="\${HOST_PATH}.bak-marketplace"
 cleanup() { rm -f "\$NEW"; }
 trap cleanup EXIT
 printf '%s' ${JSON.stringify(b64)} | base64 -d > "\$NEW" || { echo "Could not decode the updated Caddyfile" >&2; exit 1; }
+
+# Prefer fixed-verb marketplace-helper for host/systemd Caddy (/etc/caddy/…).
+# takwerx (infra-TAK) has NOPASSWD for the helper only — not for raw sudo cp.
+helper_can_run() {
+  [ -x "\$HELPER" ] || return 1
+  if "\$PRIV" -n "\$HELPER" version >/dev/null 2>&1; then return 0; fi
+  if [ -n "\${CTAK_SUDO_PASS:-}" ]; then
+    if printf '%s\\n' "\$CTAK_SUDO_PASS" | "\$PRIV" -S -p '' "\$HELPER" version >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  return 1
+}
+helper_apply_caddyfile() {
+  helper_can_run || return 1
+  case "\$HOST_PATH" in
+    /etc/caddy/Caddyfile|/etc/caddy/*/Caddyfile) ;;
+    *) return 1 ;;
+  esac
+  echo "elevate: marketplace-helper apply-caddyfile \$HOST_PATH"
+  if "\$PRIV" -n "\$HELPER" version >/dev/null 2>&1; then
+    "\$PRIV" -n "\$HELPER" apply-caddyfile "\$HOST_PATH" < "\$NEW"
+    return \$?
+  fi
+  printf '%s\\n' "\$CTAK_SUDO_PASS" | "\$PRIV" -S -p '' "\$HELPER" apply-caddyfile "\$HOST_PATH" < "\$NEW"
+  return \$?
+}
+if [ "\$VIA" != "docker" ] && helper_apply_caddyfile; then
+  exit 0
+fi
+
 copy_over() {
   local src="\$1" dest="\$2"
   if cp "\$src" "\$dest" 2>/dev/null; then return 0; fi
-  if sudo -n cp "\$src" "\$dest" 2>/dev/null; then return 0; fi
+  if "\$PRIV" -n cp "\$src" "\$dest" 2>/dev/null; then return 0; fi
   return 1
 }
 run_cmd() {
   local cmd="\$1"
   [ -n "\$cmd" ] || return 0
   if bash -lc "\$cmd"; then return 0; fi
-  if sudo -n bash -lc "\$cmd"; then return 0; fi
+  if "\$PRIV" -n bash -lc "\$cmd" 2>/dev/null; then return 0; fi
   return 1
 }
-cp -a "\$HOST_PATH" "\$BAK" 2>/dev/null || sudo -n cp -a "\$HOST_PATH" "\$BAK" || { echo "Could not back up \$HOST_PATH" >&2; exit 1; }
+cp -a "\$HOST_PATH" "\$BAK" 2>/dev/null || "\$PRIV" -n cp -a "\$HOST_PATH" "\$BAK" 2>/dev/null || {
+  echo "Could not back up \$HOST_PATH" >&2
+  echo "Host Caddyfile is root-owned; install/grant /usr/local/libexec/tak-portal/marketplace-helper (apply-caddyfile) for takwerx/infra-TAK, or run Deploy To Caddy as a user with write access." >&2
+  exit 1
+}
 if [ "\$VIA" != "docker" ] && [ -n "\$VALIDATE" ]; then
   CHECK=\${VALIDATE}
   case "\$CHECK" in
@@ -559,7 +596,11 @@ if [ "\$VIA" != "docker" ] && [ -n "\$VALIDATE" ]; then
     exit 1
   fi
 fi
-copy_over "\$NEW" "\$HOST_PATH" || { echo "Could not write \$HOST_PATH" >&2; exit 1; }
+copy_over "\$NEW" "\$HOST_PATH" || {
+  echo "Could not write \$HOST_PATH" >&2
+  echo "Install/grant marketplace-helper apply-caddyfile for non-root SSH users (takwerx)." >&2
+  exit 1
+}
 if [ "\$VIA" = "docker" ] && [ -n "\$VALIDATE" ]; then
   if ! run_cmd "\$VALIDATE"; then
     copy_over "\$BAK" "\$HOST_PATH" || true

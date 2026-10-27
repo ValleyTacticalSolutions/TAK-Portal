@@ -630,6 +630,16 @@ assert.match(discover, /systemctl is-active caddy/);
 assert.match(discover, /\$runtime inspect/);
 assert.match(discover, /Caddyfile/);
 assert.doesNotMatch(discover, /incident-manager/);
+const applyHost = caddy.applyScript({
+  b64: Buffer.from("{\n}\n", "utf8").toString("base64"),
+  hostPath: "/etc/caddy/Caddyfile",
+  via: "systemd",
+  validateCmd: "caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile",
+  reloadCmd: "systemctl reload caddy",
+});
+assert.match(applyHost, /marketplace-helper apply-caddyfile/);
+assert.match(applyHost, /\/etc\/caddy\/Caddyfile/);
+assert.match(applyHost, /need write access or marketplace-helper|Install\/grant marketplace-helper/i);
 const probed = caddy.parseProbe("CADDY_NONE\n");
 assert.strictEqual(probed.available, false);
 

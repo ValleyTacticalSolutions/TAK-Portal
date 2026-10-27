@@ -799,10 +799,30 @@ marketplace_helper_write_install_script() {
 }
 
 # Deploy helper for takwerx BEFORE removing leftover NOPASSWD: ALL (bootstrap once).
+# When a helper already exists, refresh it from the staged Portal source so new verbs
+# (e.g. apply-caddyfile) land without requiring a separate infra-TAK package bump.
 install_marketplace_helper() {
   local script
   marketplace_should_auto_deploy_helper || return 1
-  if marketplace_helper_available; then return 0; fi
+  if marketplace_helper_available; then
+    if [ -f "\${CTAK_MARKETPLACE_HELPER_SRC:-}" ]; then
+      if "$CTAK_PRIV" -n true >/dev/null 2>&1; then
+        if "$CTAK_PRIV" -n cp "$CTAK_MARKETPLACE_HELPER_SRC" "$CTAK_MARKETPLACE_HELPER" 2>/dev/null \\
+          && "$CTAK_PRIV" -n chmod 755 "$CTAK_MARKETPLACE_HELPER" 2>/dev/null; then
+          echo "elevate: refreshed marketplace helper from staged source"
+          return 0
+        fi
+      fi
+      if [ -n "\${CTAK_SUDO_PASS:-}" ] && printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' true >/dev/null 2>&1; then
+        if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' cp "$CTAK_MARKETPLACE_HELPER_SRC" "$CTAK_MARKETPLACE_HELPER" >/dev/null 2>&1 \\
+          && printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' chmod 755 "$CTAK_MARKETPLACE_HELPER" >/dev/null 2>&1; then
+          echo "elevate: refreshed marketplace helper from staged source"
+          return 0
+        fi
+      fi
+    fi
+    return 0
+  fi
   if [ ! -f "\${CTAK_MARKETPLACE_HELPER_SRC:-}" ]; then
     echo "elevate: marketplace helper source not staged at \${CTAK_MARKETPLACE_HELPER_SRC:-}; cannot auto-deploy" >&2
     return 1
@@ -1556,20 +1576,38 @@ async function deployPluginCaddy(pluginId) {
   }
   let caddyChanged = false;
   if (edited.changed) {
-    const write = await ssh.runCommand(
-      `bash -lc ${ssh.shellQuote(
-        caddyMod.applyScript({
-          b64: Buffer.from(edited.text, "utf8").toString("base64"),
-          hostPath: probe.hostPath,
-          via: probe.via,
-          validateCmd: probe.validateCmd,
-          reloadCmd: probe.reloadCmd,
-        })
-      )}`,
-      60000
-    );
+    // Stage/auto-deploy marketplace-helper for takwerx so host /etc/caddy writes
+    // do not fall back to password-prompting sudo cp.
+    await stageMarketplaceHelperSource([]);
+    let ctPath = "";
+    try {
+      const loc = await ensureCheckoutPath();
+      if (loc && loc.ok && loc.path) ctPath = loc.path;
+    } catch (_) {}
+    const applyBody = caddyMod.applyScript({
+      b64: Buffer.from(edited.text, "utf8").toString("base64"),
+      hostPath: probe.hostPath,
+      via: probe.via,
+      validateCmd: probe.validateCmd,
+      reloadCmd: probe.reloadCmd,
+    });
+    const remote = `
+set -euo pipefail
+CT=${ssh.shellQuote(ctPath || "/tmp")}
+${pluginPrivilegeBash({ composeService: "api" })}
+ensure_marketplace_sudoers || true
+install_marketplace_helper || true
+${applyBody}
+`.trim();
+    const write = await ssh.runCommand(`bash -lc ${ssh.shellQuote(remote)}`, 90000);
     if (!write.ok || !/APPLY_OK/.test(write.stdout || "")) {
-      return { ok: false, message: write.message || "Caddy update failed." };
+      const detail = String(write.message || write.stderr || write.stdout || "Caddy update failed.")
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .slice(-6)
+        .join(" ");
+      return { ok: false, message: detail || "Caddy update failed." };
     }
     caddyChanged = true;
   }

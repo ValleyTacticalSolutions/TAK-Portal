@@ -4,7 +4,7 @@
 # Do not add shell/eval; validate every argument.
 set -euo pipefail
 
-HELPER_VERSION=1
+HELPER_VERSION=2
 CADDY_SITES_D="${TAK_PORTAL_CADDY_SITES_D:-/etc/caddy/sites.d}"
 
 die() {
@@ -23,6 +23,7 @@ Verbs:
   install-plugin <cloudtak_path> <plugin_id> <dest> <staging_dir>
   rebuild <cloudtak_path> [compose_service]
   write-caddy-route <map_host> <plugin_id>   (Caddy snippet on stdin)
+  apply-caddyfile <caddyfile_path>           (full Caddyfile on stdin; backup+validate+reload)
   rm-plugin <cloudtak_path> <dest>
 EOF
   exit 2
@@ -190,6 +191,61 @@ cmd_write_caddy_route() {
   echo "wrote $dest"
 }
 
+is_allowed_caddyfile() {
+  case "${1:-}" in
+    /etc/caddy/Caddyfile) return 0 ;;
+    /etc/caddy/*/Caddyfile) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Host/systemd Caddy (infra-TAK takwerx): write the main Caddyfile with backup + validate + reload.
+# Content on stdin. Avoids broad `sudo cp` which prompts for a password for non-root SSH users.
+cmd_apply_caddyfile() {
+  local dest="${1:-}"
+  is_abs_no_dotdot "$dest" || die "invalid caddyfile path"
+  is_allowed_caddyfile "$dest" || die "refusing caddyfile path outside /etc/caddy: $dest"
+  [ -f "$dest" ] || die "caddyfile missing: $dest"
+
+  local new bak
+  new=$(mktemp)
+  bak="${dest}.bak-marketplace"
+  cat >"$new" || {
+    rm -f "$new"
+    die "could not read updated Caddyfile from stdin"
+  }
+  if command -v caddy >/dev/null 2>&1; then
+    if ! caddy validate --config "$new" --adapter caddyfile; then
+      rm -f "$new"
+      die "caddy rejected the updated file; original left in place"
+    fi
+  fi
+  cp -a "$dest" "$bak" || {
+    rm -f "$new"
+    die "could not back up $dest"
+  }
+  if ! cp "$new" "$dest"; then
+    rm -f "$new"
+    die "could not write $dest"
+  fi
+  rm -f "$new"
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet caddy 2>/dev/null; then
+    if ! systemctl reload caddy; then
+      cp -a "$bak" "$dest" || true
+      systemctl reload caddy >/dev/null 2>&1 || true
+      die "caddy reload failed; original file was restored"
+    fi
+  elif command -v caddy >/dev/null 2>&1; then
+    if ! caddy reload --config "$dest" --adapter caddyfile; then
+      cp -a "$bak" "$dest" || true
+      caddy reload --config "$dest" --adapter caddyfile >/dev/null 2>&1 || true
+      die "caddy reload failed; original file was restored"
+    fi
+  fi
+  echo APPLY_OK
+  echo "Backed up to $bak"
+}
+
 cmd_rm_plugin() {
   local ct="${1:-}" dest="${2:-}"
   is_abs_no_dotdot "$ct" || die "invalid cloudtak path"
@@ -261,6 +317,10 @@ main() {
     write-caddy-route)
       [ "$#" -eq 2 ] || die "write-caddy-route requires <map_host> <plugin_id>"
       cmd_write_caddy_route "$@"
+      ;;
+    apply-caddyfile)
+      [ "$#" -eq 1 ] || die "apply-caddyfile requires <caddyfile_path>"
+      cmd_apply_caddyfile "$@"
       ;;
     rm-plugin)
       [ "$#" -eq 2 ] || die "rm-plugin requires <cloudtak_path> <dest>"

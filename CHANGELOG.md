@@ -13,7 +13,9 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ### v2.0.23 - TBD
 ✨ `Enhancement` - CloudTAK Marketplace Save .txt appends TAK Portal version and host/SSH/instance details for troubleshooting<br>
-🐛 `Bug Fix` - CloudTAK Marketplace: when leftover `cots.ts` still passes `replay` but `SubmitCotsRequest` lacks it, healers add the type field so API image `tsc` no longer fails with TS2353
+🐛 `Bug Fix` - CloudTAK Marketplace: when leftover `cots.ts` still passes `replay` but `SubmitCotsRequest` lacks it, healers add the type field so API image `tsc` no longer fails with TS2353<br>
+🐛 `Bug Fix` - CloudTAK Marketplace page was blank after Save .txt diagnostics: EJS escaped the portal version as `&quot;…&quot;`, which broke the page script<br>
+🐛 `Bug Fix` - CloudTAK Marketplace Deploy To Caddy on takwerx/infra-TAK no longer fails with `sudo: a password is required` backing up `/etc/caddy/Caddyfile`; uses marketplace-helper `apply-caddyfile`
 
 ### v2.0.22 - 10/26/26
 🐛 `Bug Fix` - CloudTAK Marketplace: Replay drift repair no longer warns `Cannot find module './cloudtakMarketplace.patch'` when align runs from `/tmp` (#73)<br>

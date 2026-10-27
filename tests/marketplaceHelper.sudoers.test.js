@@ -25,6 +25,7 @@ assert.match(source, /\breclaim\b/);
 assert.match(source, /\binstall-plugin\b/);
 assert.match(source, /\brebuild\b/);
 assert.match(source, /\bwrite-caddy-route\b/);
+assert.match(source, /\bapply-caddyfile\b/);
 assert.match(source, /\bcleanup-sudoers\b/);
 assert.match(source, /\bcompose_file_rel\b/);
 assert.match(source, /refusing compose file outside CloudTAK checkout/);
@@ -64,6 +65,12 @@ const badHost = runHelper(["write-caddy-route", "bad host", "plugin"], {
   input: "handle /x {\n}\n",
 });
 assert.notStrictEqual(badHost.status, 0);
+
+const badCaddyPath = runHelper(["apply-caddyfile", "/tmp/evil"], {
+  input: "{\n}\n",
+});
+assert.notStrictEqual(badCaddyPath.status, 0);
+assert.match(badCaddyPath.stderr || "", /refusing caddyfile path|invalid caddyfile/i);
 
 const unknown = runHelper(["rm -rf /"]);
 assert.notStrictEqual(unknown.status, 0);
