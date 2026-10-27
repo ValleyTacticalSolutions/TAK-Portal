@@ -1550,7 +1550,8 @@ async function ensureCaddySharesCloudtakNetwork(probe, actions) {
   return parsed;
 }
 
-async function deployPluginCaddy(pluginId) {
+async function deployPluginCaddy(pluginId, options = {}) {
+  const force = !!(options && options.force);
   const catalog = loadCatalog();
   const plugin = catalog.plugins.find((p) => p.id === pluginId);
   if (!plugin) return { ok: false, message: "Plugin is not in the catalog." };
@@ -1575,7 +1576,8 @@ async function deployPluginCaddy(pluginId) {
     return { ok: false, message: edited.message };
   }
   let caddyChanged = false;
-  if (edited.changed) {
+  // force=true (Redeploy) rewrites + reloads even when snippets are already present.
+  if (edited.changed || force) {
     // Stage/auto-deploy marketplace-helper for takwerx so host /etc/caddy writes
     // do not fall back to password-prompting sudo cp.
     await stageMarketplaceHelperSource([]);

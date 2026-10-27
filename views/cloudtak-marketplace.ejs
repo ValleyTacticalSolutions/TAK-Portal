@@ -606,7 +606,7 @@
     if (p && p.caddyOnHost && p.hasCaddyActions) {
       lead.textContent = p.caddyPending
         ? "Caddy is running on the CloudTAK host. Deploy To Caddy edits the site block that reverse-proxies CloudTAK, then reloads Caddy."
-        : "Caddy on the CloudTAK host already has these routes.";
+        : "Caddy on the CloudTAK host already has these routes. Use Redeploy To Caddy to write them again and reload.";
     } else {
       lead.textContent = "Marketplace starts Docker services and sidecars. Use the steps below for anything that stays outside CloudTAK.";
     }
@@ -620,36 +620,41 @@
   function caddyDeployEl(p) {
     var wrap = document.createElement("div");
     wrap.className = "mp-caddy-deploy";
+    var pending = !!p.caddyPending;
+    var idleLabel = pending ? "Deploy To Caddy" : "Redeploy To Caddy";
     var btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "btn success";
-    btn.textContent = p.caddyPending ? "Deploy To Caddy" : "Deployed To Caddy";
-    btn.disabled = !p.caddyPending;
+    btn.className = pending ? "btn success" : "btn";
+    btn.textContent = idleLabel;
+    btn.disabled = false;
     var note = document.createElement("p");
     note.className = "muted";
+    if (!pending) {
+      note.textContent = "Routes are already present. Redeploy rewrites the Caddyfile entry and reloads Caddy.";
+    }
     btn.addEventListener("click", function () {
       if (btn.disabled) return;
+      var force = btn.textContent.indexOf("Redeploy") !== -1 || !pending;
       btn.disabled = true;
-      btn.textContent = "Deploying To Caddy…";
+      btn.textContent = force ? "Redeploying To Caddy…" : "Deploying To Caddy…";
       note.textContent = "";
       note.style.color = "";
       fetch("/api/cloudtak-marketplace/caddy/deploy", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ pluginId: p.id })
+        body: JSON.stringify({ pluginId: p.id, force: force })
       }).then(function (r) {
         return r.json().then(function (j) { return { ok: r.ok && j.ok, json: j }; });
       }).then(function (out) {
         if (!out.ok) {
           btn.disabled = false;
-          btn.textContent = "Deploy To Caddy";
+          btn.textContent = idleLabel;
           note.style.color = "#c44";
           note.textContent = (out.json && (out.json.error || out.json.message)) || "Caddy update failed.";
           return;
         }
         note.style.color = "";
         note.textContent = (out.json && out.json.message) || "Updated Caddy.";
-        btn.textContent = "Deployed To Caddy";
         setMsg(note.textContent);
         loadAll().then(function () {
           var fresh = plugins.filter(function (x) { return x.id === p.id; })[0];
@@ -657,7 +662,7 @@
         });
       }).catch(function (err) {
         btn.disabled = false;
-        btn.textContent = "Deploy To Caddy";
+        btn.textContent = idleLabel;
         note.style.color = "#c44";
         note.textContent = err.message || "Caddy update failed.";
       });
