@@ -11,6 +11,10 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.24 - 10/27/26
+(Finally a release not related to CloudTAK plugins... I know!!)
+✨ `Enhancement` - Auto Create Group / Channel now supports BOTH/READ/WRITE formats and agency specific groups have the option to hide from agency admins
+
 ### v2.0.23 - 10/27/26
 ✨ `Enhancement` - CloudTAK Marketplace Save .txt appends TAK Portal version and host/SSH/instance details for troubleshooting<br>
 🐛 `Bug Fix` - CloudTAK Marketplace: when leftover `cots.ts` still passes `replay` but `SubmitCotsRequest` lacks it, healers add the type field so API image `tsc` no longer fails with TS2353<br>
