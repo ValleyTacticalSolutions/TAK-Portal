@@ -19,25 +19,36 @@ let workerHealthCache = { at: 0, worker: { ok: true } };
 
 /** Portal/host facts for Save .txt troubleshooting footers. */
 function marketplaceDiagnostics() {
-  let hostname = "";
   try {
-    hostname = os.hostname() || "";
-  } catch (_) {}
-  const packageVersion = String((pkg && pkg.version) || "").trim() || "unknown";
-  const running = appVersion.runningVersion(pkg);
-  return {
-    portalVersion: running,
-    packageVersion,
-    betaVersion: String((pkg && pkg["beta-version"]) || "").trim() || null,
-    node: process.version,
-    platform: process.platform,
-    arch: process.arch,
-    osRelease: os.release(),
-    hostname,
-    containerHostname: String(process.env.HOSTNAME || "").trim() || null,
-    cwd: process.cwd(),
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
-  };
+    let hostname = "";
+    try {
+      hostname = os.hostname() || "";
+    } catch (_) {}
+    let timezone = null;
+    try {
+      timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+    } catch (_) {}
+    const packageVersion = String((pkg && pkg.version) || "").trim() || "unknown";
+    const running = appVersion.runningVersion(pkg);
+    return {
+      portalVersion: running,
+      packageVersion,
+      betaVersion: String((pkg && pkg["beta-version"]) || "").trim() || null,
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      osRelease: os.release(),
+      hostname,
+      containerHostname: String(process.env.HOSTNAME || "").trim() || null,
+      cwd: process.cwd(),
+      timezone,
+    };
+  } catch (err) {
+    return {
+      portalVersion: String((pkg && pkg.version) || "").trim() || "unknown",
+      error: String((err && err.message) || err || "diagnostics unavailable"),
+    };
+  }
 }
 
 function username(req) {
@@ -328,6 +339,7 @@ router.post("/caddy/deploy", async (req, res) => {
 router.post("/catalog/refresh", async (req, res) => {
   try {
     const result = await marketplace.fetchCatalog();
+    marketplace.refreshUiSnapshot();
     res.json({
       ok: !!result.ok,
       error: result.ok ? undefined : result.message,

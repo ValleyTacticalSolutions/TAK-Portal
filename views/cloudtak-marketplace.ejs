@@ -466,7 +466,7 @@
   var jobPoll = null;
   var lastStatus = null;
   var emailConfigured = <%= typeof emailConfigured !== "undefined" && emailConfigured ? "true" : "false" %>;
-  var PORTAL_VERSION = <%= JSON.stringify(typeof APP_VERSION !== "undefined" ? String(APP_VERSION) : "") %>;
+  var PORTAL_VERSION = <%- JSON.stringify(typeof APP_VERSION !== "undefined" ? String(APP_VERSION) : "") %>;
   var WAIT_HINT = "Wait until the current job is complete and containers are recreated and running";
   var EMAIL_NOT_CONFIGURED =
     "Email/SMTP is not configured. Enable Email under Settings → Email and set SMTP host and From address before submitting.";
@@ -1238,30 +1238,57 @@
 
   function loadAll() {
     var gen = ++loadGen;
+    function readJson(r) {
+      return r.json().then(function (j) {
+        return { httpOk: r.ok, status: r.status, json: j || {} };
+      }).catch(function () {
+        return { httpOk: false, status: r.status, json: {} };
+      });
+    }
     return Promise.all([
-      fetch("/api/cloudtak-marketplace/plugins", { headers: { Accept: "application/json" } }).then(function (r) { return r.json(); }),
-      fetch("/api/cloudtak-marketplace/status", { headers: { Accept: "application/json" } }).then(function (r) { return r.json(); })
+      fetch("/api/cloudtak-marketplace/plugins", { headers: { Accept: "application/json" } }).then(readJson),
+      fetch("/api/cloudtak-marketplace/status", { headers: { Accept: "application/json" } }).then(readJson).catch(function () {
+        return { httpOk: false, status: 0, json: {} };
+      })
     ]).then(function (pair) {
       if (gen !== loadGen) return;
-      var snap = pair[0];
-      var status = pair[1];
-      lastStatus = status || null;
-      plugins = (snap && snap.plugins) || [];
+      var snapRes = pair[0] || {};
+      var statusRes = pair[1] || {};
+      var snap = snapRes.json || {};
+      var status = statusRes.json || null;
+      lastStatus = status;
+      if (!snapRes.httpOk || snap.ok === false) {
+        if (!plugins.length) plugins = [];
+        setMsg((snap && snap.error) || ("Failed to load plugin catalog (HTTP " + (snapRes.status || "?") + ")."), true);
+      } else {
+        plugins = Array.isArray(snap.plugins) ? snap.plugins : [];
+        if (!plugins.length) {
+          setMsg("Catalog loaded but returned 0 plugins. Try Check for Updates, or confirm the bundled catalog is present in this install.", true);
+        } else {
+          var msgEl = $("mpMsg");
+          var curMsg = msgEl ? String(msgEl.textContent || "") : "";
+          if (/Failed to load plugin catalog|returned 0 plugins|Failed to load marketplace/i.test(curMsg)) setMsg("");
+        }
+      }
       jobBusy = !!(status && (status.busy || changeJobsBusy(status.jobs)));
       if (jobBusy) uninstallArmedId = "";
       // Drop the wait hint once change jobs finish (banner also clears via renderBanners).
       if (!jobBusy) {
-        var msgEl = $("mpMsg");
-        var curMsg = msgEl ? String(msgEl.textContent || "") : "";
-        if (curMsg.indexOf(WAIT_HINT) !== -1) setMsg("");
+        var waitEl = $("mpMsg");
+        var waitMsg = waitEl ? String(waitEl.textContent || "") : "";
+        if (waitMsg.indexOf(WAIT_HINT) !== -1) setMsg("");
       }
-      renderBanners(status, snap);
-      renderQueue(status && status.jobs);
-      renderCards();
-      var logJobs = status && Array.isArray(status.logJobs)
-        ? status.logJobs
-        : (status && status.jobs || []).filter(function (j) { return j.status !== "staged"; }).slice(0, 12);
-      renderJobs(logJobs, status && status.jobs);
+      try {
+        renderBanners(status, snap);
+        renderQueue(status && status.jobs);
+        renderCards();
+        var logJobs = status && Array.isArray(status.logJobs)
+          ? status.logJobs
+          : (status && status.jobs || []).filter(function (j) { return j.status !== "staged"; }).slice(0, 12);
+        renderJobs(logJobs, status && status.jobs);
+      } catch (err) {
+        setMsg((err && err.message) || "Failed to render marketplace", true);
+      }
       document.querySelectorAll("[data-mp-filter]").forEach(function (btn) {
         btn.classList.toggle("is-filter-on", btn.getAttribute("data-mp-filter") === filter);
       });
