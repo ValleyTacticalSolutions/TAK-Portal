@@ -1966,18 +1966,80 @@ function filterMapGroupsForUserMembership(groups, userGroupNames) {
   });
 }
 
+function markerCountsByChannelBaseKey(markers) {
+  const counts = new Map();
+  for (const m of Array.isArray(markers) ? markers : []) {
+    const groups = Array.isArray(m.groups) && m.groups.length ? m.groups : [];
+    for (const g of groups) {
+      const channelName = toChannelGroupName(g);
+      if (!channelName) continue;
+      const key = channelBaseKey(channelName);
+      if (!key || key === UNASSIGNED_CHANNEL_KEY) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/**
+ * Inject MA channels the caller owns or was delegated (admins are not members).
+ * Hidden MA-created groups are absent from the Authentik catalog refresh.
+ */
+function mergeManagedMutualAidChannels(groups, authUser, markers) {
+  if (!authUser) return { groups, addedKeys: [] };
+  const managed = dataSyncAccess.getManagedMutualAidGroupsForUser(authUser);
+  if (!managed.length) return { groups, addedKeys: [] };
+
+  const list = Array.isArray(groups) ? groups.slice() : [];
+  const seen = new Set(list.map((g) => g.baseKey).filter(Boolean));
+  const counts = markerCountsByChannelBaseKey(markers);
+  const addedKeys = [];
+
+  for (const ma of managed) {
+    const displayName = String(ma.takDisplayName || ma.authentikName || "").trim();
+    if (!displayName) continue;
+    const name = groupsSvc.ensureTakPrefix(displayName);
+    const baseKey = channelBaseKey(name);
+    if (!baseKey || baseKey === UNASSIGNED_CHANNEL_KEY) continue;
+    addedKeys.push(baseKey);
+    if (seen.has(baseKey)) continue;
+    seen.add(baseKey);
+    list.push({
+      name,
+      displayName,
+      baseKey,
+      markerCount: counts.get(baseKey) || 0,
+    });
+  }
+
+  list.sort((a, b) =>
+    String(a.displayName || "").localeCompare(String(b.displayName || ""))
+  );
+  return { groups: list, addedKeys };
+}
+
 async function getTakGroupCatalog(markers, options = {}) {
   await refreshGroupCatalog();
   let groups = buildGroupsCatalogWithCounts(markers);
+  let allowedChannelKeys = null;
+
   if (options.scopeMemberGroups) {
+    const memberKeys = getUserMemberChannelBaseKeys(options.userGroupNames || []);
     groups = filterMapGroupsForUserMembership(groups, options.userGroupNames || []);
+    const merged = mergeManagedMutualAidChannels(
+      groups,
+      options.authUser || null,
+      markers
+    );
+    groups = merged.groups;
+    for (const key of merged.addedKeys) memberKeys.add(key);
+    allowedChannelKeys = Array.from(memberKeys);
   }
+
   return {
     groups,
     channelScope: options.scopeMemberGroups ? "member" : "all",
-    allowedChannelKeys: options.scopeMemberGroups
-      ? Array.from(getUserMemberChannelBaseKeys(options.userGroupNames || []))
-      : null,
+    allowedChannelKeys: options.scopeMemberGroups ? allowedChannelKeys : null,
     error: catalogCache.error,
     updatedAt: new Date().toISOString(),
   };
@@ -2028,6 +2090,7 @@ module.exports = {
   getTakGroupCatalog,
   getUserMemberChannelBaseKeys,
   filterMapGroupsForUserMembership,
+  mergeManagedMutualAidChannels,
   refreshGroupCatalog,
   refreshSubscriptionIndex,
   refreshDataFeedIndex,

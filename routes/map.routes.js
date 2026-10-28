@@ -40,6 +40,7 @@ function getMapAccessContext(req) {
   const isGlobalAdmin = !!user.isGlobalAdmin;
   const isAgencyAdmin = !!user.isAgencyAdmin && !isGlobalAdmin;
   return {
+    authUser: req.authentikUser || null,
     isGlobalAdmin,
     isAgencyAdmin,
     scopeMemberGroups: !isGlobalAdmin,
@@ -59,6 +60,7 @@ async function attachScopedGroupCatalog(snapshot, ctx) {
   const catalog = await mapMeta.getTakGroupCatalog(cotStream.getMarkerList(), {
     scopeMemberGroups: ctx.scopeMemberGroups,
     userGroupNames: ctx.userGroups,
+    authUser: ctx.authUser,
   });
   snapshot.groupsCatalog = catalog.groups;
   snapshot.channelScope = catalog.channelScope;
@@ -253,6 +255,7 @@ router.get("/groups", async (req, res) => {
     const catalog = await mapMeta.getTakGroupCatalog(cotStream.getMarkerList(), {
       scopeMemberGroups: ctx.scopeMemberGroups,
       userGroupNames: ctx.userGroups,
+      authUser: ctx.authUser,
     });
     return res.json(catalog);
   } catch (err) {
@@ -457,6 +460,7 @@ router.get("/geofences/action-options", requireGeofenceGlobalAdmin, async (req, 
     const catalog = await mapMeta.getTakGroupCatalog(cotStream.getMarkerList(), {
       scopeMemberGroups: ctx.scopeMemberGroups,
       userGroupNames: ctx.userGroups,
+      authUser: ctx.authUser,
     });
     const channels = (Array.isArray(catalog.groups) ? catalog.groups : [])
       .map((g) => {

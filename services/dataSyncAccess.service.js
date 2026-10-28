@@ -137,6 +137,49 @@ function getMutualAidAllowedGroupsForUser(authUser) {
   return resolveMutualAidAllowedGroups(authUser?.groups, mutualAidStore.load());
 }
 
+/**
+ * Unique MA channel groups from records the caller may manage (owner or delegated).
+ * @param {Array} maRecords
+ * @param {(item: object) => boolean} isManaged
+ * @returns {Array<{ authentikName, takDisplayName, canonicalKey, agencySuffix, groupPrefix, mutualAid, managed }>}
+ */
+function resolveManagedMutualAidGroups(maRecords, isManaged) {
+  const byKey = new Map();
+  const predicate = typeof isManaged === "function" ? isManaged : () => false;
+  for (const item of Array.isArray(maRecords) ? maRecords : []) {
+    if (!predicate(item)) continue;
+    const name = String(item?.groupName || "").trim();
+    if (!name) continue;
+    const canonicalKey = canonicalGroupKey(name);
+    if (!canonicalKey || byKey.has(canonicalKey)) continue;
+    byKey.set(canonicalKey, {
+      authentikName: name,
+      takDisplayName: takDisplayName(name),
+      canonicalKey,
+      agencySuffix: null,
+      groupPrefix: null,
+      mutualAid: true,
+      managed: true,
+    });
+  }
+  return Array.from(byKey.values());
+}
+
+/**
+ * MA channels an agency / multi-agency admin owns or has been delegated —
+ * used for Data Sync dropdown + mission access (admins are not group members).
+ */
+function getManagedMutualAidGroupsForUser(authUser) {
+  if (!authUser) return [];
+  const access = accessSvc.getAgencyAccess(authUser);
+  if (access.isGlobalAdmin) return [];
+  // Lazy require avoids circular load with mutualAid.service.
+  const mutualAidSvc = require("./mutualAid.service");
+  return resolveManagedMutualAidGroups(mutualAidStore.load(), (item) =>
+    mutualAidSvc.canViewMutualAid(authUser, item)
+  );
+}
+
 function entryToGroupName(entry) {
   if (entry == null) return "";
   if (typeof entry === "string") return String(entry).trim();
@@ -302,6 +345,11 @@ async function getAllowedCanonicalKeySet(authUser, options = {}) {
   const allowed = await buildAgencyAllowedGroups(authUser);
   if (allowed === null) return null;
   const keys = new Set(allowed.map((g) => g.canonicalKey));
+  // Owner / delegated MA channels (Data Sync + mission CRUD for agency admins).
+  for (const ma of getManagedMutualAidGroupsForUser(authUser)) {
+    keys.add(ma.canonicalKey);
+  }
+  // Optional: MA channels the user belongs to (map overlay).
   if (options.includeMutualAid) {
     for (const ma of getMutualAidAllowedGroupsForUser(authUser)) {
       keys.add(ma.canonicalKey);
@@ -363,23 +411,35 @@ async function resolveGroupsForUser(authUser, takPayload) {
   }
 
   const allowed = await buildAgencyAllowedGroups(authUser);
+  const managedMa = getManagedMutualAidGroupsForUser(authUser);
   const resolved = [];
   const matchDetails = [];
+  const seenKeys = new Set();
 
-  for (const ag of allowed) {
-    const fromTak = takByKey.get(ag.canonicalKey);
-    const chosen = fromTak || ag.takDisplayName;
+  const pushGroup = (entry, source) => {
+    const fromTak = takByKey.get(entry.canonicalKey);
+    const chosen = fromTak || entry.takDisplayName;
+    if (!entry.canonicalKey || seenKeys.has(entry.canonicalKey)) return;
+    seenKeys.add(entry.canonicalKey);
     resolved.push(chosen);
     matchDetails.push({
-      authentikName: ag.authentikName,
-      takDisplayName: ag.takDisplayName,
-      canonicalKey: ag.canonicalKey,
+      authentikName: entry.authentikName,
+      takDisplayName: entry.takDisplayName,
+      canonicalKey: entry.canonicalKey,
       matchedTakName: fromTak || null,
       chosenForUi: chosen,
+      source,
     });
+  };
+
+  for (const ag of allowed) {
+    pushGroup(ag, "agency");
+  }
+  for (const ma of managedMa) {
+    pushGroup(ma, "mutual_aid");
   }
 
-  const groups = [...new Set(resolved)]
+  const groups = resolved
     .filter((n) => !String(n || "").trim().toLowerCase().startsWith("cn="))
     .sort((a, b) => a.localeCompare(b));
 
@@ -389,6 +449,7 @@ async function resolveGroupsForUser(authUser, takPayload) {
       scope: "agency",
       allowedAgencySuffixes: access.allowedAgencySuffixes || [],
       authentikAllowedCount: allowed.length,
+      managedMutualAidCount: managedMa.length,
       takGroupCount: takNames.length,
       takSample: takNames.slice(0, 12),
       resolvedGroupCount: groups.length,
@@ -813,6 +874,7 @@ async function buildAccessDebug(authUser) {
   const allowedKeySet = allowed === null ? null : new Set(allowed.map((g) => g.canonicalKey));
   const mapMissionKeySet = await getAllowedCanonicalKeySet(authUser, MAP_MISSION_ACCESS);
   const mutualAidAllowed = getMutualAidAllowedGroupsForUser(authUser);
+  const mutualAidManaged = getManagedMutualAidGroupsForUser(authUser);
   const resolved = await resolveGroupsForUser(authUser, takGroupsRaw);
 
   const missionFilterPreview = missionsRaw.map((m) => ({
@@ -835,6 +897,7 @@ async function buildAccessDebug(authUser) {
     },
     authentikAllowedGroups: allowed,
     mutualAidAllowedGroups: mutualAidAllowed,
+    mutualAidManagedGroups: mutualAidManaged,
     resolvedUiGroups: resolved.groups,
     resolvedDebug: resolved.debug,
     missions: {
@@ -861,6 +924,8 @@ module.exports = {
   MAP_MISSION_ACCESS,
   getMutualAidAllowedGroupsForUser,
   resolveMutualAidAllowedGroups,
+  getManagedMutualAidGroupsForUser,
+  resolveManagedMutualAidGroups,
   getAllowedTakGroupNameSet,
   getAllowedCanonicalKeySet,
   resolveGroupsForUser,
