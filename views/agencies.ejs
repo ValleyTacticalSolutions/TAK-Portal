@@ -174,6 +174,22 @@
                   aria-label="Account Lookup"
                 ></button>
               </div>
+              <div class="settings-field settings-field-bool">
+                <span class="settings-label">
+                  <span>Hide Agency From Request Access</span>
+                  <span class="settings-help-tip">
+                    <button type="button" class="settings-help-btn" aria-label="Help" aria-expanded="false">?</button>
+                    <span class="settings-help-popover" role="tooltip">When enabled, this agency is removed from the agency dropdown on the public Request Access page. Account Lookup and other agency settings are unaffected.</span>
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  class="settings-toggle is-off"
+                  id="hideFromRequestAccessToggle"
+                  aria-pressed="false"
+                  aria-label="Hide Agency From Request Access"
+                ></button>
+              </div>
             </div>
           </div>
         </section>
@@ -1461,6 +1477,7 @@ function normalizeCountyName(raw) {
 let currentLookupAgencyId = null;
 let currentLookupModalEnabled = false;
 let currentLookupModalAutoApprove = false;
+let currentLookupModalHideFromRequestAccess = false;
 let currentLookupModalHasDefaultTemplate = false;
 let lastSavedLookupDomain = "";
 let lookupDomainSaveTimer = null;
@@ -1486,6 +1503,10 @@ function showDomainModalError(message) {
 
 function syncLookupModalToggles() {
   setSettingsToggleState(document.getElementById("accountLookupToggle"), currentLookupModalEnabled);
+  setSettingsToggleState(
+    document.getElementById("hideFromRequestAccessToggle"),
+    currentLookupModalHideFromRequestAccess
+  );
   const autoToggle = document.getElementById("autoApproveToggle");
   setSettingsToggleState(autoToggle, currentLookupModalAutoApprove);
   const locked = !currentLookupModalHasDefaultTemplate;
@@ -1511,6 +1532,7 @@ function fillDomainSection(id) {
   currentLookupAgencyId = id;
   currentLookupModalEnabled = !!(a && a.lookupEnabled);
   currentLookupModalAutoApprove = !!(a && a.autoApproveRequests);
+  currentLookupModalHideFromRequestAccess = !!(a && a.hideFromRequestAccess);
   currentLookupModalHasDefaultTemplate = !!(a && a.hasDefaultTemplate);
   if (lookupDomainSaveTimer) {
     clearTimeout(lookupDomainSaveTimer);
@@ -1609,6 +1631,16 @@ function parseDomainListClient(raw) {
 
 const domainPartRegex = /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
+/** True while the user is mid-entry of another domain (e.g. "agency.gov, " or "agency.gov, coun"). */
+function isLookupDomainListIncomplete(raw) {
+  const s = String(raw || "");
+  if (/,\s*$/.test(s)) return true;
+  const segments = s.split(",");
+  const last = String(segments[segments.length - 1] || "").trim();
+  if (!last) return false;
+  return last.includes("@") || !domainPartRegex.test(last);
+}
+
 function validateDomainFieldForSave(domainInput, errorEl) {
   const parts = parseDomainListClient(domainInput.value);
   for (const p of parts) {
@@ -1630,8 +1662,14 @@ function saveLookupDomains() {
   if (lookupDomainSaveInFlight) return Promise.resolve(false);
   const nextValue = String(domainInput.value || "");
   if (nextValue === lastSavedLookupDomain) return Promise.resolve(true);
+  // While typing "domain, next..." do not autosave — normalize+rewrite was stripping commas/spaces.
+  if (isLookupDomainListIncomplete(nextValue)) {
+    showDomainModalError("");
+    return Promise.resolve(false);
+  }
   if (!validateDomainFieldForSave(domainInput, error)) return Promise.resolve(false);
 
+  const sentValue = nextValue;
   lookupDomainSaveInFlight = true;
   return fetch(`/api/agencies/${encodeURIComponent(currentLookupAgencyId)}/lookup/domain`, {
     method: "POST",
@@ -1646,8 +1684,17 @@ function saveLookupDomains() {
       }
       await loadAgenciesWithCounts();
       const a = (agencies || []).find((x) => String(x._id ?? x.id) === String(currentLookupAgencyId));
-      if (domainInput && a) domainInput.value = a.lookupDomain != null ? String(a.lookupDomain) : "";
-      lastSavedLookupDomain = domainInput ? String(domainInput.value || "") : nextValue;
+      const normalized =
+        out.lookupDomain != null
+          ? String(out.lookupDomain)
+          : a && a.lookupDomain != null
+            ? String(a.lookupDomain)
+            : "";
+      // Only rewrite the field if the user has not kept typing since this save started.
+      if (domainInput && String(domainInput.value || "") === sentValue) {
+        domainInput.value = normalized;
+      }
+      lastSavedLookupDomain = normalized;
       showDomainModalError("");
       return true;
     })
@@ -1779,6 +1826,58 @@ if (autoApproveToggle) {
       })
       .finally(() => {
         autoApproveToggle.removeAttribute("data-busy");
+        syncLookupModalToggles();
+      });
+  });
+}
+
+const hideFromRequestAccessToggle = document.getElementById("hideFromRequestAccessToggle");
+if (hideFromRequestAccessToggle) {
+  hideFromRequestAccessToggle.addEventListener("click", function () {
+    if (!currentLookupAgencyId) return;
+    const enabling = !currentLookupModalHideFromRequestAccess;
+
+    hideFromRequestAccessToggle.setAttribute("data-busy", "1");
+    hideFromRequestAccessToggle.disabled = true;
+    const url = enabling
+      ? `/api/agencies/${encodeURIComponent(currentLookupAgencyId)}/hide-from-request-access/enable`
+      : `/api/agencies/${encodeURIComponent(currentLookupAgencyId)}/hide-from-request-access/disable`;
+
+    fetch(url, { method: "POST" })
+      .then(async (res) => {
+        const out = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showDomainModalError(
+            out.error ||
+              (enabling
+                ? "Could not hide agency from Request Access."
+                : "Could not show agency on Request Access.")
+          );
+          syncLookupModalToggles();
+          return;
+        }
+        currentLookupModalHideFromRequestAccess = enabling;
+        await loadAgenciesWithCounts();
+        const a = (agencies || []).find((x) => String(x._id ?? x.id) === String(currentLookupAgencyId));
+        currentLookupModalHideFromRequestAccess = !!(a && a.hideFromRequestAccess);
+        syncLookupModalToggles();
+        setMsg(
+          enabling ? "Agency hidden from Request Access." : "Agency shown on Request Access.",
+          true
+        );
+        showDomainModalError("");
+      })
+      .catch(() => {
+        showDomainModalError(
+          enabling
+            ? "Could not hide agency from Request Access."
+            : "Could not show agency on Request Access."
+        );
+        syncLookupModalToggles();
+      })
+      .finally(() => {
+        hideFromRequestAccessToggle.removeAttribute("data-busy");
+        hideFromRequestAccessToggle.disabled = false;
         syncLookupModalToggles();
       });
   });

@@ -509,7 +509,7 @@ function validateCreate(input) {
 
   if (!isOther) {
     if (!agency) throw new Error("Selected agency is not valid");
-    if (!agenciesStore.isAgencyPublicEnrollmentEligible(agency)) {
+    if (!agenciesStore.isAgencyRequestAccessEligible(agency)) {
       throw new Error(
         "The selected agency is not currently accepting access requests."
       );

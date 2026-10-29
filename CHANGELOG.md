@@ -11,6 +11,11 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.25 - 10/28/26
+✨ `Enhancement` - Mutual Aid delegated agency admins can now access data syncs linked to the mutual aid channel from the Data Sync page and the Live Map<br>
+✨ `Enhancement` - Agency edit modal now includes a toggle to hide individual agencies from the request access page<br>
+🐛 `Bug Fix` - Fixes issue with Agencies edit modal not allowing multiple email domains to be entered due to auto-save logic conflicts
+
 ### v2.0.24 - 10/27/26
 (Finally a release not related to CloudTAK plugins... I know!!)
 ✨ `Enhancement` - Auto Create Group / Channel now supports BOTH/READ/WRITE formats and agency specific groups have the option to hide from agency admins

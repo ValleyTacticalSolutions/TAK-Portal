@@ -227,6 +227,7 @@ router.get("/with-counts", async (req, res) => {
         id,
         _id: id,
         autoApproveRequests: a.autoApproveRequests === true,
+        hideFromRequestAccess: a.hideFromRequestAccess === true,
         hasDefaultTemplate: store.agencyHasDefaultTemplate(a?.suffix),
       };
     });
@@ -1297,6 +1298,7 @@ router.put("/:index", async (req, res) => {
   if (!("lookupEnabled" in body)) a.lookupEnabled = existing.lookupEnabled;
   if (!("lookupDomain" in body)) a.lookupDomain = existing.lookupDomain;
   if (!("autoApproveRequests" in body)) a.autoApproveRequests = existing.autoApproveRequests === true;
+  if (!("hideFromRequestAccess" in body)) a.hideFromRequestAccess = existing.hideFromRequestAccess === true;
   if (!("isActive" in body)) a.isActive = existing.isActive;
   if (!("usernameTokenPlacement" in body) && !("usernameSuffixPlacement" in body)) {
     a.usernameTokenPlacement = accessSvc.normalizeUsernameTokenPlacement(
@@ -1916,6 +1918,68 @@ router.post("/:index/auto-approve/disable", (req, res) => {
   });
 
   return res.json({ success: true, autoApproveRequests: false });
+});
+
+
+// Hide agency from the public Request Access dropdown.
+router.post("/:index/hide-from-request-access/enable", (req, res) => {
+  const idx = Number(req.params.index);
+  if (!Number.isInteger(idx)) {
+    return res.status(400).json({ error: "Invalid agency index" });
+  }
+
+  const agencies = store.load();
+  if (!agencies[idx]) {
+    return res.status(404).json({ error: "Agency not found" });
+  }
+
+  const agency = agencies[idx];
+  agencies[idx].hideFromRequestAccess = true;
+  store.save(agencies);
+
+  auditSvc.logEvent({
+    actor: req.authentikUser || null,
+    request: { method: req.method, path: req.originalUrl || req.path, ip: req.ip },
+    action: "ENABLE_AGENCY_HIDE_FROM_REQUEST_ACCESS",
+    targetType: "agency",
+    targetId: String(agency?.suffix || ""),
+    details: {
+      summary: `Hid agency ${agency?.name || agency?.suffix || ""} from Request Access.`,
+    },
+  });
+
+  return res.json({ success: true, hideFromRequestAccess: true });
+});
+
+
+// Show agency again on the public Request Access dropdown.
+router.post("/:index/hide-from-request-access/disable", (req, res) => {
+  const idx = Number(req.params.index);
+  if (!Number.isInteger(idx)) {
+    return res.status(400).json({ error: "Invalid agency index" });
+  }
+
+  const agencies = store.load();
+  if (!agencies[idx]) {
+    return res.status(404).json({ error: "Agency not found" });
+  }
+
+  const agency = agencies[idx];
+  agencies[idx].hideFromRequestAccess = false;
+  store.save(agencies);
+
+  auditSvc.logEvent({
+    actor: req.authentikUser || null,
+    request: { method: req.method, path: req.originalUrl || req.path, ip: req.ip },
+    action: "DISABLE_AGENCY_HIDE_FROM_REQUEST_ACCESS",
+    targetType: "agency",
+    targetId: String(agency?.suffix || ""),
+    details: {
+      summary: `Showed agency ${agency?.name || agency?.suffix || ""} on Request Access.`,
+    },
+  });
+
+  return res.json({ success: true, hideFromRequestAccess: false });
 });
 
 module.exports = router;

@@ -51,14 +51,19 @@ function isAgencyActive(agency) {
   return agency?.isActive !== false;
 }
 
-/** Agencies shown on public forms and eligible for lookup / request access. */
+/** Agencies eligible for Account Lookup and other public enrollment checks (active only). */
 function isAgencyPublicEnrollmentEligible(agency) {
   return isAgencyActive(agency);
 }
 
+/** Agencies shown in the Request Access dropdown (active and not hidden). */
+function isAgencyRequestAccessEligible(agency) {
+  return isAgencyActive(agency) && agency?.hideFromRequestAccess !== true;
+}
+
 function filterPublicEnrollmentAgencies(agencies) {
   return (Array.isArray(agencies) ? agencies : load()).filter(
-    isAgencyPublicEnrollmentEligible
+    isAgencyRequestAccessEligible
   );
 }
 
@@ -270,6 +275,7 @@ module.exports = {
   emailDomainInAgencyList,
   isAgencyActive,
   isAgencyPublicEnrollmentEligible,
+  isAgencyRequestAccessEligible,
   filterPublicEnrollmentAgencies,
   findAgencyBySuffix,
   assertAgencyActiveBySuffix,
