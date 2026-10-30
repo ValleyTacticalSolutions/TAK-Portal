@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.29 - TBD
+🐛 `Bug Fix` - CloudTAK Marketplace `apply-caddyfile` runs `caddy validate` as the `caddy` user (not root) so Deploy To Caddy cannot read root-only files or create root-owned logs via crafted Caddyfile directives (#81)
+
 ### v2.0.28 - 10/30/26
 🐛 `Bug Fix` - Fixes issue with live map failing to load
 

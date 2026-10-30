@@ -4,7 +4,7 @@
 # Do not add shell/eval; validate every argument.
 set -euo pipefail
 
-HELPER_VERSION=2
+HELPER_VERSION=3
 CADDY_SITES_D="${TAK_PORTAL_CADDY_SITES_D:-/etc/caddy/sites.d}"
 
 die() {
@@ -199,6 +199,46 @@ is_allowed_caddyfile() {
   esac
 }
 
+# Summarize validate failures without echoing raw privileged output (path contents / root reads).
+caddy_validate_fail_msg() {
+  local out="${1:-}"
+  local line
+  line=$(printf '%s\n' "$out" | sed -nE 's/.*[Cc]addyfile:([0-9]+):.*/\1/p' | head -n 1)
+  if [ -n "$line" ]; then
+    echo "Caddy rejected the file (near line $line)"
+  else
+    echo "Caddy rejected the file"
+  fi
+}
+
+# Run caddy validate as the caddy user when possible so validate cannot read root-only
+# files (e.g. import /etc/shadow) or create root-owned log files at caller-chosen paths.
+# Prints "as_user" or "as_root" to the path in $2; validate stdout/stderr on stdout.
+run_caddy_validate() {
+  local config="$1"
+  local mode_file="$2"
+  local rc=0
+  # mktemp is 0600; caddy user must be able to read the candidate file.
+  chmod 0644 "$config" || true
+  if id -u caddy >/dev/null 2>&1; then
+    echo as_user >"$mode_file"
+    if command -v runuser >/dev/null 2>&1; then
+      runuser -u caddy -- caddy validate --config "$config" --adapter caddyfile 2>&1 || rc=$?
+      return "$rc"
+    fi
+    if command -v setpriv >/dev/null 2>&1; then
+      setpriv --reuid=caddy --regid=caddy --clear-groups -- caddy validate --config "$config" --adapter caddyfile 2>&1 || rc=$?
+      return "$rc"
+    fi
+    # Last resort: su with a quoted path (no shell interpolation of config content).
+    su -s /bin/sh caddy -c "caddy validate --config $(printf '%q' "$config") --adapter caddyfile" 2>&1 || rc=$?
+    return "$rc"
+  fi
+  echo as_root >"$mode_file"
+  caddy validate --config "$config" --adapter caddyfile 2>&1 || rc=$?
+  return "$rc"
+}
+
 # Host/systemd Caddy (infra-TAK takwerx): write the main Caddyfile with backup + validate + reload.
 # Content on stdin. Avoids broad `sudo cp` which prompts for a password for non-root SSH users.
 cmd_apply_caddyfile() {
@@ -215,16 +255,25 @@ cmd_apply_caddyfile() {
     die "could not read updated Caddyfile from stdin"
   }
   if command -v caddy >/dev/null 2>&1; then
-    # Validate may fail opening caddy-owned log/data paths even when the file is valid.
-    _caddy_out=""
-    _caddy_rc=0
-    _caddy_out=$(caddy validate --config "$new" --adapter caddyfile 2>&1) || _caddy_rc=$?
+    local _caddy_out _caddy_rc=0 _caddy_mode=as_root _caddy_filtered _mode_file
+    _mode_file=$(mktemp)
+    _caddy_out=$(run_caddy_validate "$new" "$_mode_file") || _caddy_rc=$?
+    _caddy_mode=$(cat "$_mode_file" 2>/dev/null || echo as_root)
+    rm -f "$_mode_file"
     if [ "$_caddy_rc" -ne 0 ]; then
-      _caddy_filtered=$(printf '%s\n' "$_caddy_out" | sed '/^[[:space:]]*$/d')
-      if [ -n "$_caddy_filtered" ] && ! printf '%s\n' "$_caddy_filtered" | grep -Eiv 'permission denied|EACCES|operation not permitted' >/dev/null; then
-        echo "caddy validate inconclusive (permission denied on log/data paths); continuing." >&2
+      # As the caddy user, permission denied is a real reject (e.g. import /etc/shadow).
+      # As root only: treat all-permission-denied output as inconclusive (#76 log/data paths).
+      if [ "$_caddy_mode" = "as_root" ]; then
+        _caddy_filtered=$(printf '%s\n' "$_caddy_out" | sed '/^[[:space:]]*$/d')
+        if [ -n "$_caddy_filtered" ] && ! printf '%s\n' "$_caddy_filtered" | grep -Eiv 'permission denied|EACCES|operation not permitted' >/dev/null; then
+          echo "caddy validate inconclusive (permission denied on log/data paths); continuing." >&2
+        else
+          caddy_validate_fail_msg "$_caddy_out" >&2
+          rm -f "$new"
+          die "caddy rejected the updated file; original left in place"
+        fi
       else
-        printf '%s\n' "$_caddy_out" >&2
+        caddy_validate_fail_msg "$_caddy_out" >&2
         rm -f "$new"
         die "caddy rejected the updated file; original left in place"
       fi
