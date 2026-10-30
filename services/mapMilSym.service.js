@@ -48,6 +48,11 @@ function isMilSymIconId(apiIconId) {
   return String(apiIconId || "").trim().startsWith("2525D:");
 }
 
+async function parseDirect2525DSidc(raw) {
+  const mod = await loadEsm();
+  return mod.parseDirect2525DSidc(raw);
+}
+
 module.exports = {
   MILSYM_SIZE,
   isCotTypeConvertable,
@@ -57,4 +62,5 @@ module.exports = {
   renderMilSymPng,
   renderMilSymPngByIconId,
   isMilSymIconId,
+  parseDirect2525DSidc,
 };

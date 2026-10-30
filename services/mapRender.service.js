@@ -150,6 +150,21 @@ function isAirCotType(type) {
   return parts.length >= 3 && parts[2].toUpperCase() === "A";
 }
 
+function isSeaOrSubsurfaceCotType(type) {
+  const raw = String(type || "").trim();
+  const parts = raw.split("-");
+  if (parts.length >= 3) {
+    const dim = parts[2].toUpperCase();
+    if (dim === "S" || dim === "U") return true;
+  }
+  // Numeric 2525D SIDC: digits 5–6 (1-based) are symbol set (30 sea / 35 sub).
+  if (/^1[0-9]\d{18}$/.test(raw)) {
+    const symbolSet = raw.slice(4, 6);
+    return symbolSet === "30" || symbolSet === "35";
+  }
+  return false;
+}
+
 /** ATAK/TAK Aware self-SA ground (a-f-G-U-C). CloudTAK browser SA uses a-f-G-E-V-C. */
 function isStandardGroundEudCotType(type) {
   return mapIconResolve.isStandardGroundEudType(type);
@@ -190,7 +205,10 @@ function markerUsesMapIcon(marker) {
   // Aircraft (and milsym) keep symbology even when multi-hop _flow-tags_
   // classify the marker as federation (otherwise they render as team dots).
   if (apiId.startsWith("2525D:")) return true;
-  if (isAirCotType(marker.type) && (src === "type2525b" || src === "default" || src === "milsym")) {
+  if (
+    (isAirCotType(marker.type) || isSeaOrSubsurfaceCotType(marker.type)) &&
+    (src === "type2525b" || src === "default" || src === "milsym")
+  ) {
     return true;
   }
   if (
@@ -514,6 +532,7 @@ module.exports = {
   markerVisible,
   markerChannelKeys,
   isAirCotType,
+  isSeaOrSubsurfaceCotType,
   isStandardGroundEudCotType,
   markerUsesMapIcon,
   markerDisplayColor,

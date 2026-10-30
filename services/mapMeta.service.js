@@ -1257,6 +1257,14 @@ function parseAffiliationFromType(type) {
   if (t.startsWith("a-h-")) return "hostile";
   if (t.startsWith("a-n-")) return "neutral";
   if (t.startsWith("a-u-")) return "unknown";
+  // CloudTAK milicon / numeric 2525D SIDC: digit 4 is standard identity.
+  if (/^1[0-9]\d{18}$/.test(t)) {
+    const id = t.charAt(3);
+    if (id === "3" || id === "2") return "friend";
+    if (id === "4") return "neutral";
+    if (id === "6" || id === "5") return "hostile";
+    if (id === "1" || id === "0") return "unknown";
+  }
   return "other";
 }
 
@@ -1837,8 +1845,15 @@ function classifyMarkerOrigin(marker) {
   if (flowProvenanceCount >= 2) return "federation";
 
   if (/^a-f-G-/i.test(type)) return "eud";
+  // Air / sea / subsurface atom tracks are typically data feeds (ADS-B, AIS, …).
   if (/^a-[fnhu]-A-/i.test(type)) return "feed";
+  if (/^a-[fnhu]-[SU]-/i.test(type)) return "feed";
   if (/^a-f-[GUS]-/i.test(type)) return "eud";
+  // CloudTAK-style numeric 2525D SIDC with sea (30) / subsurface (35) symbol set.
+  if (/^1[0-9]\d{18}$/.test(type)) {
+    const symbolSet = type.slice(4, 6);
+    if (symbolSet === "30" || symbolSet === "35") return "feed";
+  }
 
   return "unknown";
 }

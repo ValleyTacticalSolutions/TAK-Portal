@@ -175,14 +175,91 @@ async function runTests() {
   };
   assert.strictEqual(mapRender.markerUsesMapIcon(feedAir), true);
 
-  // COT_MAPPING_2525B override
+  // AIS / sea-surface: paint even when origin was previously "unknown"
+  const aisShip = await mapIcon.resolveIconAsync({
+    type: "a-n-S-X-M",
+    affiliation: "neutral",
+  });
+  assert.ok(aisShip, "AIS sea-surface CoT should resolve an icon");
+  assert.strictEqual(aisShip.source, "milsym", "AIS should use CloudTAK-style 2525D milsym");
+  assert.strictEqual(
+    aisShip.iconId,
+    "2525D:10043000001401000000",
+    "a-n-S-X-M should map to the same SIDC CloudTAK milicon uses"
+  );
+  assert.strictEqual(
+    mapRender.markerUsesMapIcon({
+      type: "a-n-S-X-M",
+      origin: "feed",
+      iconId: aisShip.iconId,
+      iconSource: aisShip.source,
+    }),
+    true,
+    "AIS sea markers must paint as map icons when origin is feed"
+  );
+  assert.strictEqual(
+    mapRender.markerUsesMapIcon({
+      type: "a-n-S-X-M",
+      origin: "unknown",
+      iconId: aisShip.iconId,
+      iconSource: aisShip.source,
+    }),
+    true,
+    "AIS sea type2525b/milsym must paint even if origin is unknown"
+  );
+  const aisSidc = await mapIcon.resolveIconAsync({
+    type: "10043000001401000000",
+    affiliation: "neutral",
+  });
+  assert.ok(aisSidc, "numeric milicon SIDC type should resolve");
+  assert.strictEqual(aisSidc.source, "milsym");
+  assert.strictEqual(aisSidc.iconId, "2525D:10043000001401000000");
+  assert.strictEqual(
+    mapRender.markerUsesMapIcon({
+      type: "10043000001401000000",
+      origin: "unknown",
+      iconId: aisSidc.iconId,
+      iconSource: "milsym",
+    }),
+    true,
+    "CloudTAK milicon SIDC markers must paint as map icons"
+  );
+  assert.strictEqual(
+    mapRender.isSeaOrSubsurfaceCotType("a-n-S-X-M"),
+    true,
+    "a-n-S-X-M is sea-surface"
+  );
+  assert.strictEqual(
+    mapRender.isSeaOrSubsurfaceCotType("10043000001401000000"),
+    true,
+    "numeric SIDC 30 is sea-surface"
+  );
+  const mapMeta = require("../services/mapMeta.service");
+  assert.strictEqual(
+    mapMeta.classifyMarkerOrigin({ type: "a-n-S-X-M" }),
+    "feed",
+    "neutral sea atom types classify as feed"
+  );
+  assert.strictEqual(
+    mapMeta.parseAffiliationFromType("10043000001401000000"),
+    "neutral",
+    "SIDC identity digit 4 is neutral"
+  );
+
+  // COT_MAPPING_2525B → milsym (same as 2525C); sync PNG path defers.
   const mapped = mapIcon.resolveIcon({
     type: "a-f-G-E-V",
     affiliation: "friend",
     usericon: { iconsetpath: "COT_MAPPING_2525B/a/f/A/C/H" },
   });
-  assert.ok(mapped, "COT_MAPPING_2525B path should resolve");
-  assert.ok(/fed_rotor/i.test(mapped.relPath || mapped.iconId));
+  assert.strictEqual(mapped, null, "COT_MAPPING_2525B should defer to milsym");
+  const mapped2525bAsync = await mapIcon.resolveIconAsync({
+    type: "a-f-G-E-V",
+    affiliation: "friend",
+    usericon: { iconsetpath: "COT_MAPPING_2525B/a/f/A/C/H" },
+  });
+  assert.ok(mapped2525bAsync, "COT_MAPPING_2525B path should resolve via milsym");
+  assert.strictEqual(mapped2525bAsync.source, "milsym");
 
   // COT_MAPPING_2525C → milsym filled symbols
   const mapped2525cSync = mapIcon.resolveIcon({

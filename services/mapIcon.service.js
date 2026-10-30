@@ -123,7 +123,17 @@ function resolveExplicitIcon({ type, affiliation, detail, usericon }) {
   );
 }
 
-/** Live map: custom usericon/path first; 2525D milsym only when CoT asks for it. */
+function milsymIconResult(iconId) {
+  if (!iconId) return null;
+  return {
+    iconId,
+    iconsetUid: null,
+    relPath: null,
+    source: "milsym",
+  };
+}
+
+/** Live map: custom usericon/path first; PNG type match; then 2525D milsym. */
 async function resolveIconAsync({ type, affiliation, detail, usericon }) {
   const explicit = resolveExplicitIcon({ type, affiliation, detail, usericon });
   if (explicit) return explicit;
@@ -147,26 +157,39 @@ async function resolveIconAsync({ type, affiliation, detail, usericon }) {
     return null;
   }
 
-  // Only invent 2525D when the CoT explicitly requests 2525 mapping (or prefer-list).
+  // CloudTAK milicon / numeric 2525D SIDC as type — never PNG-prefix guess.
+  if (/^1[0-9]\d{18}$/.test(cotType)) {
+    const sidcHit = milsymIconResult(await mapMilSym.cotTypeTo2525DIconId(cotType));
+    if (sidcHit) return sidcHit;
+  }
+
+  // Explicit 2525 mapping path / prefer-list → milsym of (possibly remapped) type.
   const wantMilsym =
     mapIconResolve.prefersMilSymIconPath(ui.iconsetpath) ||
     mapIconResolve.prefersMilSymCotType(cotType);
-  if (wantMilsym) {
+  // Sea / subsurface (AIS etc.): prefer filled 2525D like CloudTAK milicon
+  // over FalconView outline PNGs (A-N-S.png).
+  const seaDim = (() => {
+    const parts = String(cotType || "")
+      .trim()
+      .split("-");
+    return parts.length >= 3 && /^(S|U)$/i.test(parts[2]);
+  })();
+  if (wantMilsym || seaDim) {
     const milId = await mapMilSym.cotTypeTo2525DIconId(cotType);
-    if (milId) {
-      return {
-        iconId: milId,
-        iconsetUid: null,
-        relPath: null,
-        source: "milsym",
-      };
-    }
+    const hit = milsymIconResult(milId);
+    if (hit) return hit;
   }
 
-  return mapIconResolve.resolvePngIcon(
+  const png = mapIconResolve.resolvePngIcon(
     { type, affiliation, detail, usericon },
     registry()
   );
+  if (png) return png;
+
+  // Other 2525-convertable CoT without a bundled PNG → filled 2525D milsymbol.
+  const milId = await mapMilSym.cotTypeTo2525DIconId(cotType);
+  return milsymIconResult(milId);
 }
 
 function explainIconResolution({ type, affiliation, detail, usericon, origin }) {

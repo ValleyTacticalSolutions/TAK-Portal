@@ -7,9 +7,18 @@ import sharp from "sharp";
 
 const DEFAULT_SIZE = 48;
 
+/** CloudTAK milicon / numeric 2525D SIDC (20 digits), optional 2525D: prefix. */
+export function parseDirect2525DSidc(raw) {
+  const s = String(raw || "").trim();
+  const m = /^(?:2525D:)?(1[0-9]\d{18})$/i.exec(s);
+  return m ? m[1] : null;
+}
+
 export function isCotTypeConvertable(cotType) {
+  const t = String(cotType || "").trim();
+  if (parseDirect2525DSidc(t)) return true;
   try {
-    return Type2525.is2525BConvertable(String(cotType || "").trim());
+    return Type2525.is2525BConvertable(t);
   } catch {
     return false;
   }
@@ -17,6 +26,8 @@ export function isCotTypeConvertable(cotType) {
 
 export function cotTypeTo2525DIconId(cotType) {
   const t = String(cotType || "").trim();
+  const direct = parseDirect2525DSidc(t);
+  if (direct) return `2525D:${direct}`;
   if (!isCotTypeConvertable(t)) return null;
   try {
     const sidc = Type2525.to2525D(t);
@@ -38,10 +49,17 @@ export function cotTypeTo2525B(cotType) {
 
 export async function renderMilSymPng(cotType, size = DEFAULT_SIZE) {
   const t = String(cotType || "").trim();
-  if (!isCotTypeConvertable(t)) {
+  const direct = parseDirect2525DSidc(t);
+  let sidc = direct;
+  if (!sidc) {
+    if (!Type2525.is2525BConvertable(t)) {
+      throw new Error("CoT type is not 2525B-convertable");
+    }
+    sidc = Type2525.to2525D(t);
+  }
+  if (!sidc) {
     throw new Error("CoT type is not 2525B-convertable");
   }
-  const sidc = Type2525.to2525D(t);
   const symbol = new ms.Symbol(sidc, milSymOptions(size));
   const svg = symbol.asSVG();
   return sharp(Buffer.from(svg, "utf8")).png().toBuffer();
