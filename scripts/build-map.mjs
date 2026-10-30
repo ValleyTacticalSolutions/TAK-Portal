@@ -47,7 +47,8 @@ function vendorMapLibre() {
     fs.copyFileSync(path.join(dist, ent), path.join(vendorDir, ent));
   }
 
-  const bootstrap = `import maplibregl from "./maplibre-gl.mjs";
+  // MapLibre 6 is ESM-only with named exports only (no default). Use namespace import.
+  const bootstrap = `import * as maplibregl from "./maplibre-gl.mjs";
 maplibregl.setWorkerUrl(new URL("./maplibre-gl-worker.mjs", import.meta.url).href);
 globalThis.maplibregl = maplibregl;
 export default maplibregl;
