@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.28 - 10/30/26
+🐛 `Bug Fix` - Fixes issue with live map failing to load
+
 ### v2.0.27 - 10/30/26
 🐛 `Bug Fix` - Fixes issue with filtered groups appearing in the user edit modal
 
