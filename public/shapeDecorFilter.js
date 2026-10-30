@@ -407,20 +407,11 @@
 
   function shouldSkipLiveStreamMarker(marker) {
     const type = String(marker?.type || marker?.cotType || "").toLowerCase();
-    if (isShapeControlCotType(type)) {
-      return true;
-    }
-    const how = String(marker?.how || "").toLowerCase();
-    const hasIcon = hasExplicitUserIcon({
-      icon: marker?.icon || marker?.iconsetpath,
-      iconsetpath: marker?.iconsetpath,
-    });
-    if (!hasIcon && (how === "m-g" || how.startsWith("m-g-"))) {
-      if (type.startsWith("a-n-") || type.startsWith("a-u-") || type.startsWith("a-p-")) {
-        return true;
-      }
-    }
-    return false;
+    // Only skip known shape-editor control types here. Do not treat every
+    // machine-GPS neutral/unknown/pending point as decor — that drops real SA
+    // (AIS ships, sensor/tracker feeds). Linked/vertex handles are filtered
+    // later via shouldDropShapeDecorPoint once shapes are present.
+    return isShapeControlCotType(type);
   }
 
   return {

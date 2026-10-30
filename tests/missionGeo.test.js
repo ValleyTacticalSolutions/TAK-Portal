@@ -220,6 +220,32 @@ async function runTests() {
     false,
     "sensor location markers must not be skipped on live stream"
   );
+  assert.strictEqual(
+    shapeDecor.shouldSkipLiveStreamMarker({
+      type: "a-n-S-X-M",
+      how: "m-g",
+      callsign: "MMSI 338343742",
+      course: 215,
+      speed: 3.1,
+    }),
+    false,
+    "AIS machine-GPS sea-surface markers must not be skipped on live stream"
+  );
+  assert.strictEqual(
+    shapeDecor.shouldSkipLiveStreamMarker({ type: "a-n-G", how: "m-g" }),
+    false,
+    "neutral machine-GPS points without shape linkage must not be skipped"
+  );
+  assert.strictEqual(
+    shapeDecor.shouldSkipLiveStreamMarker({ type: "a-u-G", how: "m-g" }),
+    false,
+    "unknown machine-GPS points without shape linkage must not be skipped"
+  );
+  assert.strictEqual(
+    shapeDecor.shouldSkipLiveStreamMarker({ type: "a-p-G", how: "m-g" }),
+    false,
+    "pending machine-GPS points without shape linkage must not be skipped"
+  );
 
   console.log("missionGeo.test.js: all assertions passed");
 }
