@@ -6,6 +6,27 @@
 
   const MAP_GLYPHS = "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf";
   const DEFAULT_BASEMAP_ID = "dark-matter";
+  // TAK marker labels use Open Sans Semibold. CARTO's versioned fonts CDN
+  // (tiles.basemaps.cartocdn.com/v/.../fonts) serves Montserrat / Open Sans
+  // Regular+Bold for basemap text but 404s Semibold — rewrite those fetches
+  // to MapLibre demotiles so labels render without breaking CARTO place names.
+  const SEMIBOLD_FONTSTACK = "Open Sans Semibold";
+  const SEMIBOLD_GLYPH_RE = /\/fonts\/Open(?:%20| )Sans(?:%20| )Semibold\/([^/?#]+\.pbf)/i;
+
+  function rewriteMissingCartoSemiboldGlyphs(url, resourceType) {
+    if (resourceType !== "Glyphs") return undefined;
+    const raw = String(url || "");
+    if (!raw || raw.indexOf("demotiles.maplibre.org/font/") !== -1) return undefined;
+    const match = raw.match(SEMIBOLD_GLYPH_RE);
+    if (!match) return undefined;
+    return {
+      url:
+        "https://demotiles.maplibre.org/font/" +
+        SEMIBOLD_FONTSTACK +
+        "/" +
+        match[1],
+    };
+  }
 
   function withMapGlyphs(style) {
     if (typeof style === "string") return style;
@@ -151,6 +172,7 @@
     DEFAULT_BASEMAP_ID,
     BASEMAPS,
     withMapGlyphs,
+    rewriteMissingCartoSemiboldGlyphs,
     rasterBasemapStyle,
     normalizeBasemapId,
     getBasemapEntry,

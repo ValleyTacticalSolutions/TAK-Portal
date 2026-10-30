@@ -818,6 +818,11 @@
       const initialStyle =
         typeof style === "string" ? style : withMapGlyphs(style);
 
+      const basemaps = window.TAK_MAP_BASEMAPS || {};
+      const transformMapRequest =
+        typeof basemaps.rewriteMissingCartoSemiboldGlyphs === "function"
+          ? basemaps.rewriteMissingCartoSemiboldGlyphs
+          : null;
       const instance = new maplibregl.Map({
         container: container,
         style: initialStyle,
@@ -827,6 +832,7 @@
         dragRotate: false,
         pitchWithRotate: false,
         touchPitch: false,
+        transformRequest: transformMapRequest || undefined,
       });
       map = instance;
       instance.scrollZoom.enable();

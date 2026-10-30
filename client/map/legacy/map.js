@@ -2771,6 +2771,11 @@
     : [-98.5795, 39.8283];
   const initialZoom = storedViewport ? storedViewport.zoom : 4;
 
+  const transformMapRequest =
+    typeof mapBasemaps.rewriteMissingCartoSemiboldGlyphs === "function"
+      ? mapBasemaps.rewriteMissingCartoSemiboldGlyphs
+      : null;
+
   const map = new maplibregl.Map({
     container: "map",
     style: withMapGlyphs(initialBasemap.style),
@@ -2787,6 +2792,7 @@
     touchPitch: false,
     rollEnabled: false,
     attributionControl: true,
+    transformRequest: transformMapRequest || undefined,
   });
 
   if (typeof ResizeObserver !== "undefined") {
