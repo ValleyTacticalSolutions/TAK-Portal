@@ -11,7 +11,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
-### v2.0.26 - TBD
+### v2.0.26 - 10/29/26
 🐛 `Bug Fix` - Data Sync create mission no longer reassigns an existing mission (case-insensitive name) into the creator's agency group (#80)<br>
 🐛 `Bug Fix` - Directory outbox: create_user persists Authentik pk before follow-up steps, recovers from username/group name conflicts, and skips unsynced local group UUIDs; password/email edits refuse users still syncing (#79)<br>
 🐛 `Bug Fix` - CloudTAK Marketplace Deploy To Caddy treats `caddy validate` permission-denied on log/data paths as inconclusive and continues (#76)<br>
