@@ -11,7 +11,8 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
-### v2.0.29 - TBD
+### v2.0.29 - 10/30/26
+🐛 `Bug Fix` - Live Map markers no longer strobe under MapLibre 6: disable symbol fade, stop camera view pushes on every CoT batch, and only rewrite GeoJSON features when geometry/properties actually change<br>
 🐛 `Bug Fix` - CloudTAK Marketplace `apply-caddyfile` runs `caddy validate` as the `caddy` user (not root) so Deploy To Caddy cannot read root-only files or create root-owned logs via crafted Caddyfile directives (#81)
 
 ### v2.0.28 - 10/30/26

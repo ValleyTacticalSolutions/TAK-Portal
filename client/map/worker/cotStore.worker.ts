@@ -15,7 +15,6 @@ import { MAP_DIFF_FLUSH_MS, STALE_SWEEP_MS, VIEW_FLUSH_MS } from "../constants";
 import {
   buildPaintFeature,
   effectiveMapImageId,
-  featurePropertyPatch,
   isMarkerExpired,
   isMarkerStale,
   paintChannelKeys,
@@ -32,6 +31,8 @@ const liveShapes = new Map<string, LiveShapeFeature>();
 const showLabelByUid = new Map<string, number>();
 /** Last painted stale flag so we only flush when a CoT crosses stale/expiry. */
 const staleFlagByUid = new Map<string, number>();
+/** Last features sent to the GeoJSON source — skip no-op geometry/property rewrites. */
+const lastPaintedByUid = new Map<string, MarkerFeature>();
 
 let revision = 0;
 let bounds: LonLatBounds | null = null;
@@ -146,6 +147,53 @@ function buildFeature(marker: SlimMarker, showLabel: number): MarkerFeature | nu
   });
 }
 
+const PAINT_PROP_KEYS: Array<keyof MarkerFeature["properties"]> = [
+  "callsign",
+  "type",
+  "affiliation",
+  "color",
+  "teamColor",
+  "iconId",
+  "apiIconId",
+  "iconSource",
+  "origin",
+  "usesMapIcon",
+  "showCircle",
+  "drawTier",
+  "selected",
+  "locked",
+  "renderSort",
+  "labelSort",
+  "showLabel",
+  "channelKeys",
+  "course",
+  "stale",
+];
+
+function geometryChanged(prev: MarkerFeature | undefined, next: MarkerFeature): boolean {
+  if (!prev) return true;
+  const a = prev.geometry.coordinates;
+  const b = next.geometry.coordinates;
+  return a[0] !== b[0] || a[1] !== b[1];
+}
+
+/** Emit only keys whose painted values changed (avoids symbol-bucket rebuilds). */
+function changedPropertyPatch(
+  prev: MarkerFeature | undefined,
+  next: MarkerFeature
+): Array<{ key: string; value: unknown }> | undefined {
+  if (!prev) {
+    return PAINT_PROP_KEYS.map((key) => ({ key, value: next.properties[key] }));
+  }
+  const out: Array<{ key: string; value: unknown }> = [];
+  for (const key of PAINT_PROP_KEYS) {
+    if (prev.properties[key] !== next.properties[key]) {
+      out.push({ key, value: next.properties[key] });
+    }
+  }
+  return out.length ? out : undefined;
+}
+
 function emitSearchIndex(): void {
   const entries: Array<{ uid: string; callsign: string; lat: number; lon: number }> = [];
   for (const m of markers.values()) {
@@ -180,6 +228,7 @@ function flush(): void {
     const features: MarkerFeature[] = [];
     const next = new Set<string>();
     showLabelByUid.clear();
+    lastPaintedByUid.clear();
     for (const m of visible) {
       const uid = String(m.uid);
       const showLabel = resolveShowLabel(uid, labelMap);
@@ -187,6 +236,7 @@ function flush(): void {
       if (!feat) continue;
       features.push(feat);
       next.add(uid);
+      lastPaintedByUid.set(uid, feat);
     }
     sourceUids.clear();
     for (const uid of next) sourceUids.add(uid);
@@ -221,47 +271,25 @@ function flush(): void {
     if (!nextUids.has(uid)) {
       diff.remove.push(vectorId(uid));
       showLabelByUid.delete(uid);
+      lastPaintedByUid.delete(uid);
     }
   }
 
   for (const [uid, feat] of want) {
     if (!sourceUids.has(uid)) {
       diff.add.push(feat);
+      lastPaintedByUid.set(uid, feat);
       continue;
     }
-    const marker = markers.get(uid);
-    if (!marker) continue;
-    const showLabel = resolveShowLabel(uid, labelMap);
-    const paintId = effectiveMapImageId(marker);
-    // Geometry always; full property patch only when labels were recomputed or icon state may change.
-    if (labelMap) {
-      diff.update.push({
-        id: feat.id,
-        newGeometry: feat.geometry,
-        addOrUpdateProperties: featurePropertyPatch(marker, {
-          selectedUid,
-          lockedUid,
-          showLabel,
-          overviewMode,
-          iconReady: !paintId || readyIcons.has(paintId),
-        }),
-      });
-    } else {
-      diff.update.push({
-        id: feat.id,
-        newGeometry: feat.geometry,
-        addOrUpdateProperties: [
-          { key: "callsign", value: String(marker.callsign || uid.slice(0, 16)) },
-          { key: "color", value: feat.properties.color },
-          { key: "iconId", value: feat.properties.iconId },
-          { key: "showCircle", value: feat.properties.showCircle },
-          { key: "showLabel", value: showLabel },
-          { key: "selected", value: uid === selectedUid },
-          { key: "locked", value: uid === lockedUid },
-          { key: "stale", value: feat.properties.stale },
-        ],
-      });
-    }
+    const prev = lastPaintedByUid.get(uid);
+    const moved = geometryChanged(prev, feat);
+    const propPatch = changedPropertyPatch(prev, feat);
+    if (!moved && !propPatch) continue;
+    const entry: GeoJsonDiff["update"][number] = { id: feat.id };
+    if (moved) entry.newGeometry = feat.geometry;
+    if (propPatch) entry.addOrUpdateProperties = propPatch;
+    diff.update.push(entry);
+    lastPaintedByUid.set(uid, feat);
   }
 
   sourceUids.clear();
@@ -289,6 +317,7 @@ function dropMarker(uid: string): void {
   markers.delete(id);
   showLabelByUid.delete(id);
   staleFlagByUid.delete(id);
+  lastPaintedByUid.delete(id);
 }
 
 function upsertMarker(marker: SlimMarker): void {
@@ -344,6 +373,7 @@ function handle(msg: WorkerInbound): void {
       sourceUids.clear();
       showLabelByUid.clear();
       staleFlagByUid.clear();
+      lastPaintedByUid.clear();
       for (const m of msg.markers || []) upsertMarker(m);
       revision = Number(msg.revision) || revision;
       needFullResync = true;

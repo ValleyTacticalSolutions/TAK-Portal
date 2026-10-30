@@ -265,11 +265,13 @@ export function bootTakMap() {
   applyBatch = function (msg) {
     __origApplyBatch(msg);
     const store = __initCotStore();
+    // store.batch already schedules a flush for changed tracks. Do not push the
+    // camera view here — that forced label recompute + full marker rewrite on
+    // every SSE batch and strobed symbols under MapLibre's default fade.
     store.batch(msg.updates || [], msg.removes || [], msg.revision);
     if (msg.shapeUpdates || msg.shapeRemoves) {
       store.shapesBatch(msg.shapeUpdates || [], msg.shapeRemoves || []);
     }
-    __pushViewToWorker();
     if (typeof preloadIconsForMarkers === "function") {
       preloadIconsForMarkers(msg.updates || []);
     }

@@ -2776,6 +2776,8 @@
     style: withMapGlyphs(initialBasemap.style),
     center: initialCenter,
     zoom: initialZoom,
+    // Avoid MapLibre's default 300ms symbol fade-in; dense live updates otherwise strobe.
+    fadeDuration: 0,
     bearing: 0,
     pitch: 0,
     minPitch: 0,
