@@ -622,8 +622,9 @@
     window.TAK_PORTAL_MAP_DEFAULTS = { basemap: "<%= typeof defaultMapSource !== 'undefined' ? defaultMapSource : 'dark-matter' %>" };
     window.TAK_PORTAL_MAP_USER_KEY = "<%= typeof mapStorageUserKey !== 'undefined' ? mapStorageUserKey : 'anonymous' %>";
     window.TAK_PORTAL_MAP_ASSETS = {
-      maplibreJsUrl: "<%= typeof maplibreJsUrl !== 'undefined' ? maplibreJsUrl : 'https://unpkg.com/maplibre-gl@5.13.0/dist/maplibre-gl.js' %>",
-      maplibreCssUrl: "<%= typeof maplibreCssUrl !== 'undefined' ? maplibreCssUrl : 'https://unpkg.com/maplibre-gl@5.13.0/dist/maplibre-gl.css' %>",
+      maplibreJsUrl: "<%= typeof maplibreJsUrl !== 'undefined' ? maplibreJsUrl : 'https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.mjs' %>",
+      maplibreWorkerJsUrl: "<%= typeof maplibreWorkerJsUrl !== 'undefined' ? maplibreWorkerJsUrl : 'https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl-worker.mjs' %>",
+      maplibreCssUrl: "<%= typeof maplibreCssUrl !== 'undefined' ? maplibreCssUrl : 'https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css' %>",
     };
     <% } %>
   </script>

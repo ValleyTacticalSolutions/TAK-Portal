@@ -1,6 +1,6 @@
 /**
  * Build the TypeScript map client → public/dist/
- * Also vendors MapLibre GL (UMD) into public/vendor/maplibre-gl/
+ * Also vendors MapLibre GL (ESM + worker) into public/vendor/maplibre-gl/
  */
 import * as esbuild from "esbuild";
 import fs from "fs";
@@ -31,21 +31,29 @@ function vendorMapLibre() {
     fs.copyFileSync(cssSrc, path.join(vendorDir, "maplibre-gl.css"));
   }
 
-  // Prefer official UMD build (MapLibre 5.x). Do NOT IIFE-bundle ESM —
-  // that breaks the MapLibre web worker and yields blank maps + MIME errors.
-  const umdJs = path.join(dist, "maplibre-gl.js");
-  const outJs = path.join(vendorDir, "maplibre-gl.js");
-  if (fs.existsSync(umdJs)) {
-    fs.copyFileSync(umdJs, outJs);
-    console.log("[build-map] vendored MapLibre UMD → public/vendor/maplibre-gl/");
-    return;
+  // MapLibre 6 is ESM-only (no UMD). Copy runtime modules + a tiny bootstrap that
+  // assigns window.maplibregl and points the worker at the vendored worker module.
+  const required = ["maplibre-gl.mjs", "maplibre-gl-worker.mjs"];
+  for (const name of required) {
+    const src = path.join(dist, name);
+    if (!fs.existsSync(src)) {
+      console.error(`[build-map] missing ${name} in maplibre-gl/dist (need maplibre-gl@>=6.4.1)`);
+      process.exit(1);
+    }
+  }
+  for (const ent of fs.readdirSync(dist)) {
+    if (ent.endsWith(".map") || ent.includes("-dev.")) continue;
+    if (!ent.endsWith(".mjs") && !ent.endsWith(".css")) continue;
+    fs.copyFileSync(path.join(dist, ent), path.join(vendorDir, ent));
   }
 
-  console.error(
-    "[build-map] maplibre-gl UMD dist/maplibre-gl.js missing. " +
-      "Install maplibre-gl@5.13.0 (ESM-only MapLibre 6 breaks classic <script> + worker)."
-  );
-  process.exit(1);
+  const bootstrap = `import maplibregl from "./maplibre-gl.mjs";
+maplibregl.setWorkerUrl(new URL("./maplibre-gl-worker.mjs", import.meta.url).href);
+globalThis.maplibregl = maplibregl;
+export default maplibregl;
+`;
+  fs.writeFileSync(path.join(vendorDir, "maplibre-bootstrap.mjs"), bootstrap, "utf8");
+  console.log("[build-map] vendored MapLibre ESM + bootstrap → public/vendor/maplibre-gl/");
 }
 
 ensureDir(distDir);

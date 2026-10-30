@@ -215,9 +215,19 @@ cmd_apply_caddyfile() {
     die "could not read updated Caddyfile from stdin"
   }
   if command -v caddy >/dev/null 2>&1; then
-    if ! caddy validate --config "$new" --adapter caddyfile; then
-      rm -f "$new"
-      die "caddy rejected the updated file; original left in place"
+    # Validate may fail opening caddy-owned log/data paths even when the file is valid.
+    _caddy_out=""
+    _caddy_rc=0
+    _caddy_out=$(caddy validate --config "$new" --adapter caddyfile 2>&1) || _caddy_rc=$?
+    if [ "$_caddy_rc" -ne 0 ]; then
+      _caddy_filtered=$(printf '%s\n' "$_caddy_out" | sed '/^[[:space:]]*$/d')
+      if [ -n "$_caddy_filtered" ] && ! printf '%s\n' "$_caddy_filtered" | grep -Eiv 'permission denied|EACCES|operation not permitted' >/dev/null; then
+        echo "caddy validate inconclusive (permission denied on log/data paths); continuing." >&2
+      else
+        printf '%s\n' "$_caddy_out" >&2
+        rm -f "$new"
+        die "caddy rejected the updated file; original left in place"
+      fi
     fi
   fi
   cp -a "$dest" "$bak" || {

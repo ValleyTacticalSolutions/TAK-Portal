@@ -1812,6 +1812,44 @@ let editGroupCurrentName = "";
 let editGroupCurrentDescription = "";
 let editGroupCurrentPrivate = "no";
 let editGroupOriginalType = null; // used to prevent agency->global for non-global admins
+let editGroupOriginalTypeDetail = "";
+
+/** Prefer stored created_type; fall back to name parsing for legacy groups. */
+function resolveEditUiType(g, parsed) {
+  const createdType = groupCreatedType(g);
+  if (createdType === "agency") return "agency";
+  if (createdType === "county") return "county";
+  if (createdType === "region") return "region";
+  if (createdType === "state") return "state";
+  if (createdType === "global" || createdType === "generic") return "generic";
+  return (parsed && parsed.type) || "generic";
+}
+
+function deriveGroupTypePayload(type, { prefix, county, region, state }) {
+  let groupType = "Global";
+  let groupTypeDetail = null;
+
+  if (type === "agency") {
+    groupType = "Agency";
+    const agencyObj = (agenciesCache || []).find((a) => {
+      const p = String(a.groupPrefix || "").trim();
+      return p.toLowerCase() === String(prefix || "").trim().toLowerCase();
+    });
+    if (agencyObj && agencyObj.name) groupTypeDetail = String(agencyObj.name);
+    else if (prefix) groupTypeDetail = String(prefix);
+  } else if (type === "county") {
+    groupType = "County";
+    if (county) groupTypeDetail = String(county);
+  } else if (type === "region") {
+    groupType = "Region";
+    if (region) groupTypeDetail = String(region);
+  } else if (type === "state") {
+    groupType = "State";
+    if (state) groupTypeDetail = String(state).toUpperCase();
+  }
+
+  return { groupType, groupTypeDetail };
+}
 
 // Rename (Edit Name)
 window.editGroupName = async (groupId) => {
@@ -1820,7 +1858,7 @@ window.editGroupName = async (groupId) => {
   const g = (groupsCache || []).find(x => String(x.pk) === String(groupId));
   const currentName = String(g?.name || "").trim();
   const currentDescription = groupDescriptionText(g);
-	  const currentPrivate = groupIsPrivate(g) ? "yes" : "no";
+  const currentPrivate = groupIsPrivate(g) ? "yes" : "no";
 
   if (groupActionsLocked(currentName)) {
     setMsg(listMsg, `Actions are locked for group ${currentName || groupId}`, false);
@@ -1832,9 +1870,12 @@ window.editGroupName = async (groupId) => {
   editGroupCurrentDescription = currentDescription;
   editGroupCurrentPrivate = currentPrivate;
 
-  // Break apart the current name into structured fields
+  // Break apart the current name into structured fields; type prefers attributes.
   const parsed = parseGroupName(currentName);
-  editGroupOriginalType = parsed.type || "generic";
+  const uiType = resolveEditUiType(g, parsed);
+  const storedDetail = groupCreatedTypeDetail(g);
+  editGroupOriginalType = uiType;
+  editGroupOriginalTypeDetail = storedDetail;
 
   // Type
   if (editType) {
@@ -1842,29 +1883,42 @@ window.editGroupName = async (groupId) => {
       editType.value = "agency";
       editType.disabled = true;
     } else {
-      updateCreateEditTypeOptions(parsed.type || "generic");
-      editType.value = parsed.type || "generic";
+      updateCreateEditTypeOptions(uiType);
+      editType.value = uiType;
       editType.disabled = false;
     }
 
     if (editType.onchange) editType.onchange();
   }
 
-  // Agency / county
+  // Agency / county / region / state — prefer attribute detail when present
   if (editAgencyPrefixSelect) {
-    editAgencyPrefixSelect.value = parsed.agencyPrefix || "";
+    let prefix = parsed.agencyPrefix || "";
+    if (uiType === "agency" && storedDetail) {
+      const agencyObj = (agenciesCache || []).find(
+        (a) => String(a.name || "").trim().toLowerCase() === storedDetail.toLowerCase()
+      );
+      if (agencyObj) prefix = String(agencyObj.groupPrefix || "").trim() || prefix;
+    }
+    editAgencyPrefixSelect.value = prefix;
   }
+  // Mirror create: single-agency admins stay locked; multi-agency may reassign among managed agencies.
   if (!IS_GLOBAL_ADMIN && editAgencyPrefixSelect) {
-  editAgencyPrefixSelect.disabled = true;
-}
+    editAgencyPrefixSelect.disabled = !IS_MULTI_AGENCY_ADMIN;
+  }
   if (editCountySelect) {
-    editCountySelect.value = parsed.county || "";
+    editCountySelect.value =
+      (uiType === "county" && storedDetail) ? storedDetail : (parsed.county || "");
   }
   if (editRegionSelect) {
-    editRegionSelect.value = parsed.region || "";
+    editRegionSelect.value =
+      (uiType === "region" && storedDetail) ? storedDetail : (parsed.region || "");
   }
   if (editStateSelect) {
-    editStateSelect.value = parsed.state || "";
+    editStateSelect.value =
+      (uiType === "state" && storedDetail)
+        ? storedDetail.toUpperCase()
+        : (parsed.state || "");
   }
 
   // Base name (no prefix, no behavior suffix)
@@ -2437,8 +2491,8 @@ editGroupSaveBtn.onclick = async () => {
     return;
   }
 
-  // IMPORTANT: prevent agency admins from changing agency groups to global/county
-  if (!IS_GLOBAL_ADMIN && editGroupOriginalType === "agency" && type !== "agency") {
+  // Agency / multi-agency admins may only edit Agency-scoped groups.
+  if (!IS_GLOBAL_ADMIN && type !== "agency") {
     setMsg(editGroupMsg, "You are not allowed to change an agency group to a different type.", false);
     return;
   }
@@ -2480,9 +2534,24 @@ editGroupSaveBtn.onclick = async () => {
   });
 
   const newDescription = String(editGroupDescriptionInput.value || "").trim();
-  const newPrivate = (IS_GLOBAL_ADMIN && editPrivateSelect && type === "agency")
-    ? String(editPrivateSelect.value || "no").trim().toLowerCase()
-    : null;
+  const { groupType, groupTypeDetail } = deriveGroupTypePayload(type, {
+    prefix,
+    county,
+    region,
+    state,
+  });
+
+  // Private is agency-only. Any non-agency target clears hide-from-agency-admins.
+  let newPrivate = null;
+  if (IS_GLOBAL_ADMIN) {
+    if (type === "agency") {
+      newPrivate = String(editPrivateSelect?.value || "no").trim().toLowerCase() === "yes"
+        ? "yes"
+        : "no";
+    } else {
+      newPrivate = "no";
+    }
+  }
 
   if (!newName) {
     setMsg(editGroupMsg, "Invalid group name.", false);
@@ -2503,24 +2572,35 @@ editGroupSaveBtn.onclick = async () => {
   }
 
   const privateUnchanged = (newPrivate === null) || (newPrivate === editGroupCurrentPrivate);
+  const typeUnchanged =
+    type === editGroupOriginalType &&
+    String(groupTypeDetail || "").trim().toLowerCase() ===
+      String(editGroupOriginalTypeDetail || "").trim().toLowerCase();
 
-  if (newName === editGroupCurrentName && newDescription === editGroupCurrentDescription && privateUnchanged) {
+  if (
+    newName === editGroupCurrentName &&
+    newDescription === editGroupCurrentDescription &&
+    privateUnchanged &&
+    typeUnchanged
+  ) {
     setMsg(editGroupMsg, "No changes made.", true);
     return;
   }
 
   if (!confirm(`Save changes to "${stripTakPrefix(editGroupCurrentName)}"?`)) return;
 
+  const body = {
+    name: newName,
+    description: newDescription || null,
+    groupType,
+    groupTypeDetail,
+  };
+  if (newPrivate !== null) body.private = newPrivate;
+
   const res = await fetch(`/api/groups/${encodeURIComponent(editGroupCurrentId)}`, {
     method: "PATCH",
     headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({
-      name: newName,
-      description: newDescription || null,
-      private: (IS_GLOBAL_ADMIN && editPrivateSelect && type === "agency")
-        ? String(editPrivateSelect.value || "no").trim().toLowerCase()
-        : undefined,
-    }),
+    body: JSON.stringify(body),
   });
 
   let out = {};
@@ -2534,6 +2614,8 @@ editGroupSaveBtn.onclick = async () => {
   setMsg(editGroupMsg, `Updated "${stripTakPrefix(newName)}"`, true);
   editGroupCurrentName = newName;
   editGroupCurrentDescription = newDescription;
+  editGroupOriginalType = type;
+  editGroupOriginalTypeDetail = groupTypeDetail || "";
   if (newPrivate !== null) editGroupCurrentPrivate = newPrivate;
   await loadGroups();
   showEditGroupModal(false);

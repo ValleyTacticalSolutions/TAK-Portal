@@ -15,7 +15,9 @@ const require = createRequire(import.meta.url);
 const required = [
   path.join(root, "public", "dist", "map.js"),
   path.join(root, "public", "dist", "map.worker.js"),
-  path.join(root, "public", "vendor", "maplibre-gl", "maplibre-gl.js"),
+  path.join(root, "public", "vendor", "maplibre-gl", "maplibre-bootstrap.mjs"),
+  path.join(root, "public", "vendor", "maplibre-gl", "maplibre-gl.mjs"),
+  path.join(root, "public", "vendor", "maplibre-gl", "maplibre-gl-worker.mjs"),
   path.join(root, "public", "vendor", "maplibre-gl", "maplibre-gl.css"),
 ];
 

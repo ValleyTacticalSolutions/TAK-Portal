@@ -26,6 +26,8 @@ assert.match(source, /\binstall-plugin\b/);
 assert.match(source, /\brebuild\b/);
 assert.match(source, /\bwrite-caddy-route\b/);
 assert.match(source, /\bapply-caddyfile\b/);
+assert.match(source, /permission denied|EACCES/);
+assert.match(source, /inconclusive.*continuing/i);
 assert.match(source, /\bcleanup-sudoers\b/);
 assert.match(source, /\bcompose_file_rel\b/);
 assert.match(source, /refusing compose file outside CloudTAK checkout/);

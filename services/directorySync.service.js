@@ -115,6 +115,99 @@ function formatOutboxError(err) {
   return detail ? `HTTP ${status}: ${detail}` : `HTTP ${status}: ${base}`;
 }
 
+function responseDetailText(err) {
+  try {
+    const data = err?.response?.data;
+    return typeof data === "string" ? data : JSON.stringify(data || "");
+  } catch (_) {
+    return "";
+  }
+}
+
+/**
+ * Map outbox group tokens to Authentik group pks that are safe to PATCH.
+ * Local group UUIDs without authentik_pk must never be sent (Authentik 2024+ also uses UUIDs,
+ * so isAuthentikPkToken alone cannot distinguish them).
+ */
+async function resolveSyncedAuthentikGroupPks(tokens) {
+  const list = [
+    ...new Set((Array.isArray(tokens) ? tokens : []).map((x) => String(x).trim()).filter(Boolean)),
+  ];
+  if (!list.length) return [];
+  const groups = await repo.getGroupsByPks(list);
+  const pks = [];
+  const matchedLocal = new Set();
+  for (const g of groups) {
+    const ak = g.authentik_pk != null ? String(g.authentik_pk).trim() : "";
+    if (!ak) continue;
+    pks.push(ak);
+    matchedLocal.add(ak);
+    if (g.uuid || g.id) matchedLocal.add(String(g.uuid || g.id).trim());
+    if (g.pk != null) matchedLocal.add(String(g.pk).trim());
+  }
+  // Legacy integer Authentik pks may not be in the local directory yet.
+  for (const t of list) {
+    if (/^\d+$/.test(t) && !matchedLocal.has(t)) pks.push(t);
+  }
+  return [...new Set(pks)];
+}
+
+async function persistUserAuthentikPk(entityId, pk) {
+  if (!entityId || pk == null || pk === "") return;
+  await db.query(
+    `UPDATE users SET authentik_pk = $2, sync_status = 'ok', updated_at = now() WHERE id = $1`,
+    [entityId, pk]
+  );
+}
+
+async function findAuthentikUserByUsername(username) {
+  const uname = String(username || "").trim();
+  if (!uname) return null;
+  try {
+    const res = await api.get("/core/users/", {
+      params: { username: uname, include_groups: true, page_size: 20 },
+    });
+    const results = Array.isArray(res.data?.results) ? res.data.results : [];
+    const exact = results.find(
+      (u) => String(u.username || "").toLowerCase() === uname.toLowerCase()
+    );
+    if (exact) return exact;
+  } catch (_) {}
+  try {
+    const res = await api.get("/core/users/", {
+      params: { search: uname, include_groups: true, page_size: 50 },
+    });
+    const results = Array.isArray(res.data?.results) ? res.data.results : [];
+    return (
+      results.find((u) => String(u.username || "").toLowerCase() === uname.toLowerCase()) || null
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+async function findAuthentikGroupByName(name) {
+  const n = String(name || "").trim();
+  if (!n) return null;
+  try {
+    const res = await api.get("/core/groups/", {
+      params: { name: n, include_users: false, page_size: 20 },
+    });
+    const results = Array.isArray(res.data?.results) ? res.data.results : [];
+    const exact = results.find((g) => String(g.name || "").toLowerCase() === n.toLowerCase());
+    if (exact) return exact;
+  } catch (_) {}
+  try {
+    const res = await api.get("/core/groups/", {
+      params: { search: n, include_users: false, page_size: 50 },
+    });
+    const results = Array.isArray(res.data?.results) ? res.data.results : [];
+    return results.find((g) => String(g.name || "").toLowerCase() === n.toLowerCase()) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function handleOutboxRow(row) {
   const payload = outbox.decryptPayload(row.payload || {});
   const kind = String(row.kind || "");
@@ -128,21 +221,52 @@ async function handleOutboxRow(row) {
       attributes: payload.attributes || {},
     };
     if (payload.path) body.path = payload.path;
-    const res = await api.post("/core/users/", body);
-    const created = res.data;
-    const pk = created.pk;
+
+    let created = null;
+    let pk = row.authentik_pk || payload.authentikPk || null;
+    // Outbox row may still have null pk after an earlier attempt that created the Authentik user.
+    if (!pk && row.entity_id) {
+      try {
+        const r = await db.query(`SELECT authentik_pk FROM users WHERE id = $1`, [row.entity_id]);
+        const existingPk = r.rows[0]?.authentik_pk;
+        if (existingPk != null && String(existingPk).trim() !== "") pk = existingPk;
+      } catch (_) {}
+    }
+    if (!pk) {
+      try {
+        const res = await api.post("/core/users/", body);
+        created = res.data;
+        pk = created.pk;
+      } catch (err) {
+        const status = Number(err?.response?.status || 0);
+        const detail = responseDetailText(err);
+        if (status === 400 && /unique|already exists|username/i.test(detail)) {
+          const existing = await findAuthentikUserByUsername(payload.username);
+          if (!existing?.pk) throw err;
+          pk = existing.pk;
+          created = existing;
+        } else {
+          throw err;
+        }
+      }
+    } else {
+      try {
+        const fresh = await api.get(`/core/users/${pk}/`);
+        created = fresh.data;
+      } catch (_) {
+        created = { pk, username: payload.username, email: payload.email, name: payload.name };
+      }
+    }
+
+    // Persist pk immediately so retries / later jobs (set_password) do not re-POST create.
+    await persistUserAuthentikPk(row.entity_id, pk);
+
     if (payload.password) {
       await api.post(`/core/users/${pk}/set_password/`, { password: payload.password });
     }
-    const groupPks = (payload.groupPks || []).map(String).filter((x) => repo.isAuthentikPkToken(x));
+    const groupPks = await resolveSyncedAuthentikGroupPks(payload.groupPks);
     if (groupPks.length) {
       await api.patch(`/core/users/${pk}/`, { groups: groupPks });
-    }
-    if (row.entity_id) {
-      await db.query(
-        `UPDATE users SET authentik_pk = $2, sync_status = 'ok', updated_at = now() WHERE id = $1`,
-        [row.entity_id, pk]
-      );
     }
     if (payload.sendOnboardingEmail) {
       let user = created;
@@ -182,7 +306,13 @@ async function handleOutboxRow(row) {
   if (kind === "set_groups") {
     const pk = row.authentik_pk || payload.authentikPk;
     if (!pk) throw new Error("No authentik pk for set_groups");
-    const groupPks = (payload.groupPks || []).map(String).filter((x) => repo.isAuthentikPkToken(x));
+    const requested = (payload.groupPks || []).map(String).filter(Boolean);
+    const groupPks = await resolveSyncedAuthentikGroupPks(requested);
+    if (requested.length && !groupPks.length) {
+      throw new Error(
+        "No synced Authentik group pks for set_groups (groups may still be pending create_group)"
+      );
+    }
     await api.patch(`/core/users/${pk}/`, { groups: groupPks });
     if (row.entity_id) {
       await db.query(`UPDATE users SET sync_status = 'ok', updated_at = now() WHERE id = $1`, [row.entity_id]);
@@ -199,8 +329,30 @@ async function handleOutboxRow(row) {
 
   if (kind === "create_group") {
     const body = { name: payload.name, attributes: payload.attributes || {} };
-    const res = await api.post("/core/groups/", body);
-    const pk = res.data.pk;
+    let pk = row.authentik_pk || payload.authentikPk || null;
+    if (!pk && row.entity_id) {
+      try {
+        const r = await db.query(`SELECT authentik_pk FROM groups WHERE id = $1`, [row.entity_id]);
+        const existingPk = r.rows[0]?.authentik_pk;
+        if (existingPk != null && String(existingPk).trim() !== "") pk = existingPk;
+      } catch (_) {}
+    }
+    if (!pk) {
+      try {
+        const res = await api.post("/core/groups/", body);
+        pk = res.data.pk;
+      } catch (err) {
+        const status = Number(err?.response?.status || 0);
+        const detail = responseDetailText(err);
+        if (status === 400 && /already exists|unique|name/i.test(detail)) {
+          const existing = await findAuthentikGroupByName(payload.name);
+          if (!existing?.pk) throw err;
+          pk = existing.pk;
+        } else {
+          throw err;
+        }
+      }
+    }
     if (row.entity_id) {
       await db.query(
         `UPDATE groups SET authentik_pk = $2, sync_status = 'ok', updated_at = now() WHERE id = $1`,

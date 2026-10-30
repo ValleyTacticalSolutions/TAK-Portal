@@ -337,7 +337,15 @@
     syncNavBtn();
   })();
 </script>
-<script src="<%= maplibreJsUrl %>"></script>
+<script type="module">
+  import maplibregl from "<%= maplibreJsUrl %>";
+  <% if (typeof maplibreWorkerJsUrl !== "undefined" && maplibreWorkerJsUrl) { %>
+  if (maplibregl && typeof maplibregl.setWorkerUrl === "function") {
+    maplibregl.setWorkerUrl("<%= maplibreWorkerJsUrl %>");
+  }
+  <% } %>
+  window.maplibregl = maplibregl;
+</script>
 <script src="<%= mapBasemapsJsUrl %>"></script>
 <script src="<%= shapeDecorFilterJsUrl %>"></script>
 <script src="<%= mapJsUrl %>" defer></script>

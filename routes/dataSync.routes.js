@@ -98,6 +98,18 @@ async function missionExists(missionName) {
   }
 }
 
+/** Fail-closed existence probe for write gates (non-404 errors propagate). */
+async function missionExistsStrict(missionName) {
+  try {
+    await dataSyncSvc.getMission(missionName);
+    return true;
+  } catch (err) {
+    const status = err?.response?.status;
+    if (status === 404) return false;
+    throw err;
+  }
+}
+
 function resolveMissionWriteAction(req, missionName, existedBefore) {
   const intent = auditIntentFromRequest(req);
   if (intent === "restore") return "DATA_SYNC_MISSION_RESTORED";
@@ -193,6 +205,12 @@ function sendAccessError(res, err) {
   const code = err?.code;
   if (code === "FORBIDDEN" || code === "MISSION_ACCESS_DENIED") {
     return res.status(403).json({ error: "Forbidden" });
+  }
+  if (code === "MISSION_EXISTS") {
+    return res.status(409).json({
+      error: err.message || "A mission with this name already exists.",
+      code: "MISSION_EXISTS",
+    });
   }
   if (code === "MULTIPLE_GROUPS") {
     return res.status(400).json({ error: err.message });
@@ -401,7 +419,20 @@ router.put("/missions/:missionName", async (req, res) => {
     if (!prepared.ok) return;
     const body = prepared.body;
     const missionName = req.params.missionName;
-    const existedBefore = await missionExists(missionName);
+    const intent = auditIntentFromRequest(req);
+    const existedBefore = await missionExistsStrict(missionName);
+    // Create must not overwrite an existing mission (TAK names are case-insensitive).
+    // Without this gate, PUT + allowGroupChange reassigns the existing mission's groups.
+    if (intent === "create" && existedBefore) {
+      const err = new Error("A mission with this name already exists.");
+      err.code = "MISSION_EXISTS";
+      throw err;
+    }
+    // Same readable bar as POST whenever the target already exists (restore / update via PUT).
+    if (existedBefore) {
+      const authUser = req.authentikUser || null;
+      await dataSyncAccess.assertMissionReadable(authUser, missionName);
+    }
     const data = await dataSyncSvc.putMission(missionName, body);
     const groups = missionGroupsFromBody(body);
     auditDataSync(req, resolveMissionWriteAction(req, missionName, existedBefore), missionName, {

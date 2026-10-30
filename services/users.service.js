@@ -2728,6 +2728,11 @@ async function resetPassword(userId, password) {
   if (err) throw new Error(err);
   const user = await directoryRepo.getUserById(userId);
   if (!user) throw new Error("User not found");
+  if (user.authentik_pk == null || String(user.authentik_pk).trim() === "") {
+    throw new Error(
+      "User is still syncing to Authentik; wait for sync to finish before resetting the password."
+    );
+  }
   const outboxId = await authentikOutbox.enqueue({
     kind: "set_password",
     entityType: "user",
@@ -2778,6 +2783,11 @@ async function updateEmail(userId, email) {
   const mail = String(email || "").trim();
   const user = await directoryRepo.getUserById(userId);
   if (!user) throw new Error("User not found");
+  if (user.authentik_pk == null || String(user.authentik_pk).trim() === "") {
+    throw new Error(
+      "User is still syncing to Authentik; wait for sync to finish before editing the user."
+    );
+  }
   const outboxId = await db.withTransaction(async (c) => {
     await directoryRepo.updateLocalUser(user.uuid || user.id, { email: mail }, c);
     return authentikOutbox.enqueue(

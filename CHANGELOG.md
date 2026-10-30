@@ -11,6 +11,13 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.26 - TBD
+🐛 `Bug Fix` - Data Sync create mission no longer reassigns an existing mission (case-insensitive name) into the creator's agency group (#80)<br>
+🐛 `Bug Fix` - Directory outbox: create_user persists Authentik pk before follow-up steps, recovers from username/group name conflicts, and skips unsynced local group UUIDs; password/email edits refuse users still syncing (#79)<br>
+🐛 `Bug Fix` - CloudTAK Marketplace Deploy To Caddy treats `caddy validate` permission-denied on log/data paths as inconclusive and continues (#76)<br>
+🐛 `Bug Fix` - Groups edit now updates type metadata for all agency/county/region/state/global conversions (clears ownership detail + agency-only private flag); multi-agency admins can reassign among managed agencies<br>
+⬆️ `Dependency Update` - nodemailer 10.x, sanitize-html 2.18.x, maplibre-gl 6.16.0 (ESM vendor + worker), node-forge 1.4.2, plus overrides for proxy-addr, follow-redirects, fast-uri, brace-expansion, source-map-js (#77)
+
 ### v2.0.25 - 10/28/26
 ✨ `Enhancement` - Mutual Aid delegated agency admins can now access data syncs linked to the mutual aid channel from the Data Sync page and the Live Map<br>
 ✨ `Enhancement` - Agency edit modal now includes a toggle to hide individual agencies from the request access page<br>

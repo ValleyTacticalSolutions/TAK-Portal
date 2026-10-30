@@ -18,10 +18,13 @@
     return {
       css:
         assets.maplibreCssUrl ||
-        "https://unpkg.com/maplibre-gl@5.13.0/dist/maplibre-gl.css",
+        "https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css",
       js:
         assets.maplibreJsUrl ||
-        "https://unpkg.com/maplibre-gl@5.13.0/dist/maplibre-gl.js",
+        "https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.mjs",
+      worker:
+        assets.maplibreWorkerJsUrl ||
+        "https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl-worker.mjs",
     };
   }
 
@@ -435,12 +438,16 @@
     const urls = mapAssetUrls();
     assetsPromise = loadStylesheet(urls.css)
       .then(function () {
-        return loadScript(urls.js);
+        // MapLibre 6 is ESM-only; dynamic import (not classic <script>) loads it.
+        return import(urls.js);
       })
-      .then(function () {
-        if (!window.maplibregl) {
-          throw new Error("MapLibre failed to load");
+      .then(function (mod) {
+        const ml = (mod && (mod.default || mod.maplibregl)) || window.maplibregl;
+        if (!ml) throw new Error("MapLibre failed to load");
+        if (urls.worker && typeof ml.setWorkerUrl === "function") {
+          ml.setWorkerUrl(urls.worker);
         }
+        window.maplibregl = ml;
       })
       .catch(function (err) {
         assetsPromise = null;

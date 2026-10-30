@@ -580,6 +580,23 @@ run_cmd() {
   if "\$PRIV" -n bash -lc "\$cmd" 2>/dev/null; then return 0; fi
   return 1
 }
+# caddy validate provisions config and may open log/data paths owned by the caddy user.
+# When every error line is permission-denied on a path, treat validate as inconclusive and continue.
+caddy_validate_ok() {
+  local cmd="\$1" out rc=0
+  [ -n "\$cmd" ] || return 0
+  out=\$(bash -lc "\$cmd" 2>&1) || rc=\$?
+  if [ "\$rc" -eq 0 ]; then return 0; fi
+  if "\$PRIV" -n bash -lc "\$cmd" >/dev/null 2>&1; then return 0; fi
+  local filtered
+  filtered=\$(printf '%s\\n' "\$out" | sed '/^[[:space:]]*\$/d')
+  if [ -n "\$filtered" ] && ! printf '%s\\n' "\$filtered" | grep -Eiv 'permission denied|EACCES|operation not permitted' >/dev/null; then
+    echo "Caddy validate inconclusive (permission denied on log/data paths); continuing." >&2
+    return 0
+  fi
+  printf '%s\\n' "\$out" >&2
+  return 1
+}
 cp -a "\$HOST_PATH" "\$BAK" 2>/dev/null || "\$PRIV" -n cp -a "\$HOST_PATH" "\$BAK" 2>/dev/null || {
   echo "Could not back up \$HOST_PATH" >&2
   echo "Host Caddyfile is root-owned; install/grant /usr/local/libexec/tak-portal/marketplace-helper (apply-caddyfile) for takwerx/infra-TAK, or run Deploy To Caddy as a user with write access." >&2
@@ -591,7 +608,7 @@ if [ "\$VIA" != "docker" ] && [ -n "\$VALIDATE" ]; then
     *"\$HOST_PATH"*) CHECK=\${CHECK//"\$HOST_PATH"/"\$NEW"} ;;
     *) CHECK="\$CHECK \$NEW" ;;
   esac
-  if ! run_cmd "\$CHECK"; then
+  if ! caddy_validate_ok "\$CHECK"; then
     echo "Caddy rejected the updated file. The original was left in place." >&2
     exit 1
   fi
@@ -602,7 +619,7 @@ copy_over "\$NEW" "\$HOST_PATH" || {
   exit 1
 }
 if [ "\$VIA" = "docker" ] && [ -n "\$VALIDATE" ]; then
-  if ! run_cmd "\$VALIDATE"; then
+  if ! caddy_validate_ok "\$VALIDATE"; then
     copy_over "\$BAK" "\$HOST_PATH" || true
     echo "Caddy rejected the updated file. The original was restored." >&2
     exit 1

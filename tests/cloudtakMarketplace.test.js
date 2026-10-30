@@ -640,6 +640,9 @@ const applyHost = caddy.applyScript({
 assert.match(applyHost, /marketplace-helper apply-caddyfile/);
 assert.match(applyHost, /\/etc\/caddy\/Caddyfile/);
 assert.match(applyHost, /need write access or marketplace-helper|Install\/grant marketplace-helper/i);
+assert.match(applyHost, /caddy_validate_ok/);
+assert.match(applyHost, /permission denied|EACCES/i);
+assert.match(applyHost, /inconclusive.*continuing/i);
 const probed = caddy.parseProbe("CADDY_NONE\n");
 assert.strictEqual(probed.available, false);
 

@@ -1,7 +1,7 @@
 {
   "name": "tak-portal",
   "version": "2.0.25",
-  "beta-version": "2.0.25",
+  "beta-version": "2.0.26",
   "description": "",
   "main": "server.js",
   "engines": {
@@ -25,7 +25,12 @@
   "overrides": {
     "whatwg-url": "^14.2.0",
     "undici": "$undici",
-    "node-forge": "^1.4.0"
+    "node-forge": "^1.4.2",
+    "proxy-addr": "^2.0.8",
+    "follow-redirects": "^1.16.1",
+    "fast-uri": "^3.1.9",
+    "brace-expansion": "^2.1.7",
+    "source-map-js": "^1.2.2"
   },
   "dependencies": {
     "@tak-ps/node-cot": "^14.51.0",
@@ -40,18 +45,18 @@
     "geotiff": "^3.0.5",
     "geotiff-geokeys-to-proj4": "^2024.4.13",
     "jimp": "0.22.12",
-    "maplibre-gl": "5.13.0",
+    "maplibre-gl": "6.16.0",
     "marked": "^18.0.9",
     "milsymbol": "^3.0.4",
     "multer": "^2.5.0",
-    "node-forge": "^1.4.0",
-    "nodemailer": "^9.0.4",
+    "node-forge": "^1.4.2",
+    "nodemailer": "^10.1.4",
     "pdf-lib": "^1.17.1",
     "pdfkit": "^0.19.1",
     "pg": "^8.16.3",
     "proj4": "^2.21.0",
     "qrcode": "^1.5.4",
-    "sanitize-html": "^2.17.6",
+    "sanitize-html": "^2.18.0",
     "sharp": "^0.35.5",
     "ssh2": "^1.17.0",
     "undici": "7.30.1",

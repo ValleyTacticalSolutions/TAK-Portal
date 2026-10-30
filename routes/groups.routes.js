@@ -472,8 +472,8 @@ delete attributes.cn;
 });
 
 /**
- * Rename group
- * Expected body: { name: "NEW_GROUP_NAME" }
+ * Update group name / description / private / type metadata.
+ * Expected body: { name, description?, private?, groupType?, groupTypeDetail? }
  */
 router.patch("/:groupId", async (req, res) => {
   try {
@@ -501,12 +501,124 @@ router.patch("/:groupId", async (req, res) => {
     const hasDescription = Object.prototype.hasOwnProperty.call(req.body || {}, "description");
     const description = hasDescription ? String(req.body.description || "").trim() : undefined;
 
+    const hasGroupType = Object.prototype.hasOwnProperty.call(req.body || {}, "groupType");
+    const rawGroupType = hasGroupType ? String(req.body.groupType || "").trim() : "";
+    const groupType = hasGroupType
+      ? rawGroupType === "Agency" ||
+        rawGroupType === "County" ||
+        rawGroupType === "Region" ||
+        rawGroupType === "State" ||
+        rawGroupType === "Global"
+        ? rawGroupType
+        : "Global"
+      : undefined;
+
+    const hasGroupTypeDetail = Object.prototype.hasOwnProperty.call(
+      req.body || {},
+      "groupTypeDetail"
+    );
+    const groupTypeDetail = hasGroupTypeDetail
+      ? String(req.body.groupTypeDetail || "").trim() || null
+      : undefined;
+
     const before = await groups.getGroupById(req.params.groupId).catch(() => null);
-    const out = await groups.renameGroup(req.params.groupId, name, {
+    if (!before) {
+      return res.status(404).json({ error: "Group not found" });
+    }
+    if (!accessSvc.canUserModifyGroup(authUser, before)) {
+      return res.status(403).json({ error: "You do not have permission to edit this group." });
+    }
+
+    const allAgencies = agencies.load();
+
+    if (groupType !== undefined) {
+      if (!access.isGlobalAdmin) {
+        // Agency admins may only keep/edit Agency-scoped groups for their own agency.
+        if (groupType !== "Agency") {
+          return res.status(403).json({
+            error: "You are not allowed to change an agency group to a different type.",
+          });
+        }
+        const allowedSuffixes = access.allowedAgencySuffixes || [];
+        const managedNames = allAgencies
+          .filter((a) =>
+            allowedSuffixes.includes(String(a.suffix || "").trim().toLowerCase())
+          )
+          .map((a) => String(a.name || "").trim())
+          .filter(Boolean);
+        const detailOk =
+          groupTypeDetail &&
+          managedNames.some((n) => n.toLowerCase() === String(groupTypeDetail).toLowerCase());
+        if (!detailOk) {
+          return res.status(403).json({
+            error: "You may only assign groups to your own agency.",
+          });
+        }
+      }
+
+      if (groupType === "Agency" && groupTypeDetail) {
+        const detailLower = String(groupTypeDetail).toLowerCase();
+        const matchedAgency =
+          allAgencies.find(
+            (a) => String(a?.name || "").trim().toLowerCase() === detailLower
+          ) || null;
+        if (matchedAgency && !agencies.isAgencyActive(matchedAgency)) {
+          return res.status(403).json({
+            error: `Agency "${matchedAgency.name || matchedAgency.suffix}" is disabled. Enable the agency before assigning groups to it.`,
+          });
+        }
+      }
+
+      if (
+        groupType === "Agency" ||
+        groupType === "County" ||
+        groupType === "Region" ||
+        groupType === "State"
+      ) {
+        if (!groupTypeDetail) {
+          return res.status(400).json({
+            error: `${groupType} groups require a ${groupType.toLowerCase()} detail.`,
+          });
+        }
+      }
+
+      if (groupType === "Global") {
+        const lower = String(nameWithoutTak || "").toLowerCase();
+        if (lower.startsWith(MUTUAL_AID_GROUP_PREFIX)) {
+          return res.status(400).json({
+            error:
+              'Global groups cannot start with "MA -". Create mutual aid groups from the Mutual Aid page.',
+          });
+        }
+      }
+    }
+
+    const renameOpts = {
       description,
-      private: access.isGlobalAdmin ? privateStatus : undefined,
       CN: nameWithoutTak,
-    });
+    };
+    if (groupType !== undefined) {
+      renameOpts.groupType = groupType;
+      // Pair type with detail; Global / non-agency clears leftover ownership detail.
+      renameOpts.groupTypeDetail = groupType === "Global" ? null : groupTypeDetail || null;
+      // Private is agency-only; force clear whenever leaving (or not selecting) Agency.
+      if (groupType === "Agency") {
+        if (access.isGlobalAdmin && hasPrivate) {
+          renameOpts.private = privateStatus;
+        }
+      } else if (access.isGlobalAdmin) {
+        renameOpts.private = "no";
+      }
+    } else {
+      if (access.isGlobalAdmin && hasPrivate) {
+        renameOpts.private = privateStatus;
+      }
+      if (hasGroupTypeDetail) {
+        renameOpts.groupTypeDetail = groupTypeDetail;
+      }
+    }
+
+    const out = await groups.renameGroup(req.params.groupId, name, renameOpts);
 
     auditSvc.logEvent({
       actor: authUser,
@@ -518,7 +630,12 @@ router.patch("/:groupId", async (req, res) => {
         beforeName: before?.name || null,
         name: out?.name || name,
         description: description,
-        private: access.isGlobalAdmin ? privateStatus : undefined,
+        private: access.isGlobalAdmin && hasPrivate ? privateStatus : undefined,
+        created_type: groupType,
+        created_type_detail: groupType !== undefined ? groupTypeDetail ?? null : undefined,
+        before_created_type: before?.created_type || before?.attributes?.created_type || null,
+        before_created_type_detail:
+          before?.created_type_detail || before?.attributes?.created_type_detail || null,
       },
     });
 

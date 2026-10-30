@@ -936,13 +936,16 @@ async function updateLocalGroup(id, patch, client) {
   const q = client || db;
   const nextAttrs = patch.attributes ? patch.attributes : existing.attributes || {};
   const cols = extractGroupColumns(nextAttrs);
+  // When attributes are provided, write created_type / created_type_detail from them
+  // (including null) so Global conversion can clear leftover Agency detail. COALESCE
+  // would preserve stale ownership columns and keep the group classified as Agency.
   const r = await q.query(
     `UPDATE groups SET
       name = COALESCE($2, name),
       cn = COALESCE($3, cn),
       attributes = COALESCE($4::jsonb, attributes),
-      created_type = COALESCE($5, created_type),
-      created_type_detail = COALESCE($6, created_type_detail),
+      created_type = CASE WHEN $4::jsonb IS NULL THEN created_type ELSE $5 END,
+      created_type_detail = CASE WHEN $4::jsonb IS NULL THEN created_type_detail ELSE $6 END,
       description = CASE WHEN $4::jsonb IS NULL THEN description ELSE $8 END,
       is_private = CASE WHEN $4::jsonb IS NULL THEN is_private ELSE $9 END,
       tak_portal_hidden = CASE WHEN $4::jsonb IS NULL THEN tak_portal_hidden ELSE $10 END,
@@ -955,8 +958,8 @@ async function updateLocalGroup(id, patch, client) {
       patch.name !== undefined ? patch.name : null,
       cols.cn || null,
       patch.attributes ? JSON.stringify(nextAttrs) : null,
-      cols.created_type || null,
-      cols.created_type_detail || null,
+      patch.attributes ? cols.created_type : null,
+      patch.attributes ? cols.created_type_detail : null,
       patch.sync_status || "pending",
       patch.attributes ? cols.description : null,
       patch.attributes ? cols.is_private : null,

@@ -7,6 +7,7 @@ const directoryRepo = require("./directoryRepo.service");
 const authentikOutbox = require("./authentikOutbox.service");
 const db = require("./db");
 const { isUserHidden, isGroupHidden } = require("./portalHidden.util");
+const { applyGroupEditAttributes } = require("./groupTypeEdit.util");
 
 // ---------------- Action-lock helpers ----------------
 // If a group name starts with any prefix in GROUPS_ACTIONS_HIDDEN_PREFIXES,
@@ -737,8 +738,6 @@ async function renameGroup(groupId, newName, opts = {}) {
   // Rename (and update attributes) in Authentik
   const payload = { name: n };
 
-  const wantsDescription = Object.prototype.hasOwnProperty.call(opts, "description");
-  const wantsPrivate = Object.prototype.hasOwnProperty.call(opts, "private");
   const wantsCN = Object.prototype.hasOwnProperty.call(opts, "CN") ||
                   Object.prototype.hasOwnProperty.call(opts, "cn");
 
@@ -747,21 +746,10 @@ async function renameGroup(groupId, newName, opts = {}) {
       ? current.attributes
       : {};
 
-  const nextAttrs = { ...existingAttrs };
-
-  if (wantsDescription) {
-    const desc = String(opts.description || "").trim();
-    nextAttrs.description = desc;
-  }
-
-  if (wantsPrivate) {
-    const priv = String(opts.private || "").trim().toLowerCase();
-    // Normalize to "yes"/"no"; treat anything other than "yes" as "no"
-    nextAttrs.private = priv === "yes" ? "yes" : "no";
-  }
+  // Type / detail / private / description — shared helper covers all conversion combos.
+  const nextAttrs = applyGroupEditAttributes(existingAttrs, opts);
 
   // Always maintain the Authentik CN attribute (uppercase key).
-  // Value should be exactly "CN: <group name without tak_>".
   // Remove any legacy lowercase "cn" attribute to avoid duplicates.
   delete nextAttrs.cn;
   const provided = wantsCN
