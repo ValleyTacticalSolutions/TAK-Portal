@@ -96,6 +96,8 @@
   <label>
     <span id="<%= _idPrefix %>usernameIdentifierLabelText"><%= _placement === "prefix" ? "Username Prefix" : "Username Suffix" %></span>
     <input name="suffix" placeholder="(ex. abcd, hcoem, etc...)" <%= _reqAttr %>
+           pattern="[A-Za-z0-9._-]+"
+           title="Username Agency Identifier can only contain letters, numbers, dots, underscores and hyphens"
            value="<%= _vals.suffix || '' %>"
            oninput="this.value = this.value.toLowerCase()" />
   </label>

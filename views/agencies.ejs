@@ -1949,6 +1949,19 @@ addForm.onsubmit = async (e) => {
   e.preventDefault();
   setMsg("");
 
+  const suffixInput = addForm.elements.suffix;
+  if (suffixInput) {
+    const sfx = String(suffixInput.value || "").trim().toLowerCase();
+    suffixInput.value = sfx;
+    if (!sfx || !/^[a-z0-9._-]+$/.test(sfx)) {
+      setMsg(
+        "Username Agency Identifier can only contain letters, numbers, dots, underscores and hyphens",
+        false
+      );
+      return;
+    }
+  }
+
   const groupPrefixInput = addForm.elements.groupPrefix;
   if (groupPrefixInput) {
     const gp = String(groupPrefixInput.value || "").trim();

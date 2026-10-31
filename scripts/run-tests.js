@@ -68,6 +68,9 @@ const TEST_FILES = [
   "setupDeviceAccess.test.js",
   "activeUserGate.test.js",
   "appVersion.test.js",
+  "portalHidden.test.js",
+  "hiddenPrefixMigration.test.js",
+  "hiddenPrefixLike.test.js",
 ];
 
 const testsDir = path.join(__dirname, "..", "tests");

@@ -8,8 +8,10 @@ badge,agency,firstName,lastName,email,password,radioCallsign,template,role
 
 What each column means:
 1) badge (or Username Descriptor Text from Settings)
-   - User badge number / username base (do not include username suffix).
-   - Letters and numbers only (no spaces or special characters).
+   - User badge number / username base (do not include username suffix/prefix).
+   - Letters, numbers, dots (.), underscores (_), and hyphens (-) only.
+   - Full username (badge + agency identifier) must be at least 4 characters
+     (same rule as TAK Server).
 
 2) agency
    - Can be either:

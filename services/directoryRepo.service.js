@@ -43,7 +43,8 @@ function hiddenUserClause(params, includeHiddenPrefixes, tableAlias) {
   const prefixes = hiddenUserPrefixes();
   if (prefixes.length) {
     params.push(prefixes);
-    sql += ` AND NOT EXISTS (SELECT 1 FROM unnest($${params.length}::text[]) AS p WHERE lower(${usernameCol}) LIKE p || '%')`;
+    // starts_with (not LIKE) so "_" / "%" in prefixes are literal — matches JS startsWith
+    sql += ` AND NOT EXISTS (SELECT 1 FROM unnest($${params.length}::text[]) AS p WHERE starts_with(lower(${usernameCol}), p))`;
   }
   return sql;
 }
@@ -61,10 +62,11 @@ function hiddenGroupClause(params, includeHidden, tableAlias) {
   if (prefixes.length) {
     params.push(prefixes);
     const i = params.length;
+    // starts_with (not LIKE) so "_" / "%" in prefixes are literal — matches JS startsWith
     sql += ` AND NOT EXISTS (
       SELECT 1 FROM unnest($${i}::text[]) AS p
-      WHERE lower(${nameCol}) LIKE p || '%'
-         OR lower(regexp_replace(${nameCol}, '^tak_', '', 'i')) LIKE p || '%'
+      WHERE starts_with(lower(${nameCol}), p)
+         OR starts_with(lower(regexp_replace(${nameCol}, '^tak_', '', 'i')), p)
     )`;
   }
   return sql;

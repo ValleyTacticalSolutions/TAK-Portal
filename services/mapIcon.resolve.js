@@ -81,8 +81,14 @@ const COT_TYPE_ICON_OVERRIDES = {
   "b-m-p-s-p-loc": { iconsetUid: GENERIC_ICONS_UID, relPath: "Shapes/camera.png" },
 };
 
-/** Exact CoT types that must use filled 2525D milsym (not type2525b PNG outlines/flags). */
-const COT_TYPES_PREFER_MILSYM = new Set(["a-u-g"]);
+/**
+ * Exact CoT types that must use filled 2525D milsym (not type2525b PNG outlines/flags).
+ * Bare affiliation+ground types are placeholders in many iconsets (Default stamps a-u-G on
+ * hunting art; FEMA/GeoOps/Incident Management stamp a-n-G on every icon), so exact
+ * type2525b matches would pick an arbitrary PNG (e.g. Animal Issue.png) instead of the
+ * neutral/unknown ground milsymbol ATAK and CloudTAK draw for RadioTAK APRS etc.
+ */
+const COT_TYPES_PREFER_MILSYM = new Set(["a-u-g", "a-n-g"]);
 
 function cotTypeSegments(cotType) {
   return String(cotType || "")

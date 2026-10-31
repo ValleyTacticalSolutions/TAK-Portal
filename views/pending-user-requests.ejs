@@ -526,7 +526,14 @@ th.sortable:hover{
             <input type="hidden" name="requestId" />
 
             <label class="<%= (!isGlobalAdmin && isAgencyAdmin) ? 'agency-admin-badge-full' : '' %>"><%= usernamePrefixLabel %>
-              <input type="text" name="badge" placeholder="Enter <%= usernamePrefixLabel %>" required />
+              <input
+                type="text"
+                name="badge"
+                placeholder="Enter <%= usernamePrefixLabel %>"
+                pattern="[A-Za-z0-9._-]+"
+                title="Username is invalid. Username requirements: minimum of 4 characters and contains only letters, numbers, dots, underscores and hyphens."
+                required
+              />
             </label>
 
             <label style="<%= (!isGlobalAdmin && isAgencyAdmin) ? 'display:none;' : '' %>">Agency
@@ -1243,6 +1250,36 @@ th.sortable:hover{
       const permVal = String(payload.permissions || "user").trim().toLowerCase();
       payload.permissions = permVal || "user";
 
+      const badgeVal = String(payload.badge || "").trim();
+      const agencySfx = String(payload.agencySuffix || "").trim().toLowerCase();
+      const agencyObj =
+        (Array.isArray(agenciesCache) ? agenciesCache : []).find(
+          (a) => String(a?.suffix || "").toLowerCase() === agencySfx
+        ) || { suffix: agencySfx };
+      const badgeNorm = badgeVal.toLowerCase().replace(/\s+/g, "");
+      const sfxNorm = String(agencyObj.suffix || agencySfx).trim().toLowerCase();
+      const isPrefix =
+        String(agencyObj.usernameTokenPlacement || "suffix").toLowerCase() === "prefix";
+      const previewUsername =
+        badgeNorm && sfxNorm
+          ? isPrefix
+            ? sfxNorm + badgeNorm
+            : badgeNorm + sfxNorm
+          : "";
+      if (
+        !/^[A-Za-z0-9._-]+$/.test(badgeVal) ||
+        !previewUsername ||
+        previewUsername.length < 4 ||
+        !/^[A-Za-z0-9._-]+$/.test(previewUsername)
+      ) {
+        setInlineMsg(
+          msg,
+          "Username is invalid. Username requirements: minimum of 4 characters and contains only letters, numbers, dots, underscores and hyphens.",
+          false
+        );
+        return;
+      }
+
       const pwd = String(payload.password || '').trim();
       if (!isValidPassword(pwd)) {
         setInlineMsg(
@@ -1416,6 +1453,15 @@ th.sortable:hover{
       const payload = Object.fromEntries(fd.entries());
       payload.sourceUserRequestId = reqObj.id;
       const createdSuffix = String(payload.suffix || '').trim().toLowerCase();
+      if (!createdSuffix || !/^[a-z0-9._-]+$/.test(createdSuffix)) {
+        setInlineMsg(
+          msg,
+          'Username Agency Identifier can only contain letters, numbers, dots, underscores and hyphens',
+          false
+        );
+        return;
+      }
+      payload.suffix = createdSuffix;
 
       try {
         if (submitBtn) submitBtn.disabled = true;

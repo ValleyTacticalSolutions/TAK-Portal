@@ -140,6 +140,11 @@ function validateAgency(a) {
   if (!a.name) return "Name is required";
   if (!a.state) return "State is required";
   if (!a.suffix) return "Username suffix is required";
+  const suffixErr = accessSvc.validateTakUsernameToken(
+    a.suffix,
+    "Username Agency Identifier"
+  );
+  if (suffixErr) return suffixErr;
   const gpErr = store.validateGroupPrefix(a.groupPrefix);
   if (gpErr) return gpErr;
   if (!a.color) return "Agency color is required";
@@ -798,11 +803,6 @@ router.post("/import-csv", upload.single("file"), async (req, res) => {
       const rowErrors = [];
       const baseErr = validateAgency(candidate);
       if (baseErr) rowErrors.push(baseErr);
-      if (candidate.suffix && !/^[a-z0-9_-]+$/.test(candidate.suffix)) {
-        rowErrors.push(
-          "Username identifier can only contain lowercase letters, numbers, dashes, and underscores"
-        );
-      }
       if (candidate.state && !ALLOWED_STATES.has(candidate.state)) {
         rowErrors.push(`Invalid state "${candidate.state}"`);
       }

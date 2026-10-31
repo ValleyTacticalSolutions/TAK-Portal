@@ -35,6 +35,24 @@ assert.strictEqual(
   portalHidden.isUserHidden({ username: "AK-Outpost-Service", attributes: {} }),
   true
 );
+// Prefixes with "_" are literal (same as SQL starts_with) — not LIKE single-char wildcards (#83)
+assert.strictEqual(
+  portalHidden.usernameMatchesHiddenPrefix("adm_ldapservice", ["adm_"]),
+  true
+);
+assert.strictEqual(
+  portalHidden.usernameMatchesHiddenPrefix("adm1axyz", ["adm_"]),
+  false,
+  "adm_ must not hide adm + any char (LIKE wildcard bug)"
+);
+assert.strictEqual(
+  portalHidden.groupNameMatchesHiddenPrefix("vid_camera1", ["vid_"]),
+  true
+);
+assert.strictEqual(
+  portalHidden.groupNameMatchesHiddenPrefix("vidXcamera1", ["vid_"]),
+  false
+);
 assert.strictEqual(
   portalHidden.isUserHidden({
     username: "nodered-global-x",

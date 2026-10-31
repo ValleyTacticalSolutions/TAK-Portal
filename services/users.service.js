@@ -191,8 +191,10 @@ ${label},agency,firstName,lastName,email,password,radioCallsign,template,role
 
 What each column means:
 1) ${label}
-   - Username base (do not include the agency suffix).
-   - Letters and numbers only (no spaces or special characters).
+   - Username base (do not include the agency suffix/prefix).
+   - Letters, numbers, dots (.), underscores (_), and hyphens (-) only.
+   - Full username (${label} + agency identifier) must be at least 4 characters
+     (same rule as TAK Server).
    - Older templates may still use the column name "badge".
 
 2) agency
@@ -255,10 +257,9 @@ function validateBadgeNumber(badge, descriptorLabel) {
   const b = String(badge || "").trim();
   const name = String(descriptorLabel || "").trim() || "Badge / Username";
   if (!b) return `${name} is required.`;
-  // Allow letters, numbers, periods, dashes, and underscores only.
-  if (!/^[A-Za-z0-9._-]+$/.test(b)) {
-    return `${name} can only contain letters, numbers, periods, dashes, and underscores.`;
-  }
+  // Same charset as TAK Server usernames (letters, numbers, dots, underscores, hyphens).
+  const tokenErr = accessSvc.validateTakUsernameToken(b, name);
+  if (tokenErr) return tokenErr;
   return null;
 }
 
@@ -1266,6 +1267,8 @@ async function createUser(
   agenciesStore.assertAgencyActiveBySuffix(agency.suffix, agencies);
 
   const username = accessSvc.buildUsernameWithAgencyToken(normalizedBadge, agency);
+  const usernameErr = accessSvc.validateTakUsername(username);
+  if (usernameErr) throw new Error(usernameErr);
   if (!skipExistenceCheck && await userExists(username)) {
     throw new Error("Username already exists");
   }
@@ -2082,6 +2085,13 @@ async function importUsersFromCsvBuffer(buffer, opts = {}) {
           if (!allowedAgencySuffixes.includes(sfxLower)) {
             rowErrors.push(`You do not have access to agency "${agencyRaw}"`);
           }
+        }
+
+        // Final username (badge + agency token) must match TAK Server rules.
+        if (!badgeErr) {
+          const previewUsername = accessSvc.buildUsernameWithAgencyToken(badge, agency);
+          const usernameErr = accessSvc.validateTakUsername(previewUsername);
+          if (usernameErr) rowErrors.push(usernameErr);
         }
       }
     }

@@ -463,6 +463,37 @@ async function runTests() {
     "mission drop pins should render with the filled unknown-ground milsym"
   );
 
+  // RadioTAK APRS / bare neutral ground — FEMA Icons stamps type2525b="a-n-G" on every
+  // icon, so without prefer-milsym the alphabetical pick is Animal Issue.png (dog diamond).
+  const neutralGroundSync = mapIcon.resolveIcon({ type: "a-n-G", affiliation: "neutral" });
+  assert.strictEqual(
+    neutralGroundSync,
+    null,
+    "a-n-G should skip FEMA placeholder PNGs and use filled milsym"
+  );
+  assert.strictEqual(mapIconResolve.prefersMilSymCotType("a-n-G"), true);
+  const neutralGround = await mapIcon.resolveIconAsync({
+    type: "a-n-G",
+    affiliation: "neutral",
+  });
+  assert.ok(neutralGround, "neutral ground / RadioTAK APRS should resolve via milsym");
+  assert.strictEqual(neutralGround.source, "milsym");
+  assert.ok(/^2525D:/i.test(neutralGround.iconId), "a-n-G milsym id, got " + neutralGround.iconId);
+  assert.ok(
+    !/Animal Issue/i.test(neutralGround.iconId || ""),
+    "a-n-G must not paint FEMA Animal Issue dog diamond"
+  );
+  assert.strictEqual(
+    mapRender.markerUsesMapIcon({
+      type: "a-n-G",
+      origin: "feed",
+      iconId: neutralGround.iconId,
+      iconSource: neutralGround.source,
+    }),
+    true,
+    "RadioTAK APRS a-n-G markers should render with filled neutral-ground milsym"
+  );
+
   const sensorLocIcon = mapIcon.resolveIcon({ type: "b-m-p-s-p-loc", affiliation: "other" });
   assert.ok(sensorLocIcon, "sensor location type should resolve");
   assert.strictEqual(sensorLocIcon.source, "type-override");

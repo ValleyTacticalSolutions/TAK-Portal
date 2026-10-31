@@ -79,7 +79,7 @@ async function listUsersNeedingStamp(prefixes) {
        AND tak_portal_hidden = false
        AND EXISTS (
          SELECT 1 FROM unnest($1::text[]) AS p
-         WHERE lower(username) LIKE p || '%'
+         WHERE starts_with(lower(username), p)
        )
      ORDER BY username
      LIMIT 500`,
@@ -97,8 +97,8 @@ async function listGroupsNeedingStamp(prefixes) {
        AND tak_portal_hidden = false
        AND EXISTS (
          SELECT 1 FROM unnest($1::text[]) AS p
-         WHERE lower(name) LIKE p || '%'
-            OR lower(regexp_replace(name, '^tak_', '', 'i')) LIKE p || '%'
+         WHERE starts_with(lower(name), p)
+            OR starts_with(lower(regexp_replace(name, '^tak_', '', 'i')), p)
        )
      ORDER BY name
      LIMIT 500`,
@@ -116,7 +116,7 @@ async function countUsersStillNeedingStamp(prefixes) {
        AND tak_portal_hidden = false
        AND EXISTS (
          SELECT 1 FROM unnest($1::text[]) AS p
-         WHERE lower(username) LIKE p || '%'
+         WHERE starts_with(lower(username), p)
        )`,
     [prefixes]
   );
@@ -132,8 +132,8 @@ async function countGroupsStillNeedingStamp(prefixes) {
        AND tak_portal_hidden = false
        AND EXISTS (
          SELECT 1 FROM unnest($1::text[]) AS p
-         WHERE lower(name) LIKE p || '%'
-            OR lower(regexp_replace(name, '^tak_', '', 'i')) LIKE p || '%'
+         WHERE starts_with(lower(name), p)
+            OR starts_with(lower(regexp_replace(name, '^tak_', '', 'i')), p)
        )`,
     [prefixes]
   );

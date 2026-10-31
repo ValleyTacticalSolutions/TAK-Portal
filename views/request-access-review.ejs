@@ -184,7 +184,14 @@
 
           <form id="reviewForm" class="grid2 approveForm" autocomplete="off" style="display:none;">
             <label><%= usernamePrefixLabel %>
-              <input type="text" name="badge" placeholder="Enter <%= usernamePrefixLabel %>" required />
+              <input
+                type="text"
+                name="badge"
+                placeholder="Enter <%= usernamePrefixLabel %>"
+                pattern="[A-Za-z0-9._-]+"
+                title="Username is invalid. Username requirements: minimum of 4 characters and contains only letters, numbers, dots, underscores and hyphens."
+                required
+              />
             </label>
 
             <label id="agencyFieldLabel">Agency
@@ -586,6 +593,34 @@
 
         const fd = new FormData(form);
         const payload = Object.fromEntries(fd.entries());
+        const badgeVal = String(payload.badge || "").trim();
+        const agencySfx = String(payload.agencySuffix || "").trim().toLowerCase();
+        const agencyObj =
+          (Array.isArray(agenciesCache) ? agenciesCache : []).find(
+            (a) => String(a?.suffix || "").toLowerCase() === agencySfx
+          ) || { suffix: agencySfx };
+        const badgeNorm = badgeVal.toLowerCase().replace(/\s+/g, "");
+        const sfxNorm = String(agencyObj.suffix || agencySfx).trim().toLowerCase();
+        const isPrefix =
+          String(agencyObj.usernameTokenPlacement || "suffix").toLowerCase() === "prefix";
+        const previewUsername =
+          badgeNorm && sfxNorm
+            ? isPrefix
+              ? sfxNorm + badgeNorm
+              : badgeNorm + sfxNorm
+            : "";
+        if (
+          !/^[A-Za-z0-9._-]+$/.test(badgeVal) ||
+          !previewUsername ||
+          previewUsername.length < 4 ||
+          !/^[A-Za-z0-9._-]+$/.test(previewUsername)
+        ) {
+          setMsg(
+            "Username is invalid. Username requirements: minimum of 4 characters and contains only letters, numbers, dots, underscores and hyphens.",
+            false
+          );
+          return;
+        }
         const pwd = String(payload.password || "").trim();
         if (!isValidPassword(pwd)) {
           setMsg(
@@ -803,6 +838,14 @@
           const fd = new FormData(createAgencyForm);
           const payload = Object.fromEntries(fd.entries());
           const createdSuffix = String(payload.suffix || "").trim().toLowerCase();
+          if (!createdSuffix || !/^[a-z0-9._-]+$/.test(createdSuffix)) {
+            setAgencyMsg(
+              "Username Agency Identifier can only contain letters, numbers, dots, underscores and hyphens",
+              false
+            );
+            return;
+          }
+          payload.suffix = createdSuffix;
 
           try {
             if (createAgencySubmitBtn) createAgencySubmitBtn.disabled = true;

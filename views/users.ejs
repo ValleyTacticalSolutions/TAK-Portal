@@ -62,7 +62,7 @@
           name="badge"
           placeholder="Enter <%= usernamePrefixLabel %>"
           pattern="[A-Za-z0-9._-]+"
-          title="Use letters, numbers, periods, dashes, and underscores only."
+          title="Username is invalid. Username requirements: minimum of 4 characters and contains only letters, numbers, dots, underscores and hyphens."
           required
         />
       </label>
@@ -723,8 +723,32 @@ function esc(s) {
     .replaceAll("'", "&#39;");
 }
 
+const TAK_USERNAME_INVALID_MSG =
+  "Username is invalid. Username requirements: minimum of 4 characters and contains only letters, numbers, dots, underscores and hyphens.";
+
 function isValidBadgeOrUsername(value) {
   return /^[A-Za-z0-9._-]+$/.test(String(value || "").trim());
+}
+
+function buildPreviewUsername(badge, agencyOrSuffix) {
+  const b = String(badge || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "");
+  const agency =
+    agencyOrSuffix && typeof agencyOrSuffix === "object" ? agencyOrSuffix : null;
+  const sfx = String(agency ? agency.suffix : agencyOrSuffix || "")
+    .trim()
+    .toLowerCase();
+  if (!b || !sfx) return "";
+  const isPrefix =
+    String(agency?.usernameTokenPlacement || "suffix").toLowerCase() === "prefix";
+  return isPrefix ? sfx + b : b + sfx;
+}
+
+function isValidTakUsername(username) {
+  const u = String(username || "").trim();
+  return u.length >= 4 && /^[A-Za-z0-9._-]+$/.test(u);
 }
 
 // -------------------- Agencies --------------------
@@ -1013,10 +1037,19 @@ form.onsubmit = async (e) => {
   payload.permissions = permVal || "user";
 
   if (!isValidBadgeOrUsername(payload.badge)) {
-    setMsg(
-      "Badge / Username can only contain letters, numbers, periods, dashes, and underscores.",
-      false
-    );
+    setMsg(TAK_USERNAME_INVALID_MSG, false);
+    return;
+  }
+
+  const agencyForUsername =
+    (Array.isArray(allAgenciesCache) ? allAgenciesCache : []).find(
+      (a) =>
+        String(a?.suffix || "").toLowerCase() ===
+        String(payload.agencySuffix || "").trim().toLowerCase()
+    ) || { suffix: payload.agencySuffix };
+  const previewUsername = buildPreviewUsername(payload.badge, agencyForUsername);
+  if (!isValidTakUsername(previewUsername)) {
+    setMsg(TAK_USERNAME_INVALID_MSG, false);
     return;
   }
 

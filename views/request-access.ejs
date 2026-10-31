@@ -136,7 +136,7 @@
             required
             placeholder="Enter <%= usernamePrefixLabel %>"
             pattern="[A-Za-z0-9._-]+"
-            title="Use letters, numbers, periods, dashes, and underscores only."
+            title="Username is invalid. Username requirements: minimum of 4 characters and contains only letters, numbers, dots, underscores and hyphens."
             value="<%= (form && form.badgeNumber) ? form.badgeNumber : '' %>"
           />
         </label>
@@ -280,6 +280,67 @@
   if (placementSelect) placementSelect.addEventListener('change', syncPlacementLabel);
   syncPlacementLabel();
   update();
+
+  const form = document.querySelector('form[action="/request-access"]');
+  if (form) {
+    form.addEventListener('submit', function (e) {
+      const badgeInput = form.querySelector('input[name="badgeNumber"]');
+      const badge = String(badgeInput && badgeInput.value || '').trim();
+      if (!badge || !/^[A-Za-z0-9._-]+$/.test(badge)) {
+        e.preventDefault();
+        if (badgeInput) badgeInput.setCustomValidity(
+          "Username is invalid. Username requirements: minimum of 4 characters and contains only letters, numbers, dots, underscores and hyphens."
+        );
+        if (badgeInput) badgeInput.reportValidity();
+        return false;
+      }
+      if (badgeInput) badgeInput.setCustomValidity('');
+
+      const isOther = sel && sel.value === '__other__';
+      const suffixInput = form.querySelector('input[name="suffix"]');
+      if (isOther && suffixInput && String(suffixInput.value || '').trim()) {
+        const sfx = String(suffixInput.value || '').trim().toLowerCase();
+        if (!/^[a-z0-9._-]+$/.test(sfx)) {
+          e.preventDefault();
+          suffixInput.setCustomValidity(
+            'Username Agency Identifier can only contain letters, numbers, dots, underscores and hyphens'
+          );
+          suffixInput.reportValidity();
+          return false;
+        }
+        suffixInput.setCustomValidity('');
+        const badgeNorm = badge.toLowerCase().replace(/\s+/g, '');
+        const isPrefix =
+          String(placementSelect && placementSelect.value || 'suffix').toLowerCase() === 'prefix';
+        const preview = isPrefix ? sfx + badgeNorm : badgeNorm + sfx;
+        if (preview.length < 4) {
+          e.preventDefault();
+          if (badgeInput) {
+            badgeInput.setCustomValidity(
+              "Username is invalid. Username requirements: minimum of 4 characters and contains only letters, numbers, dots, underscores and hyphens."
+            );
+            badgeInput.reportValidity();
+          }
+          return false;
+        }
+      } else if (!isOther && sel && sel.value) {
+        // Agency option value is the suffix; badge+token length is placement-independent.
+        const sfx = String(sel.value || '').trim().toLowerCase();
+        const badgeNorm = badge.toLowerCase().replace(/\s+/g, '');
+        const preview = badgeNorm + sfx;
+        if (sfx && preview.length < 4) {
+          e.preventDefault();
+          if (badgeInput) {
+            badgeInput.setCustomValidity(
+              "Username is invalid. Username requirements: minimum of 4 characters and contains only letters, numbers, dots, underscores and hyphens."
+            );
+            badgeInput.reportValidity();
+          }
+          return false;
+        }
+      }
+    });
+  }
 })();
 </script>
 

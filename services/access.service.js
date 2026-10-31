@@ -27,6 +27,42 @@ function normalizeSuffix(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+/**
+ * TAK Server username rules (same as TAK Server's user create page).
+ * Final Authentik/TAK usernames must match or the account gets no groups/channels.
+ */
+const TAK_USERNAME_MIN_LEN = 4;
+const TAK_USERNAME_CHAR_RE = /^[A-Za-z0-9._-]+$/;
+const TAK_USERNAME_INVALID_MSG =
+  "Username is invalid. Username requirements: minimum of 4 characters and contains only letters, numbers, dots, underscores and hyphens.";
+
+function isValidTakUsernameCharset(value) {
+  return TAK_USERNAME_CHAR_RE.test(String(value || ""));
+}
+
+/** Validate a full username (badge + agency token) the same way TAK Server does. */
+function validateTakUsername(username) {
+  const u = String(username || "").trim();
+  if (!u || u.length < TAK_USERNAME_MIN_LEN || !TAK_USERNAME_CHAR_RE.test(u)) {
+    return TAK_USERNAME_INVALID_MSG;
+  }
+  return null;
+}
+
+/**
+ * Validate a username part (badge base or agency suffix/prefix token).
+ * Charset only — min length is enforced on the constructed username.
+ */
+function validateTakUsernameToken(token, label) {
+  const t = String(token || "").trim();
+  const name = String(label || "").trim() || "Username identifier";
+  if (!t) return `${name} is required`;
+  if (!TAK_USERNAME_CHAR_RE.test(t)) {
+    return `${name} can only contain letters, numbers, dots, underscores and hyphens`;
+  }
+  return null;
+}
+
 function normalizeGroupList(raw) {
   if (!raw) return [];
   return String(raw)
@@ -1203,6 +1239,12 @@ async function enrichAuthUserFromAuthentik(authUser) {
 
 module.exports = {
   normalizeSuffix,
+  TAK_USERNAME_MIN_LEN,
+  TAK_USERNAME_CHAR_RE,
+  TAK_USERNAME_INVALID_MSG,
+  isValidTakUsernameCharset,
+  validateTakUsername,
+  validateTakUsernameToken,
   normalizeGroupList,
   getAgencyAdminGroupName,
   getAllAgencyAdminGroupNames,

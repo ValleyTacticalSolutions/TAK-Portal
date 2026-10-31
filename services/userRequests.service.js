@@ -474,9 +474,11 @@ function validateCreate(input) {
     throw new Error("Email Address must be valid");
   }
   if (!badgeNumber) throw new Error("Badge Number is required");
-  if (!/^[A-Za-z0-9._-]+$/.test(badgeNumber)) {
-    throw new Error("Badge Number can only contain letters, numbers, periods, dashes, and underscores");
-  }
+  const badgeTokenErr = accessSvc.validateTakUsernameToken(
+    badgeNumber,
+    "Badge Number"
+  );
+  if (badgeTokenErr) throw new Error(badgeTokenErr);
   if (!agencySuffix) throw new Error("Agency is required");
 
   const isOther = agencySuffix === "__other__";
@@ -489,6 +491,19 @@ function validateCreate(input) {
       "REQUEST_ACCESS_REQUIRE_ALL_AGENCY_DETAILS",
       false
     );
+    if (requestedAgency.suffix) {
+      const suffixErr = accessSvc.validateTakUsernameToken(
+        requestedAgency.suffix,
+        "Username Suffix/Prefix"
+      );
+      if (suffixErr) throw new Error(suffixErr);
+      const previewUsername = accessSvc.buildUsernameWithAgencyToken(
+        badgeNumber,
+        requestedAgency
+      );
+      const usernameErr = accessSvc.validateTakUsername(previewUsername);
+      if (usernameErr) throw new Error(usernameErr);
+    }
     if (requireAllAgencyDetails) {
       const gpErr = agenciesStore.validateGroupPrefix(requestedAgency.groupPrefix);
       if (gpErr) throw new Error(gpErr);
@@ -521,6 +536,10 @@ function validateCreate(input) {
         "The email provided does not match the selected agency's email domain"
       );
     }
+
+    const previewUsername = buildUsernameForAgency(badgeNumber, agency);
+    const usernameErr = accessSvc.validateTakUsername(previewUsername);
+    if (usernameErr) throw new Error(usernameErr);
   }
 
   return {
