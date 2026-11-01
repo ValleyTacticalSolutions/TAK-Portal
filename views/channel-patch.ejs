@@ -17,7 +17,7 @@
     </div>
 
     <div class="createForm">
-    <div class="row cp-nameTypeRow" style="gap:14px; align-items:flex-end; flex-wrap:wrap;">
+    <div class="cp-nameTypeRow">
       <label class="cp-field">
         Name
         <input id="cpName" type="text" placeholder="e.g. Multi-Agency Patch, Task Force Patch, etc..." maxlength="120" />
@@ -34,8 +34,8 @@
     <div id="cpBiSection">
       <label>
         Channels
-        <div class="row cp-channelToolbar" style="gap:10px; align-items:center; flex-wrap:wrap;">
-          <input id="cpChannelSearch" type="search" placeholder="Search channels..." style="flex:1; min-width:0;" />
+        <div class="row cp-channelToolbar">
+          <input id="cpChannelSearch" type="search" placeholder="Search channels..." />
           <button class="btn" type="button" id="cpSelectAllBtn">Select All</button>
           <button class="btn" type="button" id="cpClearAllBtn">Clear All</button>
         </div>
@@ -49,19 +49,19 @@
     </div>
 
     <div id="cpUniSection" style="display:none;">
-      <div class="row cp-channelToolbar" style="gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
-        <input id="cpUniSearch" type="search" placeholder="Search channels..." style="flex:1; min-width:0;" />
-      </div>
       <div class="cp-uniLayout">
         <div class="cp-uniPane">
           <div class="cp-uniPaneHeader">
-            <span class="cp-uniPaneTitle">Left</span>
-            <div class="row" style="gap:6px;">
+            <span class="cp-uniPaneTitle">Group A</span>
+            <div class="row cp-uniPaneActions">
               <button class="btn" type="button" id="cpLeftSelectAllBtn">Select All</button>
               <button class="btn" type="button" id="cpLeftClearBtn">Clear</button>
             </div>
           </div>
-          <div id="cpLeftBox" class="groupsBox cp-uniBox" data-side="left">
+          <div class="cp-uniPaneSearch">
+            <input id="cpGroupASearch" type="search" placeholder="Search Group A…" aria-label="Search Group A" />
+          </div>
+          <div id="cpLeftBox" class="groupsBox cp-uniBox" data-side="a">
             <div id="cpLeftInner" class="groupsInner cp-uniInner">
               <div class="msg">Loading channels…</div>
             </div>
@@ -73,21 +73,24 @@
             type="button"
             class="btn cp-dirBtn"
             id="cpDirBtn"
-            aria-label="Patch direction: left to right"
+            aria-label="Patch direction: Group A to Group B"
             title="Click to reverse direction"
           >→</button>
-          <div class="cp-dirHint" id="cpDirHint">Left → Right</div>
+          <div class="cp-dirHint" id="cpDirHint">Group A → Group B</div>
         </div>
 
         <div class="cp-uniPane">
           <div class="cp-uniPaneHeader">
-            <span class="cp-uniPaneTitle">Right</span>
-            <div class="row" style="gap:6px;">
+            <span class="cp-uniPaneTitle">Group B</span>
+            <div class="row cp-uniPaneActions">
               <button class="btn" type="button" id="cpRightSelectAllBtn">Select All</button>
               <button class="btn" type="button" id="cpRightClearBtn">Clear</button>
             </div>
           </div>
-          <div id="cpRightBox" class="groupsBox cp-uniBox" data-side="right">
+          <div class="cp-uniPaneSearch">
+            <input id="cpGroupBSearch" type="search" placeholder="Search Group B…" aria-label="Search Group B" />
+          </div>
+          <div id="cpRightBox" class="groupsBox cp-uniBox" data-side="b">
             <div id="cpRightInner" class="groupsInner cp-uniInner">
               <div class="msg">Loading channels…</div>
             </div>
@@ -96,7 +99,7 @@
       </div>
     </div>
 
-    <div class="row cp-formFooter createActionsRow" style="justify-content:flex-end; align-items:center; flex-wrap:wrap;">
+    <div class="row cp-formFooter createActionsRow">
       <div id="cpFormMsg" class="msg"></div>
       <div class="cp-enableCreate" id="cpEnableCreateRow">
         <span>Enable Patch Upon Creation</span>
@@ -133,17 +136,44 @@
   .cp-field input,
   .cp-field select {
     width: 100%;
-    max-width: 420px;
     box-sizing: border-box;
   }
   .cp-field select {
-    max-width: 280px;
     height: 38px;
     padding: 0 10px;
     border-radius: 10px;
     border: 1px solid var(--line);
     background: var(--panel);
     color: inherit;
+  }
+
+  .cp-nameTypeRow {
+    display: flex;
+    gap: 14px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .cp-nameTypeRow .cp-field {
+    flex: 1 1 220px;
+    min-width: 0;
+  }
+  .cp-nameTypeRow .cp-field input,
+  .cp-nameTypeRow .cp-field select {
+    width: 100%;
+    max-width: none;
+  }
+
+  .cp-channelToolbar {
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .cp-channelToolbar input[type="search"] {
+    flex: 1 1 160px;
+    min-width: 0;
+    width: auto;
+    box-sizing: border-box;
   }
 
   .groupsBox {
@@ -187,6 +217,7 @@
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     gap: 12px;
     align-items: stretch;
+    width: 100%;
   }
   .cp-uniPane {
     min-width: 0;
@@ -200,9 +231,21 @@
     gap: 8px;
     flex-wrap: wrap;
   }
+  .cp-uniPaneActions {
+    gap: 6px;
+    flex-wrap: wrap;
+  }
   .cp-uniPaneTitle {
     font-weight: 700;
     font-size: 0.95rem;
+  }
+  .cp-uniPaneSearch {
+    margin-top: 8px;
+  }
+  .cp-uniPaneSearch input[type="search"] {
+    width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
   }
   .cp-uniBox {
     margin-top: 8px;
@@ -219,7 +262,8 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding-top: 28px;
+    padding-top: 36px;
+    align-self: center;
   }
   .cp-dirBtn {
     min-width: 52px;
@@ -232,7 +276,15 @@
     font-size: 0.78rem;
     color: var(--muted, #8b93a7);
     text-align: center;
-    white-space: nowrap;
+    max-width: 7.5rem;
+    line-height: 1.25;
+  }
+
+  .cp-formFooter {
+    justify-content: flex-end;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
   }
 
   .cp-enableCreate {
@@ -342,7 +394,7 @@
     color: var(--muted, #8b93a7);
   }
 
-  /* Mobile: stacked layout, no horizontal scroll — same pattern as Templates */
+  /* Tablet / mobile: stacked layout, no horizontal scroll */
   @media (max-width: 990px) {
     .cp-formHeader {
       flex-wrap: wrap;
@@ -357,22 +409,20 @@
       width: 100% !important;
     }
 
-    .cp-field input,
-    .cp-field select {
-      max-width: 100%;
-    }
     .cp-nameTypeRow {
       flex-direction: column;
-      align-items: stretch !important;
+      align-items: stretch;
+      gap: 12px;
     }
     .cp-nameTypeRow .cp-field {
+      flex: 1 1 auto;
       width: 100%;
     }
 
     .cp-channelToolbar {
       align-items: stretch !important;
     }
-    .cp-channelToolbar input {
+    .cp-channelToolbar input[type="search"] {
       flex: 1 1 100%;
       width: 100%;
     }
@@ -385,12 +435,29 @@
 
     .cp-uniLayout {
       grid-template-columns: 1fr;
-      gap: 10px;
+      gap: 14px;
     }
     .cp-uniArrowCol {
       flex-direction: row;
+      flex-wrap: wrap;
       padding-top: 0;
       justify-content: center;
+      gap: 10px;
+    }
+    .cp-dirHint {
+      max-width: none;
+      white-space: nowrap;
+    }
+    .cp-uniPaneHeader {
+      align-items: stretch;
+    }
+    .cp-uniPaneActions {
+      width: 100%;
+    }
+    .cp-uniPaneActions .btn {
+      flex: 1 1 calc(50% - 6px);
+      min-width: 0;
+      text-align: center;
     }
     .cp-uniInner {
       column-count: 2;
@@ -451,6 +518,14 @@
       box-sizing: border-box;
       text-align: center;
     }
+    .cp-topology {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .cp-topoArrow {
+      text-align: center;
+      padding: 4px 0;
+    }
     .cp-node {
       max-width: 100%;
       white-space: normal;
@@ -463,8 +538,13 @@
     .cp-uniInner {
       column-count: 1;
     }
-    .cp-channelToolbar .btn {
+    .cp-channelToolbar .btn,
+    .cp-uniPaneActions .btn {
       flex: 1 1 100%;
+    }
+    .cp-dirBtn {
+      min-width: 48px;
+      width: auto;
     }
   }
 
@@ -487,7 +567,8 @@
   const channelSearch = document.getElementById("cpChannelSearch");
   const selectAllBtn = document.getElementById("cpSelectAllBtn");
   const clearAllBtn = document.getElementById("cpClearAllBtn");
-  const uniSearch = document.getElementById("cpUniSearch");
+  const groupASearch = document.getElementById("cpGroupASearch");
+  const groupBSearch = document.getElementById("cpGroupBSearch");
   const leftBox = document.getElementById("cpLeftBox");
   const leftInner = document.getElementById("cpLeftInner");
   const rightBox = document.getElementById("cpRightBox");
@@ -579,12 +660,21 @@
 
   function updateDirUi() {
     const isLtr = uniDirection !== "rtl";
-    dirBtn.textContent = isLtr ? "→" : "←";
+    const stacked =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(max-width: 990px)").matches;
+    if (stacked) {
+      dirBtn.textContent = isLtr ? "↓" : "↑";
+    } else {
+      dirBtn.textContent = isLtr ? "→" : "←";
+    }
     dirBtn.setAttribute(
       "aria-label",
-      isLtr ? "Patch direction: left to right" : "Patch direction: right to left"
+      isLtr
+        ? "Patch direction: Group A to Group B"
+        : "Patch direction: Group B to Group A"
     );
-    dirHint.textContent = isLtr ? "Left → Right" : "Right → Left";
+    dirHint.textContent = isLtr ? "Group A → Group B" : "Group B → Group A";
   }
 
   function syncModeUi() {
@@ -621,12 +711,21 @@
   }
 
   function renderUniBoxes() {
-    const list = filteredChannels(uniSearch);
     const empty = isAgencyScoped
       ? "No agency channels in your scope."
       : "No matching channels.";
-    renderCheckboxList(leftInner, list, selectedLeft, empty);
-    renderCheckboxList(rightInner, list, selectedRight, empty);
+    renderCheckboxList(
+      leftInner,
+      filteredChannels(groupASearch),
+      selectedLeft,
+      empty
+    );
+    renderCheckboxList(
+      rightInner,
+      filteredChannels(groupBSearch),
+      selectedRight,
+      empty
+    );
   }
 
   function renderChannelUi() {
@@ -649,7 +748,8 @@
     nameInput.value = "";
     modeSelect.value = "bidirectional";
     channelSearch.value = "";
-    uniSearch.value = "";
+    groupASearch.value = "";
+    groupBSearch.value = "";
     selectedNames.clear();
     selectedLeft.clear();
     selectedRight.clear();
@@ -673,7 +773,8 @@
 
     nameInput.value = patch.name || "";
     channelSearch.value = "";
-    uniSearch.value = "";
+    groupASearch.value = "";
+    groupBSearch.value = "";
     selectedNames.clear();
     selectedLeft.clear();
     selectedRight.clear();
@@ -808,8 +909,26 @@
     renderChannelsBox();
   });
 
-  uniSearch.addEventListener("input", () => {
-    renderUniBoxes();
+  groupASearch.addEventListener("input", () => {
+    renderCheckboxList(
+      leftInner,
+      filteredChannels(groupASearch),
+      selectedLeft,
+      isAgencyScoped
+        ? "No agency channels in your scope."
+        : "No matching channels."
+    );
+  });
+
+  groupBSearch.addEventListener("input", () => {
+    renderCheckboxList(
+      rightInner,
+      filteredChannels(groupBSearch),
+      selectedRight,
+      isAgencyScoped
+        ? "No agency channels in your scope."
+        : "No matching channels."
+    );
   });
 
   channelsBox.addEventListener("change", (e) => {
@@ -822,8 +941,8 @@
   function onUniSideChange(side, e) {
     const cb = e.target && e.target.matches('input[type="checkbox"]') ? e.target : null;
     if (!cb) return;
-    const mine = side === "left" ? selectedLeft : selectedRight;
-    const other = side === "left" ? selectedRight : selectedLeft;
+    const mine = side === "a" ? selectedLeft : selectedRight;
+    const other = side === "a" ? selectedRight : selectedLeft;
     if (cb.checked) {
       mine.add(cb.value);
       other.delete(cb.value);
@@ -833,8 +952,8 @@
     renderUniBoxes();
   }
 
-  leftBox.addEventListener("change", (e) => onUniSideChange("left", e));
-  rightBox.addEventListener("change", (e) => onUniSideChange("right", e));
+  leftBox.addEventListener("change", (e) => onUniSideChange("a", e));
+  rightBox.addEventListener("change", (e) => onUniSideChange("b", e));
 
   selectAllBtn.addEventListener("click", () => {
     for (const c of filteredChannels(channelSearch)) selectedNames.add(c.name);
@@ -847,7 +966,7 @@
   });
 
   leftSelectAllBtn.addEventListener("click", () => {
-    for (const c of filteredChannels(uniSearch)) {
+    for (const c of filteredChannels(groupASearch)) {
       selectedLeft.add(c.name);
       selectedRight.delete(c.name);
     }
@@ -855,12 +974,12 @@
   });
 
   leftClearBtn.addEventListener("click", () => {
-    for (const c of filteredChannels(uniSearch)) selectedLeft.delete(c.name);
+    for (const c of filteredChannels(groupASearch)) selectedLeft.delete(c.name);
     renderUniBoxes();
   });
 
   rightSelectAllBtn.addEventListener("click", () => {
-    for (const c of filteredChannels(uniSearch)) {
+    for (const c of filteredChannels(groupBSearch)) {
       selectedRight.add(c.name);
       selectedLeft.delete(c.name);
     }
@@ -868,13 +987,17 @@
   });
 
   rightClearBtn.addEventListener("click", () => {
-    for (const c of filteredChannels(uniSearch)) selectedRight.delete(c.name);
+    for (const c of filteredChannels(groupBSearch)) selectedRight.delete(c.name);
     renderUniBoxes();
   });
 
   dirBtn.addEventListener("click", () => {
     uniDirection = uniDirection === "ltr" ? "rtl" : "ltr";
     updateDirUi();
+  });
+
+  window.addEventListener("resize", () => {
+    if (isUni()) updateDirUi();
   });
 
   createEnabledBtn.addEventListener("click", () => {
@@ -893,7 +1016,7 @@
       const leftGroups = Array.from(selectedLeft);
       const rightGroups = Array.from(selectedRight);
       if (!leftGroups.length || !rightGroups.length) {
-        setMsg("Select at least one channel on each side.", true);
+        setMsg("Select at least one channel in Group A and Group B.", true);
         return;
       }
       body = {

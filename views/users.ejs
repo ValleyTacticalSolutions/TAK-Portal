@@ -326,12 +326,15 @@
               <label>Email</label>
               <div class="row editTopPanelEmailRow">
                 <input id="emailInput" type="email" />
+                <% if (!userPhoneFieldEnabled) { %>
                 <button class="btn" id="saveUserDetailsBtn" type="button">Update User Details</button>
+                <% } %>
               </div>
               <% if (userPhoneFieldEnabled) { %>
               <label class="editTopPanelPhoneLabel" for="phoneInput">Phone</label>
               <div class="row editTopPanelPhoneRow">
                 <input id="phoneInput" type="tel" placeholder="Optional" autocomplete="off" maxlength="40" />
+                <button class="btn" id="saveUserDetailsBtn" type="button">Update User Details</button>
               </div>
               <% } %>
               <span class="msg" id="nameMsg"></span>
@@ -4655,11 +4658,13 @@ body.noScroll .main{
 }
 
 .editTopPanelPhoneRow{
+  gap: 8px;
+  align-items: center;
   margin-top: 4px;
 }
 
 .editTopPanelPhoneRow input{
-  width: 100%;
+  flex: 1;
   min-width: 0;
 }
 
