@@ -87,19 +87,24 @@ function buildItakEnrollPayload({ host, username, token, registrationId }) {
 }
 
 /**
- * Build ATAK device preference URL for callsign, team (color), role, and
- * Plugin Update Server settings when TAK host is known.
+ * Build ATAK device preference URL for callsign, team (color), role,
+ * optional phone (saHasPhoneNumber), and Plugin Update Server settings when TAK host is known.
  * Format: tak://com.atakmap.app/preference?key1=...&type1=...&value1=...&key2=...
  */
-function buildPreferenceUrl({ callsign, teamLabel, roleLabel }) {
+function buildPreferenceUrl({ callsign, teamLabel, roleLabel, phone }) {
   const c = String(callsign || "").trim();
   const t = String(teamLabel || "").trim();
   const r = String(roleLabel || "Team Member").trim();
+  // ATAK saHasPhoneNumber expects digits only (e.g. 1234567899).
+  const phoneDigits = String(phone || "").replace(/\D/g, "").slice(0, 40);
 
   const entries = [];
   if (c) entries.push({ key: "locationCallsign", type: "string", value: c });
   if (t) entries.push({ key: "locationTeam", type: "string", value: t });
   if (r) entries.push({ key: "atakRoleType", type: "string", value: r });
+  if (phoneDigits) {
+    entries.push({ key: "saHasPhoneNumber", type: "string", value: phoneDigits });
+  }
 
   const host = getTakHost();
   if (host) {

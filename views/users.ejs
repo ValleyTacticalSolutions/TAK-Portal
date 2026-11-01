@@ -2023,6 +2023,7 @@ function renderUserPrefQr(obj) {
   if (obj.callsign) prefLines.push(`<div><strong>Callsign:</strong> ${escapeHtml(obj.callsign)}</div>`);
   if (obj.teamLabel) prefLines.push(`<div><strong>Team:</strong> ${escapeHtml(obj.teamLabel)}</div>`);
   if (obj.roleLabel) prefLines.push(`<div><strong>Role:</strong> ${escapeHtml(obj.roleLabel)}</div>`);
+  if (obj.phone) prefLines.push(`<div><strong>Phone:</strong> ${escapeHtml(obj.phone)}</div>`);
   if (userPrefQrDetails) {
     userPrefQrDetails.innerHTML = prefLines.length
       ? prefLines.join("")
@@ -2080,6 +2081,7 @@ async function fetchUserPreferenceQrData(userId) {
     callsign: data.callsign || "",
     teamLabel: data.teamLabel || "",
     roleLabel: data.roleLabel || "",
+    phone: data.phone || "",
     preferenceUrl: data.preferenceUrl || "",
     qrCode: data.qrCode || "",
   };

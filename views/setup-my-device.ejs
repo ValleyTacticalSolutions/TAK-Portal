@@ -1233,6 +1233,7 @@
       if (data.callsign) lines.push(`<div><strong>Callsign:</strong> ${escapeHtml(data.callsign)}</div>`);
       if (data.teamLabel) lines.push(`<div><strong>Team:</strong> ${escapeHtml(data.teamLabel)}</div>`);
       if (data.roleLabel) lines.push(`<div><strong>Role:</strong> ${escapeHtml(data.roleLabel)}</div>`);
+      if (data.phone) lines.push(`<div><strong>Phone:</strong> ${escapeHtml(data.phone)}</div>`);
       preferenceQrDetails.innerHTML = lines.length ? lines.join("") : "";
       const url = (data.preferenceUrl && String(data.preferenceUrl).trim()) || "";
       preferenceQrOpenBtn.disabled = !url;

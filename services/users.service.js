@@ -544,7 +544,7 @@ function buildCallsign({
  * Get preference data for Setup My Device (Android Step 3): callsign, team (color), role.
  * Uses same logic as onboarding email (CALLSIGN_FORMAT_EXPRESSION, agency, template color override).
  * @param {object} user - Full Authentik user with attributes
- * @returns {{ callsign: string, teamLabel: string, roleLabel: string }}
+ * @returns {{ callsign: string, teamLabel: string, roleLabel: string, phone: string }}
  */
 function getPreferenceDataForUser(user) {
   const attrs = user?.attributes || {};
@@ -558,6 +558,7 @@ function getPreferenceDataForUser(user) {
 
   const badgeNumber = String(attrs.badge_number || "");
   const radioCallsign = String(attrs.radio_callsign || "");
+  const phone = normalizePhone(attrs.phone);
   const username = String(user?.username || "");
   const agencyAbbreviation = String(
     agency?.groupPrefix || attrs.agency_abbreviation || ""
@@ -616,6 +617,7 @@ function getPreferenceDataForUser(user) {
     callsign: String(callsign || "").trim(),
     teamLabel: String(agencyColorEffective || "").trim(),
     roleLabel,
+    phone,
   };
 }
 
@@ -631,6 +633,7 @@ async function buildPreferenceQrForUser(targetUser) {
     callsign: pref.callsign,
     teamLabel: pref.teamLabel,
     roleLabel: pref.roleLabel,
+    phone: pref.phone,
   });
   let qrCode = null;
   if (preferenceUrl) {
@@ -641,6 +644,7 @@ async function buildPreferenceQrForUser(targetUser) {
     callsign: pref.callsign,
     teamLabel: pref.teamLabel,
     roleLabel: pref.roleLabel,
+    phone: pref.phone,
     preferenceUrl: preferenceUrl || "",
     qrCode,
   };
