@@ -95,15 +95,18 @@ function buildPreferenceUrl({ callsign, teamLabel, roleLabel, phone }) {
   const c = String(callsign || "").trim();
   const t = String(teamLabel || "").trim();
   const r = String(roleLabel || "Team Member").trim();
-  // ATAK saHasPhoneNumber expects digits only (e.g. 1234567899).
-  const phoneDigits = String(phone || "").replace(/\D/g, "").slice(0, 40);
+  // ATAK saHasPhoneNumber expects E.164-style with leading + (e.g. +12345678900).
+  // Users often omit the US country code; prepend 1 when we only have 10 digits.
+  let phoneDigits = String(phone || "").replace(/\D/g, "").slice(0, 40);
+  if (phoneDigits.length === 10) phoneDigits = `1${phoneDigits}`;
+  const phoneValue = phoneDigits ? `+${phoneDigits}` : "";
 
   const entries = [];
   if (c) entries.push({ key: "locationCallsign", type: "string", value: c });
   if (t) entries.push({ key: "locationTeam", type: "string", value: t });
   if (r) entries.push({ key: "atakRoleType", type: "string", value: r });
-  if (phoneDigits) {
-    entries.push({ key: "saHasPhoneNumber", type: "string", value: phoneDigits });
+  if (phoneValue) {
+    entries.push({ key: "saHasPhoneNumber", type: "string", value: phoneValue });
   }
 
   const host = getTakHost();
