@@ -11,8 +11,8 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
-### v2.0.30 - 10/31/26
-✨ `Enhancement` - Restrict allowed special characters for usernames<br>
+### v2.0.30 - 1/1/26
+✨ `Enhancement` - Restrict allowed special characters for usernames based off TAK Server testing<br>
 🐛 `Bug Fix` - Fixes issue with adm users<br>
 
 ### v2.0.29 - 10/30/26
