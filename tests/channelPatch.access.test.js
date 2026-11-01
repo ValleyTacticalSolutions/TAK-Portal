@@ -76,6 +76,15 @@ const keys = access.patchGroupKeys({
 assert.ok(keys.has("hcso ops"));
 assert.ok(keys.has("hcso tac"));
 
+const uniKeys = access.patchGroupKeys({
+  mode: "unidirectional",
+  leftGroups: ["tak_HCSO Ops"],
+  rightGroups: ["tak_HCSO Tac"],
+  groups: [],
+});
+assert.ok(uniKeys.has("hcso ops"), "uni leftGroups count toward scope keys");
+assert.ok(uniKeys.has("hcso tac"), "uni rightGroups count toward scope keys");
+
 const picker = access.allowedKeySetFromPicker({
   allowedChannelKeys: ["hcso ops", "hcso tac"],
 });

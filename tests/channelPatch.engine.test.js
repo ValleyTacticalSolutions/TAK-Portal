@@ -46,6 +46,7 @@ assert.deepStrictEqual(
   migrated.groups.sort(),
   ["tak_CPD Main", "tak_DAVIS Main"].sort()
 );
+assert.strictEqual(migrated.mode, "bidirectional", "legacy rows default to bidirectional");
 assert.strictEqual(migrated.hubGroup, undefined);
 assert.strictEqual(migrated.spokes, undefined);
 
@@ -57,6 +58,92 @@ assert.strictEqual(
   null,
   "requires at least two channels"
 );
+
+// Unidirectional normalize + flow
+const uniLtr = store.normalizePatch({
+  id: "uni-1",
+  name: "Ops → Tac",
+  mode: "unidirectional",
+  leftGroups: ["tak_CPD Main", "tak_DAVIS Main"],
+  rightGroups: ["tak_SPD Main"],
+  direction: "ltr",
+});
+assert.ok(uniLtr);
+assert.strictEqual(uniLtr.mode, "unidirectional");
+assert.strictEqual(uniLtr.direction, "ltr");
+assert.deepStrictEqual(uniLtr.leftGroups, ["tak_CPD Main", "tak_DAVIS Main"]);
+assert.deepStrictEqual(uniLtr.rightGroups, ["tak_SPD Main"]);
+assert.deepStrictEqual(
+  uniLtr.groups.sort(),
+  ["tak_CPD Main", "tak_DAVIS Main", "tak_SPD Main"].sort(),
+  "uni groups is union of both sides"
+);
+
+assert.strictEqual(
+  store.normalizePatch({
+    id: "uni-overlap",
+    mode: "unidirectional",
+    leftGroups: ["tak_CPD Main"],
+    rightGroups: ["tak_CPD Main"],
+  }),
+  null,
+  "uni rejects overlapping sides"
+);
+assert.strictEqual(
+  store.normalizePatch({
+    id: "uni-empty",
+    mode: "unidirectional",
+    leftGroups: ["tak_CPD Main"],
+    rightGroups: [],
+  }),
+  null,
+  "uni requires at least one channel on each side"
+);
+
+assert.deepStrictEqual(
+  engine.destinationsForSource(uniLtr, "cpd main").sort(),
+  ["tak_SPD Main"],
+  "uni ltr: left source fans to right dests"
+);
+assert.deepStrictEqual(
+  engine.destinationsForSource(uniLtr, "davis main").sort(),
+  ["tak_SPD Main"],
+  "uni ltr: every left source fans to right"
+);
+assert.deepStrictEqual(
+  engine.destinationsForSource(uniLtr, "spd main"),
+  [],
+  "uni ltr: right side does not fan back"
+);
+
+const uniRtl = store.normalizePatch({
+  id: "uni-2",
+  name: "Ops ← Tac",
+  mode: "unidirectional",
+  leftGroups: ["tak_CPD Main"],
+  rightGroups: ["tak_SPD Main", "tak_DAVIS Main"],
+  direction: "rtl",
+});
+assert.ok(uniRtl);
+assert.deepStrictEqual(
+  engine.destinationsForSource(uniRtl, "spd main").sort(),
+  ["tak_CPD Main"],
+  "uni rtl: right source fans to left dests"
+);
+assert.deepStrictEqual(
+  engine.destinationsForSource(uniRtl, "davis main").sort(),
+  ["tak_CPD Main"],
+  "uni rtl: every right source fans to left"
+);
+assert.deepStrictEqual(
+  engine.destinationsForSource(uniRtl, "cpd main"),
+  [],
+  "uni rtl: left side does not fan back"
+);
+
+const uniPeers = store.peerLabelsByGroupKeyFromPatches([uniLtr]);
+assert.deepStrictEqual(uniPeers.get("cpd main"), ["SPD Main"]);
+assert.deepStrictEqual(uniPeers.get("spd main").sort(), ["CPD Main", "DAVIS Main"].sort());
 
 assert.strictEqual(
   engine.patchedUid("ANDROID-abc", "tak_CPD Main", "HCSO-DAVIS-3598"),

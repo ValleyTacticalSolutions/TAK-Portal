@@ -17,12 +17,21 @@
     </div>
 
     <div class="createForm">
-    <label class="cp-field">
-      Name
-      <input id="cpName" type="text" placeholder="e.g. Multi-Agency Patch, Task Force Patch, etc..." maxlength="120" />
-    </label>
+    <div class="row cp-nameTypeRow" style="gap:14px; align-items:flex-end; flex-wrap:wrap;">
+      <label class="cp-field">
+        Name
+        <input id="cpName" type="text" placeholder="e.g. Multi-Agency Patch, Task Force Patch, etc..." maxlength="120" />
+      </label>
+      <label class="cp-field">
+        Patch Type
+        <select id="cpMode" aria-label="Patch Type">
+          <option value="bidirectional" selected>Bi-Directional Patch</option>
+          <option value="unidirectional">Uni-Directional Patch</option>
+        </select>
+      </label>
+    </div>
 
-    <div>
+    <div id="cpBiSection">
       <label>
         Channels
         <div class="row cp-channelToolbar" style="gap:10px; align-items:center; flex-wrap:wrap;">
@@ -37,6 +46,54 @@
           </div>
         </div>
       </label>
+    </div>
+
+    <div id="cpUniSection" style="display:none;">
+      <div class="row cp-channelToolbar" style="gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+        <input id="cpUniSearch" type="search" placeholder="Search channels..." style="flex:1; min-width:0;" />
+      </div>
+      <div class="cp-uniLayout">
+        <div class="cp-uniPane">
+          <div class="cp-uniPaneHeader">
+            <span class="cp-uniPaneTitle">Left</span>
+            <div class="row" style="gap:6px;">
+              <button class="btn" type="button" id="cpLeftSelectAllBtn">Select All</button>
+              <button class="btn" type="button" id="cpLeftClearBtn">Clear</button>
+            </div>
+          </div>
+          <div id="cpLeftBox" class="groupsBox cp-uniBox" data-side="left">
+            <div id="cpLeftInner" class="groupsInner cp-uniInner">
+              <div class="msg">Loading channels…</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cp-uniArrowCol">
+          <button
+            type="button"
+            class="btn cp-dirBtn"
+            id="cpDirBtn"
+            aria-label="Patch direction: left to right"
+            title="Click to reverse direction"
+          >→</button>
+          <div class="cp-dirHint" id="cpDirHint">Left → Right</div>
+        </div>
+
+        <div class="cp-uniPane">
+          <div class="cp-uniPaneHeader">
+            <span class="cp-uniPaneTitle">Right</span>
+            <div class="row" style="gap:6px;">
+              <button class="btn" type="button" id="cpRightSelectAllBtn">Select All</button>
+              <button class="btn" type="button" id="cpRightClearBtn">Clear</button>
+            </div>
+          </div>
+          <div id="cpRightBox" class="groupsBox cp-uniBox" data-side="right">
+            <div id="cpRightInner" class="groupsInner cp-uniInner">
+              <div class="msg">Loading channels…</div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="row cp-formFooter createActionsRow" style="justify-content:flex-end; align-items:center; flex-wrap:wrap;">
@@ -73,10 +130,20 @@
     gap: 6px;
     min-width: 0;
   }
-  .cp-field input {
+  .cp-field input,
+  .cp-field select {
     width: 100%;
     max-width: 420px;
     box-sizing: border-box;
+  }
+  .cp-field select {
+    max-width: 280px;
+    height: 38px;
+    padding: 0 10px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: inherit;
   }
 
   .groupsBox {
@@ -113,6 +180,59 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .cp-uniLayout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 12px;
+    align-items: stretch;
+  }
+  .cp-uniPane {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .cp-uniPaneHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .cp-uniPaneTitle {
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+  .cp-uniBox {
+    margin-top: 8px;
+    flex: 1;
+    max-height: 360px;
+  }
+  .cp-uniInner {
+    column-count: 2;
+    column-width: 160px;
+  }
+  .cp-uniArrowCol {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding-top: 28px;
+  }
+  .cp-dirBtn {
+    min-width: 52px;
+    font-size: 1.45rem;
+    font-weight: 700;
+    line-height: 1;
+    padding: 10px 14px;
+  }
+  .cp-dirHint {
+    font-size: 0.78rem;
+    color: var(--muted, #8b93a7);
+    text-align: center;
+    white-space: nowrap;
   }
 
   .cp-enableCreate {
@@ -158,6 +278,13 @@
     font-weight: 700;
     letter-spacing: 0.01em;
   }
+  .cp-patchMode {
+    display: inline-block;
+    margin-top: 4px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--muted, #8b93a7);
+  }
   .cp-patchActions {
     display: flex;
     align-items: center;
@@ -185,6 +312,19 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
+  }
+  .cp-topoSide {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .cp-topoArrow {
+    font-size: 1.2rem;
+    font-weight: 700;
+    padding: 0 4px;
+    color: var(--muted, #8b93a7);
   }
   .cp-node {
     display: inline-flex;
@@ -217,8 +357,16 @@
       width: 100% !important;
     }
 
-    .cp-field input {
+    .cp-field input,
+    .cp-field select {
       max-width: 100%;
+    }
+    .cp-nameTypeRow {
+      flex-direction: column;
+      align-items: stretch !important;
+    }
+    .cp-nameTypeRow .cp-field {
+      width: 100%;
     }
 
     .cp-channelToolbar {
@@ -233,6 +381,20 @@
       width: 100% !important;
       min-width: 0;
       text-align: center;
+    }
+
+    .cp-uniLayout {
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    .cp-uniArrowCol {
+      flex-direction: row;
+      padding-top: 0;
+      justify-content: center;
+    }
+    .cp-uniInner {
+      column-count: 2;
+      column-width: auto;
     }
 
     .groupsInner {
@@ -297,7 +459,8 @@
   }
 
   @media (max-width: 560px) {
-    .groupsInner {
+    .groupsInner,
+    .cp-uniInner {
       column-count: 1;
     }
     .cp-channelToolbar .btn {
@@ -316,11 +479,25 @@
 (function () {
   const formTitle = document.getElementById("cpFormTitle");
   const cancelEditBtn = document.getElementById("cpCancelEditBtn");
+  const biSection = document.getElementById("cpBiSection");
+  const uniSection = document.getElementById("cpUniSection");
+  const modeSelect = document.getElementById("cpMode");
   const channelsBox = document.getElementById("cpChannelsBox");
   const channelsInner = document.getElementById("cpChannelsInner");
   const channelSearch = document.getElementById("cpChannelSearch");
   const selectAllBtn = document.getElementById("cpSelectAllBtn");
   const clearAllBtn = document.getElementById("cpClearAllBtn");
+  const uniSearch = document.getElementById("cpUniSearch");
+  const leftBox = document.getElementById("cpLeftBox");
+  const leftInner = document.getElementById("cpLeftInner");
+  const rightBox = document.getElementById("cpRightBox");
+  const rightInner = document.getElementById("cpRightInner");
+  const leftSelectAllBtn = document.getElementById("cpLeftSelectAllBtn");
+  const leftClearBtn = document.getElementById("cpLeftClearBtn");
+  const rightSelectAllBtn = document.getElementById("cpRightSelectAllBtn");
+  const rightClearBtn = document.getElementById("cpRightClearBtn");
+  const dirBtn = document.getElementById("cpDirBtn");
+  const dirHint = document.getElementById("cpDirHint");
   const nameInput = document.getElementById("cpName");
   const submitBtn = document.getElementById("cpSubmitBtn");
   const createEnabledBtn = document.getElementById("cpCreateEnabled");
@@ -334,6 +511,10 @@
   let patchesCache = [];
   /** Persist checked names across filter re-renders */
   const selectedNames = new Set();
+  const selectedLeft = new Set();
+  const selectedRight = new Set();
+  /** @type {"ltr"|"rtl"} */
+  let uniDirection = "ltr";
   /** @type {string|null} */
   let editingId = null;
   let isAgencyScoped = false;
@@ -354,6 +535,16 @@
     return hit ? hit.displayName : raw.replace(/^tak_/i, "");
   }
 
+  function resolveCatalogName(g) {
+    const hit = channels.find(
+      (c) =>
+        c.name === g ||
+        c.baseKey === String(g).toLowerCase() ||
+        c.displayName === g
+    );
+    return hit ? hit.name : g;
+  }
+
   function isToggleOn(btn) {
     return !!(btn && btn.classList.contains("is-on"));
   }
@@ -365,8 +556,18 @@
     btn.setAttribute("aria-pressed", on ? "true" : "false");
   }
 
-  function filteredChannels() {
-    const q = String(channelSearch.value || "").trim().toLowerCase();
+  function currentMode() {
+    return modeSelect.value === "unidirectional"
+      ? "unidirectional"
+      : "bidirectional";
+  }
+
+  function isUni() {
+    return currentMode() === "unidirectional";
+  }
+
+  function filteredChannels(searchEl) {
+    const q = String((searchEl || channelSearch).value || "").trim().toLowerCase();
     return channels.filter((c) => {
       if (!q) return true;
       return (
@@ -376,24 +577,61 @@
     });
   }
 
-  function renderChannelsBox() {
-    const list = filteredChannels();
+  function updateDirUi() {
+    const isLtr = uniDirection !== "rtl";
+    dirBtn.textContent = isLtr ? "→" : "←";
+    dirBtn.setAttribute(
+      "aria-label",
+      isLtr ? "Patch direction: left to right" : "Patch direction: right to left"
+    );
+    dirHint.textContent = isLtr ? "Left → Right" : "Right → Left";
+  }
 
+  function syncModeUi() {
+    const uni = isUni();
+    biSection.style.display = uni ? "none" : "";
+    uniSection.style.display = uni ? "" : "none";
+  }
+
+  function renderCheckboxList(inner, list, selectedSet, emptyMsg) {
     if (!list.length) {
-      channelsInner.innerHTML = isAgencyScoped
-        ? '<div class="msg">No agency channels in your scope.</div>'
-        : '<div class="msg">No matching channels.</div>';
+      inner.innerHTML = `<div class="msg">${esc(emptyMsg)}</div>`;
       return;
     }
-
-    channelsInner.innerHTML = list
+    inner.innerHTML = list
       .map((c) => {
-        const checked = selectedNames.has(c.name) ? "checked" : "";
+        const checked = selectedSet.has(c.name) ? "checked" : "";
         return `<label class="groupItem"><input type="checkbox" value="${esc(
           c.name
         )}" ${checked} /><span>${esc(c.displayName)}</span></label>`;
       })
       .join("");
+  }
+
+  function renderChannelsBox() {
+    const list = filteredChannels(channelSearch);
+    renderCheckboxList(
+      channelsInner,
+      list,
+      selectedNames,
+      isAgencyScoped
+        ? "No agency channels in your scope."
+        : "No matching channels."
+    );
+  }
+
+  function renderUniBoxes() {
+    const list = filteredChannels(uniSearch);
+    const empty = isAgencyScoped
+      ? "No agency channels in your scope."
+      : "No matching channels.";
+    renderCheckboxList(leftInner, list, selectedLeft, empty);
+    renderCheckboxList(rightInner, list, selectedRight, empty);
+  }
+
+  function renderChannelUi() {
+    if (isUni()) renderUniBoxes();
+    else renderChannelsBox();
   }
 
   function setMsg(text, isError) {
@@ -409,9 +647,16 @@
     enableCreateRow.style.display = "";
     setToggle(createEnabledBtn, true);
     nameInput.value = "";
+    modeSelect.value = "bidirectional";
     channelSearch.value = "";
+    uniSearch.value = "";
     selectedNames.clear();
-    renderChannelsBox();
+    selectedLeft.clear();
+    selectedRight.clear();
+    uniDirection = "ltr";
+    updateDirUi();
+    syncModeUi();
+    renderChannelUi();
     setMsg("");
   }
 
@@ -428,17 +673,33 @@
 
     nameInput.value = patch.name || "";
     channelSearch.value = "";
+    uniSearch.value = "";
     selectedNames.clear();
-    for (const g of patch.groups || []) {
-      const hit = channels.find(
-        (c) =>
-          c.name === g ||
-          c.baseKey === String(g).toLowerCase() ||
-          c.displayName === g
-      );
-      selectedNames.add(hit ? hit.name : g);
+    selectedLeft.clear();
+    selectedRight.clear();
+
+    const mode =
+      patch.mode === "unidirectional" ? "unidirectional" : "bidirectional";
+    modeSelect.value = mode;
+
+    if (mode === "unidirectional") {
+      uniDirection = patch.direction === "rtl" ? "rtl" : "ltr";
+      for (const g of patch.leftGroups || []) {
+        selectedLeft.add(resolveCatalogName(g));
+      }
+      for (const g of patch.rightGroups || []) {
+        selectedRight.add(resolveCatalogName(g));
+      }
+    } else {
+      uniDirection = "ltr";
+      for (const g of patch.groups || []) {
+        selectedNames.add(resolveCatalogName(g));
+      }
     }
-    renderChannelsBox();
+
+    updateDirUi();
+    syncModeUi();
+    renderChannelUi();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -456,6 +717,25 @@
     return data;
   }
 
+  function nodesHtml(groups) {
+    return (Array.isArray(groups) ? groups : [])
+      .map((g) => `<span class="cp-node">${esc(displayFor(g))}</span>`)
+      .join("");
+  }
+
+  function topologyHtml(p) {
+    if (p.mode === "unidirectional") {
+      const left = Array.isArray(p.leftGroups) ? p.leftGroups : [];
+      const right = Array.isArray(p.rightGroups) ? p.rightGroups : [];
+      const arrow = p.direction === "rtl" ? "←" : "→";
+      return `
+        <div class="cp-topoSide">${nodesHtml(left)}</div>
+        <span class="cp-topoArrow" aria-hidden="true">${arrow}</span>
+        <div class="cp-topoSide">${nodesHtml(right)}</div>`;
+    }
+    return nodesHtml(p.groups);
+  }
+
   function renderBoard(patches) {
     patchesCache = Array.isArray(patches) ? patches : [];
     if (!patchesCache.length) {
@@ -467,15 +747,17 @@
 
     board.innerHTML = patchesCache
       .map((p) => {
-        const groups = Array.isArray(p.groups) ? p.groups : [];
-        const nodesHtml = groups
-          .map((g) => `<span class="cp-node">${esc(displayFor(g))}</span>`)
-          .join("");
-
+        const modeLabel =
+          p.mode === "unidirectional"
+            ? "Uni-Directional"
+            : "Bi-Directional";
         return `
           <article class="cp-patch ${p.enabled ? "is-on" : "is-off"}" data-id="${esc(p.id)}">
             <div class="cp-patchTop">
-              <h3 class="cp-patchTitle">${esc(p.name)}</h3>
+              <div>
+                <h3 class="cp-patchTitle">${esc(p.name)}</h3>
+                <span class="cp-patchMode">${esc(modeLabel)}</span>
+              </div>
               <div class="cp-patchActions cardActionsRow">
                 <div class="cp-enableRow">
                   <button
@@ -489,7 +771,7 @@
                 <button type="button" class="btn cp-danger cp-deleteBtn">Delete</button>
               </div>
             </div>
-            <div class="cp-topology">${nodesHtml}</div>
+            <div class="cp-topology">${topologyHtml(p)}</div>
           </article>`;
       })
       .join("");
@@ -504,7 +786,7 @@
         sensitivity: "base",
       })
     );
-    renderChannelsBox();
+    renderChannelUi();
   }
 
   async function loadPatches() {
@@ -517,8 +799,17 @@
     await loadPatches();
   }
 
+  modeSelect.addEventListener("change", () => {
+    syncModeUi();
+    renderChannelUi();
+  });
+
   channelSearch.addEventListener("input", () => {
     renderChannelsBox();
+  });
+
+  uniSearch.addEventListener("input", () => {
+    renderUniBoxes();
   });
 
   channelsBox.addEventListener("change", (e) => {
@@ -528,14 +819,62 @@
     else selectedNames.delete(cb.value);
   });
 
+  function onUniSideChange(side, e) {
+    const cb = e.target && e.target.matches('input[type="checkbox"]') ? e.target : null;
+    if (!cb) return;
+    const mine = side === "left" ? selectedLeft : selectedRight;
+    const other = side === "left" ? selectedRight : selectedLeft;
+    if (cb.checked) {
+      mine.add(cb.value);
+      other.delete(cb.value);
+    } else {
+      mine.delete(cb.value);
+    }
+    renderUniBoxes();
+  }
+
+  leftBox.addEventListener("change", (e) => onUniSideChange("left", e));
+  rightBox.addEventListener("change", (e) => onUniSideChange("right", e));
+
   selectAllBtn.addEventListener("click", () => {
-    for (const c of filteredChannels()) selectedNames.add(c.name);
+    for (const c of filteredChannels(channelSearch)) selectedNames.add(c.name);
     renderChannelsBox();
   });
 
   clearAllBtn.addEventListener("click", () => {
-    for (const c of filteredChannels()) selectedNames.delete(c.name);
+    for (const c of filteredChannels(channelSearch)) selectedNames.delete(c.name);
     renderChannelsBox();
+  });
+
+  leftSelectAllBtn.addEventListener("click", () => {
+    for (const c of filteredChannels(uniSearch)) {
+      selectedLeft.add(c.name);
+      selectedRight.delete(c.name);
+    }
+    renderUniBoxes();
+  });
+
+  leftClearBtn.addEventListener("click", () => {
+    for (const c of filteredChannels(uniSearch)) selectedLeft.delete(c.name);
+    renderUniBoxes();
+  });
+
+  rightSelectAllBtn.addEventListener("click", () => {
+    for (const c of filteredChannels(uniSearch)) {
+      selectedRight.add(c.name);
+      selectedLeft.delete(c.name);
+    }
+    renderUniBoxes();
+  });
+
+  rightClearBtn.addEventListener("click", () => {
+    for (const c of filteredChannels(uniSearch)) selectedRight.delete(c.name);
+    renderUniBoxes();
+  });
+
+  dirBtn.addEventListener("click", () => {
+    uniDirection = uniDirection === "ltr" ? "rtl" : "ltr";
+    updateDirUi();
   });
 
   createEnabledBtn.addEventListener("click", () => {
@@ -546,12 +885,37 @@
 
   submitBtn.addEventListener("click", async () => {
     setMsg("");
-    const groups = Array.from(selectedNames);
-    if (groups.length < 2) {
-      setMsg("Select at least two channels.", true);
-      return;
-    }
     const name = String(nameInput.value || "").trim();
+    const mode = currentMode();
+    let body;
+
+    if (mode === "unidirectional") {
+      const leftGroups = Array.from(selectedLeft);
+      const rightGroups = Array.from(selectedRight);
+      if (!leftGroups.length || !rightGroups.length) {
+        setMsg("Select at least one channel on each side.", true);
+        return;
+      }
+      body = {
+        name: name || undefined,
+        mode: "unidirectional",
+        leftGroups,
+        rightGroups,
+        direction: uniDirection,
+      };
+    } else {
+      const groups = Array.from(selectedNames);
+      if (groups.length < 2) {
+        setMsg("Select at least two channels.", true);
+        return;
+      }
+      body = {
+        name: name || undefined,
+        mode: "bidirectional",
+        groups,
+      };
+    }
+
     submitBtn.disabled = true;
     const isEdit = !!editingId;
     try {
@@ -560,7 +924,7 @@
           method: "PATCH",
           body: JSON.stringify({
             name,
-            groups,
+            ...body,
           }),
         });
         setCreateMode();
@@ -569,8 +933,7 @@
         await api("/api/channel-patch", {
           method: "POST",
           body: JSON.stringify({
-            name: name || undefined,
-            groups,
+            ...body,
             enabled: isToggleOn(createEnabledBtn),
           }),
         });
@@ -638,6 +1001,9 @@
       btn.disabled = false;
     }
   });
+
+  updateDirUi();
+  syncModeUi();
 
   refreshAll().catch((err) => {
     setMsg(err.message || "Failed to load", true);

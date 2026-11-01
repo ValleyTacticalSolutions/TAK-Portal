@@ -55,6 +55,18 @@ function hideOutOfScopePatch(res) {
   return res.status(404).json({ error: "Patch not found" });
 }
 
+/** Collect all channel names involved in a create/update body (bi or uni). */
+function groupsFromBody(body, fallbackGroups) {
+  const mode = store.normalizeMode(body || {});
+  if (mode === "unidirectional") {
+    const left = Array.isArray(body?.leftGroups) ? body.leftGroups : [];
+    const right = Array.isArray(body?.rightGroups) ? body.rightGroups : [];
+    return [...left, ...right];
+  }
+  if (body && Array.isArray(body.groups)) return body.groups;
+  return Array.isArray(fallbackGroups) ? fallbackGroups : [];
+}
+
 // GET /api/channel-patch/meta
 router.get("/meta", async (req, res) => {
   try {
@@ -104,20 +116,31 @@ router.post("/", async (req, res) => {
     const scoped = await loadScopedChannels(authUser);
     const allowed = channelPatchAccess.allowedKeySetFromPicker(scoped);
 
-    const groups = Array.isArray(body.groups) ? body.groups : [];
+    const mode = store.normalizeMode(body);
+    const groups = groupsFromBody(body);
     channelPatchAccess.assertGroupsInScope(access, groups, allowed);
 
-    const patch = store.create(
-      {
-        name: body.name,
-        enabled: body.enabled !== false,
-        groups,
-        agencyScope: access.isGlobalAdmin
-          ? body.agencyScope || []
-          : access.allowedAgencySuffixes || [],
-      },
-      actorLabel(authUser)
-    );
+    const createInput = {
+      name: body.name,
+      enabled: body.enabled !== false,
+      mode,
+      agencyScope: access.isGlobalAdmin
+        ? body.agencyScope || []
+        : access.allowedAgencySuffixes || [],
+    };
+    if (mode === "unidirectional") {
+      createInput.leftGroups = Array.isArray(body.leftGroups)
+        ? body.leftGroups
+        : [];
+      createInput.rightGroups = Array.isArray(body.rightGroups)
+        ? body.rightGroups
+        : [];
+      createInput.direction = body.direction;
+    } else {
+      createInput.groups = Array.isArray(body.groups) ? body.groups : [];
+    }
+
+    const patch = store.create(createInput, actorLabel(authUser));
 
     auditSvc.auditFromRequest(req, {
       action: "CHANNEL_PATCH_CREATED",
@@ -125,7 +148,11 @@ router.post("/", async (req, res) => {
       targetId: patch.id,
       details: {
         name: patch.name,
+        mode: patch.mode,
+        direction: patch.direction || null,
         groups: patch.groups,
+        leftGroups: patch.leftGroups || null,
+        rightGroups: patch.rightGroups || null,
         summary: `Created channel patch ${patch.name}.`,
       },
     });
@@ -158,15 +185,49 @@ router.patch("/:id", async (req, res) => {
     }
 
     const body = req.body || {};
-    const nextGroups = body.groups != null ? body.groups : existing.groups;
-    channelPatchAccess.assertGroupsInScope(access, nextGroups, allowed);
+    const nextMode =
+      body.mode != null ? store.normalizeMode(body) : store.normalizeMode(existing);
+    const scopeGroups =
+      body.mode != null ||
+      body.groups != null ||
+      body.leftGroups != null ||
+      body.rightGroups != null
+        ? groupsFromBody(
+            {
+              mode: nextMode,
+              groups: body.groups != null ? body.groups : existing.groups,
+              leftGroups:
+                body.leftGroups != null ? body.leftGroups : existing.leftGroups,
+              rightGroups:
+                body.rightGroups != null
+                  ? body.rightGroups
+                  : existing.rightGroups,
+            },
+            existing.groups
+          )
+        : existing.groups;
+    channelPatchAccess.assertGroupsInScope(access, scopeGroups, allowed);
 
     const fields = {};
     if (body.name != null) fields.name = body.name;
     if (body.enabled != null) fields.enabled = body.enabled;
-    if (body.groups != null) fields.groups = body.groups;
+    if (body.mode != null) fields.mode = nextMode;
     if (body.agencyScope != null && access.isGlobalAdmin) {
       fields.agencyScope = body.agencyScope;
+    }
+
+    if (nextMode === "unidirectional") {
+      if (body.leftGroups != null) fields.leftGroups = body.leftGroups;
+      else if (body.mode != null && existing.leftGroups)
+        fields.leftGroups = existing.leftGroups;
+      if (body.rightGroups != null) fields.rightGroups = body.rightGroups;
+      else if (body.mode != null && existing.rightGroups)
+        fields.rightGroups = existing.rightGroups;
+      if (body.direction != null) fields.direction = body.direction;
+      else if (body.mode != null) fields.direction = existing.direction || "ltr";
+    } else {
+      if (body.groups != null) fields.groups = body.groups;
+      else if (body.mode != null) fields.groups = existing.groups;
     }
 
     const patch = store.update(req.params.id, fields);
@@ -178,7 +239,11 @@ router.patch("/:id", async (req, res) => {
       details: {
         name: patch.name,
         enabled: patch.enabled,
+        mode: patch.mode,
+        direction: patch.direction || null,
         groups: patch.groups,
+        leftGroups: patch.leftGroups || null,
+        rightGroups: patch.rightGroups || null,
         summary: `Updated channel patch ${patch.name}.`,
       },
     });

@@ -323,19 +323,17 @@
             </div>
 
             <div class="editTopPanelEmail">
-              <div class="editTopPanelEmailLabels<%= userPhoneFieldEnabled ? ' hasPhone' : '' %>">
-                <label>Email</label>
-                <% if (userPhoneFieldEnabled) { %>
-                <label for="phoneInput">Phone</label>
-                <% } %>
-              </div>
-              <div class="row editTopPanelEmailRow<%= userPhoneFieldEnabled ? ' hasPhone' : '' %>">
+              <label>Email</label>
+              <div class="row editTopPanelEmailRow">
                 <input id="emailInput" type="email" />
-                <% if (userPhoneFieldEnabled) { %>
-                <input id="phoneInput" type="tel" placeholder="Optional" autocomplete="off" maxlength="40" />
-                <% } %>
                 <button class="btn" id="saveUserDetailsBtn" type="button">Update User Details</button>
               </div>
+              <% if (userPhoneFieldEnabled) { %>
+              <label class="editTopPanelPhoneLabel" for="phoneInput">Phone</label>
+              <div class="row editTopPanelPhoneRow">
+                <input id="phoneInput" type="tel" placeholder="Optional" autocomplete="off" maxlength="40" />
+              </div>
+              <% } %>
               <span class="msg" id="nameMsg"></span>
             </div>
           </div>
@@ -580,7 +578,6 @@ const VIEWER_AGENCY_SUFFIX = <%- JSON.stringify(
   String(typeof viewerAgencySuffix !== "undefined" ? viewerAgencySuffix : "").trim().toLowerCase()
 ) %>;
 const USERNAME_PREFIX_LABEL = <%- JSON.stringify(usernamePrefixLabel) %>;
-const USER_PHONE_FIELD_ENABLED = <%- JSON.stringify(!!userPhoneFieldEnabled) %>;
 
 const agencySelect = document.getElementById("createAgencySelect");
 const filterAgencySelect = document.getElementById("filterAgencySelect");
@@ -1358,6 +1355,8 @@ if (csvBtn && csvFileInput) {
 </script>
 
 <script>
+const USER_PHONE_FIELD_ENABLED = <%- JSON.stringify(!!userPhoneFieldEnabled) %>;
+
 const msg = document.getElementById("msg");
 const actionMsg = document.getElementById("actionMsg");
 const tbody = document.getElementById("tbody");
@@ -4639,29 +4638,28 @@ body.noScroll .main{
   margin-top: 6px;
 }
 
-.editTopPanelEmailLabels{
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 8px;
-}
-
-.editTopPanelEmailLabels.hasPhone{
-  grid-template-columns: 1fr 1fr auto;
-}
-
 .editTopPanelEmailRow{
   gap: 8px;
   align-items: center;
   margin-top: 4px;
 }
 
-.editTopPanelEmailRow.hasPhone{
-  display: grid;
-  grid-template-columns: 1fr 1fr auto;
-}
-
 .editTopPanelEmailRow input{
   flex: 1;
+  min-width: 0;
+}
+
+.editTopPanelPhoneLabel{
+  display: block;
+  margin-top: 8px;
+}
+
+.editTopPanelPhoneRow{
+  margin-top: 4px;
+}
+
+.editTopPanelPhoneRow input{
+  width: 100%;
   min-width: 0;
 }
 
@@ -5041,10 +5039,6 @@ th.sortable:hover{
   .createEmailPwdRow,
   .createEmailPwdRow.hasPhone,
   .createFinalRow{
-    grid-template-columns: 1fr;
-  }
-  .editTopPanelEmailLabels.hasPhone,
-  .editTopPanelEmailRow.hasPhone{
     grid-template-columns: 1fr;
   }
   .templateBar{

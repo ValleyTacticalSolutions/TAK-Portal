@@ -65,7 +65,12 @@ function mergeCreatedMutualAidPickerChannels(channels, groupNames) {
 
 function patchGroupKeys(patch) {
   const keys = new Set();
-  for (const name of patch?.groups || []) {
+  const names = [
+    ...(Array.isArray(patch?.groups) ? patch.groups : []),
+    ...(Array.isArray(patch?.leftGroups) ? patch.leftGroups : []),
+    ...(Array.isArray(patch?.rightGroups) ? patch.rightGroups : []),
+  ];
+  for (const name of names) {
     const k = mapMeta.channelBaseKey(name);
     if (k && k !== mapMeta.UNASSIGNED_CHANNEL_KEY) keys.add(k);
   }

@@ -1,8 +1,10 @@
 /**
  * Persist channel patches in Postgres.
  *
- * Model: a named set of channels patched together (full mesh, both directions).
- * Legacy hub/spokes rows are migrated on read.
+ * Modes:
+ *  - bidirectional: named set of channels patched together (full mesh, both ways)
+ *  - unidirectional: left/right channel lists with ltr|rtl flow
+ * Legacy hub/spokes rows are migrated on read to bidirectional mesh.
  */
 const crypto = require("crypto");
 const pgCache = require("./pgCache");
@@ -35,26 +37,139 @@ function groupDisplayLabel(name) {
 }
 
 /**
+ * Deduped list of group name strings from an array of strings/objects.
+ * @returns {string[]}
+ */
+function extractNamesFromList(list) {
+  const out = [];
+  const seen = new Set();
+  for (const item of Array.isArray(list) ? list : []) {
+    let name = "";
+    if (typeof item === "string" || typeof item === "number") {
+      name = safeStr(item).trim();
+    } else if (item && typeof item === "object") {
+      name = safeStr(item.group || item.name || item.groupName).trim();
+    }
+    if (!name) continue;
+    const key = groupDedupeKey(name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
+}
+
+/**
+ * Accept modern `groups: string[]` or legacy hub + spokes.
+ * @returns {string[]}
+ */
+function extractGroupNames(raw) {
+  const out = extractNamesFromList(raw?.groups);
+
+  // Legacy hub / spokes → flat mesh
+  if (!out.length) {
+    const legacy = [];
+    const hub = safeStr(raw?.hubGroup || raw?.hub).trim();
+    if (hub) legacy.push(hub);
+    const spokes = Array.isArray(raw?.spokes) ? raw.spokes : [];
+    for (const row of spokes) {
+      if (typeof row === "string" || typeof row === "number") {
+        legacy.push(safeStr(row).trim());
+      } else if (row && typeof row === "object") {
+        legacy.push(safeStr(row.group || row.name || row.groupName).trim());
+      }
+    }
+    return extractNamesFromList(legacy);
+  }
+
+  return out;
+}
+
+function normalizeMode(raw) {
+  const m = safeStr(raw?.mode || raw?.type).trim().toLowerCase();
+  if (
+    m === "unidirectional" ||
+    m === "uni" ||
+    m === "uni-directional" ||
+    m === "one-way" ||
+    m === "oneway"
+  ) {
+    return "unidirectional";
+  }
+  return "bidirectional";
+}
+
+function normalizeDirection(raw) {
+  const d = safeStr(raw?.direction).trim().toLowerCase();
+  if (d === "rtl" || d === "right-to-left" || d === "left" || d === "←") {
+    return "rtl";
+  }
+  return "ltr";
+}
+
+/**
+ * Resolved traffic ends for a patch.
+ * @returns {{ sources: string[], destinations: string[] }}
+ */
+function resolveFlowEnds(patch) {
+  if (!patch || normalizeMode(patch) !== "unidirectional") {
+    const groups = Array.isArray(patch?.groups) ? patch.groups : [];
+    return { sources: groups.slice(), destinations: groups.slice() };
+  }
+  const left = Array.isArray(patch.leftGroups) ? patch.leftGroups : [];
+  const right = Array.isArray(patch.rightGroups) ? patch.rightGroups : [];
+  const direction = normalizeDirection(patch);
+  if (direction === "rtl") {
+    return { sources: right.slice(), destinations: left.slice() };
+  }
+  return { sources: left.slice(), destinations: right.slice() };
+}
+
+/**
  * For each channel in enabled patches, the other channels it is patched with.
- * @param {Array<{ enabled?: boolean, groups?: string[] }>} patches
+ * Bi: full mesh peers. Uni: sources ↔ destinations (labels both ways; traffic is one-way).
  * @returns {Map<string, string[]>} matchKey -> sorted peer display labels
  */
 function peerLabelsByGroupKeyFromPatches(patches) {
   const byKey = new Map();
+
+  function addPeer(srcKey, dstKey, dstLabel) {
+    if (!srcKey || !dstKey || srcKey === dstKey) return;
+    if (!byKey.has(srcKey)) byKey.set(srcKey, new Map());
+    const peers = byKey.get(srcKey);
+    if (!peers.has(dstKey)) peers.set(dstKey, dstLabel);
+  }
+
   for (const p of Array.isArray(patches) ? patches : []) {
     if (!p || p.enabled === false) continue;
+
+    if (normalizeMode(p) === "unidirectional") {
+      const { sources, destinations } = resolveFlowEnds(p);
+      const srcItems = sources
+        .map((g) => ({ key: groupMatchKey(g), label: groupDisplayLabel(g) }))
+        .filter((x) => x.key);
+      const dstItems = destinations
+        .map((g) => ({ key: groupMatchKey(g), label: groupDisplayLabel(g) }))
+        .filter((x) => x.key);
+      for (const src of srcItems) {
+        for (const dst of dstItems) {
+          addPeer(src.key, dst.key, dst.label);
+          addPeer(dst.key, src.key, src.label);
+        }
+      }
+      continue;
+    }
+
     const items = (Array.isArray(p.groups) ? p.groups : [])
       .map((g) => ({ key: groupMatchKey(g), label: groupDisplayLabel(g) }))
       .filter((x) => x.key);
     for (const src of items) {
-      if (!byKey.has(src.key)) byKey.set(src.key, new Map());
-      const peers = byKey.get(src.key);
       for (const dst of items) {
-        if (dst.key === src.key) continue;
-        if (!peers.has(dst.key)) peers.set(dst.key, dst.label);
+        addPeer(src.key, dst.key, dst.label);
       }
     }
   }
+
   const out = new Map();
   for (const [k, peers] of byKey) {
     out.set(
@@ -83,65 +198,20 @@ function annotateGroupsWithPatchPeers(groups, patches) {
   });
 }
 
-/**
- * Accept modern `groups: string[]` or legacy hub + spokes.
- * @returns {string[]}
- */
-function extractGroupNames(raw) {
-  const out = [];
-  const seen = new Set();
-
-  function push(name) {
-    const g = safeStr(name).trim();
-    if (!g) return;
-    const key = groupDedupeKey(g);
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push(g);
-  }
-
-  if (Array.isArray(raw?.groups)) {
-    for (const item of raw.groups) {
-      if (typeof item === "string" || typeof item === "number") {
-        push(item);
-      } else if (item && typeof item === "object") {
-        push(item.group || item.name || item.groupName);
-      }
-    }
-  }
-
-  // Legacy hub / spokes → flat mesh
-  if (!out.length) {
-    push(raw?.hubGroup || raw?.hub);
-    const spokes = Array.isArray(raw?.spokes) ? raw.spokes : [];
-    for (const row of spokes) {
-      if (typeof row === "string" || typeof row === "number") {
-        push(row);
-      } else if (row && typeof row === "object") {
-        push(row.group || row.name || row.groupName);
-      }
-    }
-  }
-
-  return out;
-}
-
 function normalizePatch(raw, { assignId = false } = {}) {
   if (!raw || typeof raw !== "object") return null;
 
-  const groups = extractGroupNames(raw);
-  if (groups.length < 2) return null;
-
+  const mode = normalizeMode(raw);
   let id = safeStr(raw.id).trim();
   if (!id && assignId) id = crypto.randomUUID();
   if (!id) return null;
 
   const now = new Date().toISOString();
-  return {
+  const base = {
     id,
     name: safeStr(raw.name).trim() || "Untitled Patch",
     enabled: raw.enabled !== false && raw.enabled !== "false" && raw.enabled !== 0,
-    groups,
+    mode,
     createdBy: safeStr(raw.createdBy).trim() || "",
     createdAt: safeStr(raw.createdAt).trim() || now,
     updatedAt: safeStr(raw.updatedAt).trim() || now,
@@ -150,6 +220,40 @@ function normalizePatch(raw, { assignId = false } = {}) {
       : [],
     lastForwardAt: safeStr(raw.lastForwardAt).trim() || null,
     lastError: safeStr(raw.lastError).trim() || null,
+  };
+
+  if (mode === "unidirectional") {
+    const leftGroups = extractNamesFromList(
+      raw.leftGroups != null ? raw.leftGroups : raw.sources
+    );
+    const rightGroups = extractNamesFromList(
+      raw.rightGroups != null ? raw.rightGroups : raw.destinations
+    );
+    if (!leftGroups.length || !rightGroups.length) return null;
+
+    const leftKeys = new Set(leftGroups.map(groupDedupeKey));
+    for (const g of rightGroups) {
+      if (leftKeys.has(groupDedupeKey(g))) return null;
+    }
+
+    const groups = extractNamesFromList([...leftGroups, ...rightGroups]);
+    if (groups.length < 2) return null;
+
+    return {
+      ...base,
+      groups,
+      leftGroups,
+      rightGroups,
+      direction: normalizeDirection(raw),
+    };
+  }
+
+  const groups = extractGroupNames(raw);
+  if (groups.length < 2) return null;
+
+  return {
+    ...base,
+    groups,
   };
 }
 
@@ -199,6 +303,14 @@ function getById(id) {
   return load().find((p) => p.id === key) || null;
 }
 
+function invalidPatchError() {
+  const err = new Error(
+    "Invalid patch: select at least two distinct channels (uni: one+ on each side, no overlap)."
+  );
+  err.status = 400;
+  return err;
+}
+
 function create(input, actorName) {
   const patch = normalizePatch(
     {
@@ -212,13 +324,7 @@ function create(input, actorName) {
     },
     { assignId: true }
   );
-  if (!patch) {
-    const err = new Error(
-      "Invalid patch: select at least two distinct channels."
-    );
-    err.status = 400;
-    throw err;
-  }
+  if (!patch) throw invalidPatchError();
   const items = load();
   items.push(patch);
   save(items);
@@ -245,6 +351,15 @@ function update(id, patchFields) {
     updatedAt: new Date().toISOString(),
   };
 
+  // When switching to bidirectional, drop uni-only fields so normalize does not
+  // accidentally keep stale left/right as the source of truth.
+  const nextMode = normalizeMode(merged);
+  if (nextMode === "bidirectional") {
+    delete merged.leftGroups;
+    delete merged.rightGroups;
+    delete merged.direction;
+  }
+
   if (patchFields && Object.prototype.hasOwnProperty.call(patchFields, "enabled")) {
     merged.enabled =
       patchFields.enabled !== false &&
@@ -253,13 +368,7 @@ function update(id, patchFields) {
   }
 
   const next = normalizePatch(merged);
-  if (!next) {
-    const err = new Error(
-      "Invalid patch: select at least two distinct channels."
-    );
-    err.status = 400;
-    throw err;
-  }
+  if (!next) throw invalidPatchError();
 
   if (
     patchFields &&
@@ -327,4 +436,7 @@ module.exports = {
   peerLabelsByGroupKeyFromPatches,
   enabledPeerLabelsByGroupKey,
   annotateGroupsWithPatchPeers,
+  resolveFlowEnds,
+  normalizeMode,
+  normalizeDirection,
 };

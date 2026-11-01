@@ -1,5 +1,8 @@
 /**
- * Channel patch engine — mesh CoT rebroadcast across selected channels (both ways).
+ * Channel patch engine — CoT rebroadcast across selected channels.
+ *
+ * Bidirectional: full mesh (both ways). Unidirectional: sources → destinations only
+ * (left/right lists + ltr|rtl arrow resolved by channelPatch.store.resolveFlowEnds).
  *
  * Important: patched CoT is written on the portal's webadmin TLS stream. Reusing the
  * EUD's UID/SA would make TAK Server treat webadmin as a second instance of that
@@ -62,17 +65,39 @@ function isPortalBridgeCot(cot) {
 }
 
 /**
- * Destinations for a source channel within one patch (full mesh, both ways).
+ * Destinations for a source channel within one patch.
+ * Bi: full mesh (both ways). Uni: only if source is on the sending side.
  * @returns {string[]} destination group names (catalog names)
  */
 function destinationsForSource(patch, sourceKey) {
   if (!sourceKey) return [];
+
+  const mode = store.normalizeMode(patch);
+  if (mode === "unidirectional") {
+    const { sources, destinations } = store.resolveFlowEnds(patch);
+    if (!sources.length || !destinations.length) return [];
+
+    const sourceKeys = new Set(sources.map((g) => groupKey(g)).filter(Boolean));
+    if (!sourceKeys.has(sourceKey)) return [];
+
+    const dests = [];
+    const seen = new Set();
+    for (const groupName of destinations) {
+      const g = safeStr(groupName).trim();
+      if (!g) continue;
+      const k = groupKey(g);
+      if (!k || k === sourceKey) continue;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      dests.push(g);
+    }
+    return dests;
+  }
+
   const groups = Array.isArray(patch?.groups) ? patch.groups : [];
   if (groups.length < 2) return [];
 
-  const memberKeys = new Set(
-    groups.map((g) => groupKey(g)).filter(Boolean)
-  );
+  const memberKeys = new Set(groups.map((g) => groupKey(g)).filter(Boolean));
   if (!memberKeys.has(sourceKey)) return [];
 
   const dests = [];
