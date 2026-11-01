@@ -9,6 +9,8 @@
   }) %>
   <%
     const usernamePrefixLabel = String((settings && settings.USERNAME_PREFIX_LABEL) || "").trim() || "Badge Number / Username";
+    const userPhoneFieldEnabled =
+      String((settings && settings.USER_PHONE_NUMBER_FIELD_ENABLED) || "").toLowerCase() === "true";
     const isSingleAgencyUsersAdmin =
       !isGlobalAdmin &&
       isAgencyAdmin &&
@@ -79,7 +81,7 @@
         <input name="lastName" placeholder="Doe" required />
       </label>
 
-      <div class="createEmailPwdRow">
+      <div class="createEmailPwdRow<%= userPhoneFieldEnabled ? ' hasPhone' : '' %>">
         <label>Email (optional)
           <input name="email" type="email" placeholder="example@agency.gov" />
         </label>
@@ -110,6 +112,12 @@
         <label>Radio Callsign (optional)
           <input name="radioCallsign" type="text" placeholder="ex. T05 or C10 or B01G" autocomplete="off" />
         </label>
+
+        <% if (userPhoneFieldEnabled) { %>
+        <label>Phone (optional)
+          <input name="phone" type="tel" placeholder="ex. 555-555-0123" autocomplete="off" maxlength="40" />
+        </label>
+        <% } %>
       </div>
 
       <div class="createFinalRow">
@@ -315,9 +323,17 @@
             </div>
 
             <div class="editTopPanelEmail">
-              <label>Email</label>
-              <div class="row editTopPanelEmailRow">
+              <div class="editTopPanelEmailLabels<%= userPhoneFieldEnabled ? ' hasPhone' : '' %>">
+                <label>Email</label>
+                <% if (userPhoneFieldEnabled) { %>
+                <label for="phoneInput">Phone</label>
+                <% } %>
+              </div>
+              <div class="row editTopPanelEmailRow<%= userPhoneFieldEnabled ? ' hasPhone' : '' %>">
                 <input id="emailInput" type="email" />
+                <% if (userPhoneFieldEnabled) { %>
+                <input id="phoneInput" type="tel" placeholder="Optional" autocomplete="off" maxlength="40" />
+                <% } %>
                 <button class="btn" id="saveUserDetailsBtn" type="button">Update User Details</button>
               </div>
               <span class="msg" id="nameMsg"></span>
@@ -564,6 +580,7 @@ const VIEWER_AGENCY_SUFFIX = <%- JSON.stringify(
   String(typeof viewerAgencySuffix !== "undefined" ? viewerAgencySuffix : "").trim().toLowerCase()
 ) %>;
 const USERNAME_PREFIX_LABEL = <%- JSON.stringify(usernamePrefixLabel) %>;
+const USER_PHONE_FIELD_ENABLED = <%- JSON.stringify(!!userPhoneFieldEnabled) %>;
 
 const agencySelect = document.getElementById("createAgencySelect");
 const filterAgencySelect = document.getElementById("filterAgencySelect");
@@ -1388,6 +1405,7 @@ function setEditUserModalTitle(user) {
 const usernameSpan = document.getElementById("usernameSpan");
 
 const emailInput = document.getElementById("emailInput");
+const phoneInput = document.getElementById("phoneInput");
 const saveUserDetailsBtn = document.getElementById("saveUserDetailsBtn");
 const pw1 = document.getElementById("pw1");
 const pw2 = document.getElementById("pw2");
@@ -3155,6 +3173,9 @@ window.editUser = async (userPk) => {
     }
 
     if (emailInput) emailInput.value = selectedUser.email || "";
+    if (phoneInput) {
+      phoneInput.value = String(selectedUser?.attributes?.phone || "").trim();
+    }
     if (radioCallsignInput) {
       radioCallsignInput.value = String(selectedUser?.radio_callsign || selectedUser?.attributes?.radio_callsign || "").trim();
     }
@@ -3199,6 +3220,7 @@ window.editUser = async (userPk) => {
   if (firstNameInput) firstNameInput.value = "";
   if (lastNameInput) lastNameInput.value = "";
   if (emailInput) emailInput.value = "";
+  if (phoneInput) phoneInput.value = "";
   if (radioCallsignInput) radioCallsignInput.value = "";
   if (groupChips) groupChips.innerHTML = "";
   if (groupsInner) groupsInner.innerHTML = "";
@@ -3884,11 +3906,49 @@ if (saveUserDetailsBtn) {
       );
     }
 
+    if (USER_PHONE_FIELD_ENABLED && phoneInput) {
+      const phone = String(phoneInput.value || "").trim();
+      let phoneRes;
+      try {
+        phoneRes = await fetch(`/api/users/${selectedUser.pk}/phone`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone }),
+        });
+      } catch {
+        return setMsgEl(nameMsg, "Name and email updated, but network error while updating phone.", false);
+      }
+
+      const phoneOut = await readJsonSafe(phoneRes);
+      if (!phoneRes.ok) {
+        return setMsgEl(
+          nameMsg,
+          (phoneOut.json && phoneOut.json.error) || `Phone update failed (HTTP ${phoneRes.status})`,
+          false
+        );
+      }
+
+      const attrs = { ...(selectedUser.attributes || {}) };
+      if (phone) {
+        attrs.phone = phone;
+      } else {
+        delete attrs.phone;
+      }
+      selectedUser.attributes = attrs;
+    }
+
     selectedUser.name = newName;
     selectedUser.email = email;
 
     const patch = (u) =>
-      String(u.pk) === String(selectedUser.pk) ? { ...u, name: newName, email } : u;
+      String(u.pk) === String(selectedUser.pk)
+        ? {
+            ...u,
+            name: newName,
+            email,
+            attributes: selectedUser.attributes || u.attributes,
+          }
+        : u;
 
     allUsers = (allUsers || []).map(patch);
     const updatedVisible = (window.__lastUsers || []).map(patch);
@@ -4579,10 +4639,25 @@ body.noScroll .main{
   margin-top: 6px;
 }
 
+.editTopPanelEmailLabels{
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.editTopPanelEmailLabels.hasPhone{
+  grid-template-columns: 1fr 1fr auto;
+}
+
 .editTopPanelEmailRow{
   gap: 8px;
   align-items: center;
   margin-top: 4px;
+}
+
+.editTopPanelEmailRow.hasPhone{
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
 }
 
 .editTopPanelEmailRow input{
@@ -4760,6 +4835,10 @@ th.sortable:hover{
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+
+.createEmailPwdRow.hasPhone{
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .agency-admin-badge-full{
@@ -4960,7 +5039,12 @@ th.sortable:hover{
   }
 
   .createEmailPwdRow,
+  .createEmailPwdRow.hasPhone,
   .createFinalRow{
+    grid-template-columns: 1fr;
+  }
+  .editTopPanelEmailLabels.hasPhone,
+  .editTopPanelEmailRow.hasPhone{
     grid-template-columns: 1fr;
   }
   .templateBar{

@@ -208,6 +208,7 @@ const SETTINGS_SUBCATEGORIES = [
       "LIVE_MAP_ENABLED",
       "CLOUDTAK_URL",
       "BETA_MODE",
+      "USER_PHONE_NUMBER_FIELD_ENABLED",
     ],
   },
   {

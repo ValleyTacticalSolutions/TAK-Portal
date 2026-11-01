@@ -234,6 +234,7 @@
         "REQUEST_ACCESS_ENABLED",
         "REQUEST_ACCESS_REQUIRE_ALL_AGENCY_DETAILS",
         "BETA_MODE",
+        "USER_PHONE_NUMBER_FIELD_ENABLED",
         "LIVE_MAP_ENABLED",
         "MOU_ENABLED",
         "MOU_SEND_EMAILS",
@@ -435,6 +436,7 @@
         "REQUEST_ACCESS_ENABLED",
         "REQUEST_ACCESS_REQUIRE_ALL_AGENCY_DETAILS",
         "BETA_MODE",
+        "USER_PHONE_NUMBER_FIELD_ENABLED",
         "DEFAULT_THEME_MODE",
         "LIVE_MAP_ENABLED",
         "DEFAULT_MAP_SOURCE",
@@ -2493,6 +2495,7 @@
             </label>
             <% renderField("USERNAME_PREFIX_LABEL","Username Descriptor Text","Displayed on Users, Pending User Requests, Request Access, and the user CSV import template. Default: Badge Number / Username","Badge Number / Username"); %>
             <% renderField("BETA_MODE","Enable Beta Features","Shows in-development features for global admins (e.g. Getting Started). Also selects the update channel: on tracks the latest main branch; off updates to the last GitHub Release (including rolling back if you were on main). Settings and other data in the Docker volume are kept. Data Package, Locate Persons, and Data Sync are available regardless of this setting."); %>
+            <% renderField("USER_PHONE_NUMBER_FIELD_ENABLED","User's Phone Number Field","When on, shows an optional phone number field on the Users create form and edit modal, and includes a phone column in the user CSV import template. Stored on the Authentik user as attribute phone."); %>
           </div>
           <script>
             (function () {

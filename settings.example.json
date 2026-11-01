@@ -81,6 +81,7 @@
   "REQUEST_ACCESS_ENABLED": "true",
   "REQUEST_ACCESS_REQUIRE_ALL_AGENCY_DETAILS": "false",
   "BETA_MODE": "false",
+  "USER_PHONE_NUMBER_FIELD_ENABLED": "false",
   "SERVER_NAME": "",
   "DEFAULT_THEME_MODE": "dark",
   "DEFAULT_MAP_SOURCE": "dark-matter",

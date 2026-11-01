@@ -457,6 +457,10 @@ router.post("/", async (req, res) => {
         }
       : null;
 
+    if (!users.isUserPhoneNumberFieldEnabled()) {
+      delete payload.phone;
+    }
+
     const result = await users.createUser(payload, {
       createdBy,
       creationMethod: "manual",
@@ -1286,6 +1290,36 @@ router.put("/:userId/radio-callsign", async (req, res) => {
       },
     });
     res.json({ success: true, radioCallsign: radioCallsign || null });
+  } catch (err) {
+    res.status(400).json({ error: toErrorPayload(err) });
+  }
+});
+
+router.put("/:userId/phone", async (req, res) => {
+  try {
+    if (!users.isUserPhoneNumberFieldEnabled()) {
+      return res.status(403).json({ error: "User phone number field is disabled." });
+    }
+    const authUser = req.authentikUser || null;
+    const beforeUser = await users.getUserById(req.params.userId).catch(() => null);
+    const beforePhone =
+      beforeUser?.attributes?.phone != null ? String(beforeUser.attributes.phone) : null;
+    const phone = String(req.body?.phone ?? "").trim();
+    await users.updatePhone(req.params.userId, phone);
+    const user = await users.getUserById(req.params.userId).catch(() => null);
+    auditSvc.logEvent({
+      actor: authUser,
+      request: { method: req.method, path: req.originalUrl || req.path, ip: req.ip },
+      action: "UPDATE_USER_PHONE",
+      targetType: "user",
+      targetId: String(req.params.userId),
+      details: {
+        username: user?.username ?? beforeUser?.username ?? null,
+        beforePhone,
+        afterPhone: phone || null,
+      },
+    });
+    res.json({ success: true, phone: phone || null });
   } catch (err) {
     res.status(400).json({ error: toErrorPayload(err) });
   }

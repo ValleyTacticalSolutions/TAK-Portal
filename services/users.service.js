@@ -92,6 +92,18 @@ function getUsernamePrefixLabel() {
   return String(settings.USERNAME_PREFIX_LABEL || "").trim() || DEFAULT_USERNAME_PREFIX_LABEL;
 }
 
+/** Strict: only exact "true" enables the optional user phone field (missing/empty/other = off). */
+function isUserPhoneNumberFieldEnabled() {
+  const settings = settingsSvc.getSettings ? settingsSvc.getSettings() || {} : {};
+  return String(settings.USER_PHONE_NUMBER_FIELD_ENABLED || "").toLowerCase() === "true";
+}
+
+// Phone is stored as typed (trimmed), so "555-555-0123", "(555) 555-0123" and
+// "+15555550123" all round-trip unchanged. Callers that dial strip to digits.
+function normalizePhone(phone) {
+  return String(phone ?? "").trim().slice(0, 40);
+}
+
 function normalizeCsvHeaderName(h) {
   return String(h || "")
     .trim()
@@ -157,6 +169,7 @@ function csvEscapeIfNeeded(value) {
 }
 
 function buildUsersImportTemplateCsv() {
+  const phoneEnabled = isUserPhoneNumberFieldEnabled();
   const header = [
     getUsernamePrefixLabel(),
     "agency",
@@ -165,13 +178,19 @@ function buildUsersImportTemplateCsv() {
     "email",
     "password",
     "radioCallsign",
+    ...(phoneEnabled ? ["phone"] : []),
     "template",
     "role",
   ];
-  const rows = [
-    ["1001", "TEST", "John", "Doe", "john.doe@example.org", "Password!23456", "T05", "Patrol", ""],
-    ["1002", "test", "Jane", "Smith", "jane.smith@example.org", "", "", "Patrol", "Team Lead"],
-  ];
+  const rows = phoneEnabled
+    ? [
+        ["1001", "TEST", "John", "Doe", "john.doe@example.org", "Password!23456", "T05", "555-555-0123", "Patrol", ""],
+        ["1002", "test", "Jane", "Smith", "jane.smith@example.org", "", "", "", "Patrol", "Team Lead"],
+      ]
+    : [
+        ["1001", "TEST", "John", "Doe", "john.doe@example.org", "Password!23456", "T05", "Patrol", ""],
+        ["1002", "test", "Jane", "Smith", "jane.smith@example.org", "", "", "Patrol", "Team Lead"],
+      ];
   return (
     [header.map(csvEscapeIfNeeded).join(",")]
       .concat(rows.map((r) => r.map(csvEscapeIfNeeded).join(",")))
@@ -181,13 +200,51 @@ function buildUsersImportTemplateCsv() {
 
 function buildUsersImportCsvInstructions() {
   const label = getUsernamePrefixLabel();
+  const phoneEnabled = isUserPhoneNumberFieldEnabled();
+  const headerLine = phoneEnabled
+    ? `${label},agency,firstName,lastName,email,password,radioCallsign,phone,template,role`
+    : `${label},agency,firstName,lastName,email,password,radioCallsign,template,role`;
+  const phoneSection = phoneEnabled
+    ? `
+8) phone  (optional)
+   - Optional (can be blank or column omitted entirely).
+   - If set, stored on the Authentik user as attribute phone, exactly as typed
+     (for example 555-555-0123 or +15555550123).
+   - Place after radioCallsign and before template when included.
+
+9) template
+   - This is the user group template name to apply to the new user.
+   - Example from sample file: Patrol
+   - The template must already exist for that agency, or that row will fail.
+
+10) role  (optional – last column)`
+    : `
+8) template
+   - This is the user group template name to apply to the new user.
+   - Example from sample file: Patrol
+   - The template must already exist for that agency, or that row will fail.
+
+9) role  (optional – last column)`;
+  const optionalCols = phoneEnabled
+    ? "email, radioCallsign, phone, and/or role"
+    : "email, radioCallsign, and/or role";
+  const examples = phoneEnabled
+    ? `- Good row (role from template, with radio callsign and phone):
+  1001,TEST,John,Doe,john.doe@example.org,Password!23456,HCSO-1001,555-555-0123,Patrol,
+- Good row with blank password and explicit role (no radio callsign, no phone):
+  1002,test,Jane,Smith,jane.smith@example.org,,,,Patrol,Team Lead`
+    : `- Good row (role from template, with radio callsign):
+  1001,TEST,John,Doe,john.doe@example.org,Password!23456,HCSO-1001,Patrol,
+- Good row with blank password and explicit role (no radio callsign):
+  1002,test,Jane,Smith,jane.smith@example.org,,,Patrol,Team Lead`;
+
   return `CSV User Creation Instructions
 ====================================
 
 Use this with: users-import-template.csv
 
 CSV format (DO NOT change the header line except to optionally omit optional columns):
-${label},agency,firstName,lastName,email,password,radioCallsign,template,role
+${headerLine}
 
 What each column means:
 1) ${label}
@@ -223,13 +280,7 @@ ${passwordPolicySvc.csvBulletList()}
    - Optional (can be blank or column omitted entirely).
    - If set, stored on the Authentik user as attribute radio_callsign.
    - Place before template when included in the header row.
-
-8) template
-   - This is the user group template name to apply to the new user.
-   - Example from sample file: Patrol
-   - The template must already exist for that agency, or that row will fail.
-
-9) role  (optional – last column)
+${phoneSection}
    - If this column is missing, left blank, or the value is empty, the new user's
      role is taken from the selected template (same as creating a user in the UI
      without overriding role).
@@ -239,17 +290,14 @@ ${passwordPolicySvc.csvBulletList()}
 
 Quick rules:
 - Keep the first row (header) as shown; you may omit optional columns
-  (email, radioCallsign, and/or role) for older spreadsheets.
+  (${optionalCols}) for older spreadsheets.
 - The first column header matches Username Descriptor Text in Settings.
 - One user per line.
 - Do not add other extra columns.
 - Save as .csv.
 
 Examples:
-- Good row (role from template, with radio callsign):
-  1001,TEST,John,Doe,john.doe@example.org,Password!23456,HCSO-1001,Patrol,
-- Good row with blank password and explicit role (no radio callsign):
-  1002,test,Jane,Smith,jane.smith@example.org,,,Patrol,Team Lead
+${examples}
 `;
 }
 
@@ -1221,6 +1269,8 @@ async function createUser(
     lastName,
     password,
     radioCallsign,
+    /** Optional contact phone; stored on the Authentik user as attribute `phone` when feature enabled */
+    phone,
     templateIndex,
     manualGroupIds,
     role,
@@ -1450,6 +1500,13 @@ async function createUser(
   const radioCall = String(radioCallsign || "").trim();
   if (radioCall) {
     attributes.radio_callsign = radioCall;
+  }
+
+  if (isUserPhoneNumberFieldEnabled()) {
+    const phoneValue = normalizePhone(phone);
+    if (phoneValue) {
+      attributes.phone = phoneValue;
+    }
   }
 
   const payload = {
@@ -2009,6 +2066,17 @@ async function importUsersFromCsvBuffer(buffer, opts = {}) {
     return "";
   }
 
+  const phoneEnabled = isUserPhoneNumberFieldEnabled();
+
+  function getPhone(parts) {
+    if (!phoneEnabled) return "";
+    for (const key of ["phone", "phone_number", "phonenumber", "phone number", "mobile", "cell"]) {
+      const v = get(parts, key);
+      if (v) return v;
+    }
+    return "";
+  }
+
   const agencies = agenciesStore.load();
   const rows = [];
   /** @type {Array<{ line: number, phase: string, messages: string[], badge?: string, email?: string, username?: string }>} */
@@ -2036,6 +2104,7 @@ async function importUsersFromCsvBuffer(buffer, opts = {}) {
     const email = get(parts, "email");
     const password = get(parts, "password");
     const radioCallsign = getRadioCallsign(parts);
+    const phone = getPhone(parts);
     const templateName = get(parts, "template");
 
     const rowErrors = [];
@@ -2138,6 +2207,7 @@ async function importUsersFromCsvBuffer(buffer, opts = {}) {
       email,
       password,
       radioCallsign,
+      phone,
       templateName,
       /** Non-empty only when CSV specified a valid role; otherwise createUser uses template role */
       roleCsv: roleResolved.ok ? roleResolved.role : "",
@@ -2236,6 +2306,7 @@ async function importUsersFromCsvBuffer(buffer, opts = {}) {
             lastName: row.lastName,
             password: row.password || undefined, // <- per-row password / no-password
             radioCallsign: row.radioCallsign || undefined,
+            phone: row.phone || undefined,
             templateIndex,
             manualGroupIds: [],
             allGroups,
@@ -3154,6 +3225,38 @@ async function updateRadioCallsign(userId, radioCallsign) {
     newAttrs.radio_callsign = v;
   } else {
     delete newAttrs.radio_callsign;
+  }
+  const outboxId = await db.withTransaction(async (c) => {
+    await directoryRepo.updateLocalUser(user.uuid || user.id, { attributes: newAttrs }, c);
+    return authentikOutbox.enqueue(
+      {
+        kind: "patch_user",
+        entityType: "user",
+        entityId: user.uuid || user.id,
+        authentikPk: user.authentik_pk,
+        username: user.username,
+        payload: { authentikPk: user.authentik_pk, patch: { attributes: newAttrs } },
+      },
+      c
+    );
+  });
+  await authentikOutbox.waitForOutbox(outboxId, 8000);
+  invalidateUsersCache();
+  return newAttrs;
+}
+
+async function updatePhone(userId, phone) {
+  if (!isUserPhoneNumberFieldEnabled()) {
+    throw new Error("User phone number field is disabled.");
+  }
+  await assertUserNotActionLocked(userId, { ignoreLocks: true });
+  const user = await getUserById(userId);
+  const newAttrs = { ...(user.attributes || {}) };
+  const v = normalizePhone(phone);
+  if (v) {
+    newAttrs.phone = v;
+  } else {
+    delete newAttrs.phone;
   }
   const outboxId = await db.withTransaction(async (c) => {
     await directoryRepo.updateLocalUser(user.uuid || user.id, { attributes: newAttrs }, c);
@@ -4727,6 +4830,8 @@ module.exports = {
   setUserGroups,
   updateUserAttributes,
   updateRadioCallsign,
+  updatePhone,
+  isUserPhoneNumberFieldEnabled,
   backfillMissingUserRoles,
   getMissingUserRoleStats,
   getMissingUserRolePreviewRows,
