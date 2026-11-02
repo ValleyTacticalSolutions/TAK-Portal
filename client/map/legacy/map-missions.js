@@ -45,6 +45,8 @@
     openMissions.forEach(function (entry, name) {
       if (!entry || !entry.visible || entry.loading) return;
       if (!entry.geojson) {
+        // Failed loads (esp. deleted missions) set entry.error; do not hammer the API.
+        if (entry.error) return;
         loadMission(name, { refresh: true });
         return;
       }
@@ -117,6 +119,10 @@
       }
       renderMissionList();
     } catch (err) {
+      if (isMissionGoneError(err)) {
+        forgetOpenMission(name);
+        return;
+      }
       console.warn("[map-missions] auto-refresh failed:", name, err?.message || err);
     } finally {
       missionAutoRefreshInFlight.delete(name);
@@ -888,6 +894,60 @@
     return msg || "Could not load " + label;
   }
 
+  function isMissionGoneError(err) {
+    const status = err && err.status;
+    if (status === 404 || status === 410) return true;
+    const msg = err && err.message ? String(err.message) : "";
+    return /\(HTTP 404\)|\(HTTP 410\)|not found|no longer exists/i.test(msg);
+  }
+
+  function catalogMissionNames() {
+    const names = new Set();
+    for (let i = 0; i < missionsCatalog.length; i++) {
+      const m = missionsCatalog[i];
+      const name = String(m?.name || m?.Name || "").trim();
+      if (name) names.add(name);
+    }
+    return names;
+  }
+
+  /** Drop a persisted mission that no longer exists (deleted Data Sync, etc.). */
+  function forgetOpenMission(name) {
+    const entry = openMissions.get(name);
+    if (!entry) return;
+    bumpMissionOp(name);
+    entry.pendingVisible = null;
+    entry.loading = false;
+    entry.visible = false;
+    if (bridge && typeof bridge.clearMissionMarkers === "function") {
+      bridge.clearMissionMarkers(name);
+    }
+    removeMissionLayers(name);
+    openMissions.delete(name);
+    itemMenuOpen.delete(name);
+    missionAutoRefreshInFlight.delete(name);
+    missionLoadGen.delete(name);
+    writeState();
+    renderMissionList();
+    rebuildMissionShapeDecorIndex();
+    if (bridge && typeof bridge.refreshLiveMarkersForMissionOverlay === "function") {
+      bridge.refreshLiveMarkersForMissionOverlay();
+    }
+    syncMissionAutoRefreshTimer();
+  }
+
+  function pruneOpenMissionsMissingFromCatalog() {
+    if (!missionsCatalog.length) return;
+    const names = catalogMissionNames();
+    const stale = [];
+    openMissions.forEach(function (_entry, openName) {
+      if (!names.has(openName)) stale.push(openName);
+    });
+    for (let i = 0; i < stale.length; i++) {
+      forgetOpenMission(stale[i]);
+    }
+  }
+
   async function throwIfOverlayResponseFailed(resp, fallback) {
     if (resp.ok) return;
     let msg = fallback + " (HTTP " + resp.status + ")";
@@ -895,7 +955,9 @@
       const body = await resp.json();
       if (body && body.error) msg = body.error;
     } catch (_) {}
-    throw new Error(msg);
+    const err = new Error(msg);
+    err.status = resp.status;
+    throw err;
   }
 
   async function fetchMissionGeojson(name, options) {
@@ -1481,10 +1543,20 @@
       }
     } catch (err) {
       if (!missionOpStale(name, gen)) {
+        if (isMissionGoneError(err)) {
+          entry.loading = false;
+          entry.pendingVisible = null;
+          forgetOpenMission(name);
+          return;
+        }
         entry.error = overlayNetworkError(err, "this mission");
       }
     } finally {
-      finishMissionBusy(name, entry, gen);
+      if (openMissions.get(name) === entry) {
+        finishMissionBusy(name, entry, gen);
+      } else {
+        syncMissionAutoRefreshTimer();
+      }
     }
   }
 
@@ -1936,6 +2008,7 @@
       if (!resp.ok) throw new Error("missions " + resp.status);
       const data = await resp.json();
       missionsCatalog = Array.isArray(data.missions) ? data.missions : [];
+      pruneOpenMissionsMissingFromCatalog();
       renderMissionList();
     } catch (err) {
       if (listEl) {
@@ -1949,7 +2022,14 @@
 
   function restoreOpenMissions() {
     const state = readState();
+    const catalogNames = catalogMissionNames();
+    const haveCatalog = missionsCatalog.length > 0;
+    let droppedStale = false;
     for (const name of state.open) {
+      if (haveCatalog && !catalogNames.has(name)) {
+        droppedStale = true;
+        continue;
+      }
       const settings = state.settings[name] || {};
       const visible = settings.visible !== false;
       const entry = {
@@ -1967,12 +2047,12 @@
       };
       openMissions.set(name, entry);
     }
+    if (droppedStale) writeState();
+    syncMissionAutoRefreshTimer();
     whenLiveReady(function () {
-      const pending = readState();
-      for (const name of pending.open) {
-        const settings = pending.settings[name] || {};
-        if (settings.visible !== false) loadMission(name);
-      }
+      openMissions.forEach(function (entry, name) {
+        if (entry && entry.visible) loadMission(name);
+      });
     });
   }
 
