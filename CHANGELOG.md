@@ -11,6 +11,10 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.31 - IN PROGRESS
+✨ `Enhancement` - Optional phone number field added to users page - Must be enabled in Settings, Branding & Appearance<br>
+✨ `Enhancement` - Channel Patching - Adds support for uni-directional patches<br>
+
 ### v2.0.30 - 1/1/26
 ✨ `Enhancement` - Restrict allowed special characters for usernames based off TAK Server testing<br>
 🐛 `Bug Fix` - Fixes issue with adm users<br>
