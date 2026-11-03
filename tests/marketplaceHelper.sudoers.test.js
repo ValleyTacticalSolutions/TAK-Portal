@@ -32,6 +32,9 @@ assert.match(source, /chmod 0644/);
 assert.match(source, /Caddy rejected the file/);
 assert.match(source, /permission denied|EACCES/);
 assert.match(source, /inconclusive.*continuing/i);
+assert.match(source, /\[ "\$_caddy_mode" = "as_root" \] && caddy_validate_permission_inconclusive/);
+assert.match(source, /\/var\/log\/caddy\|\/var\/lib\/caddy/);
+assert.doesNotMatch(source, /sed '\/\^\[\[:space:\]\]\*\$\/d'/);
 assert.match(source, /as_user/);
 assert.match(source, /run_caddy_validate/);
 assert.match(source, /\bcleanup-sudoers\b/);
@@ -83,5 +86,124 @@ assert.match(badCaddyPath.stderr || "", /refusing caddyfile path|invalid caddyfi
 const unknown = runHelper(["rm -rf /"]);
 assert.notStrictEqual(unknown.status, 0);
 assert.match(unknown.stderr || "", /unknown verb|enable marketplace/i);
+
+const MARK_BEGIN = "# BEGIN caddy_validate_permission_inconclusive";
+const MARK_END = "# END caddy_validate_permission_inconclusive";
+function extractMarked(text) {
+  const start = text.indexOf(MARK_BEGIN);
+  const end = text.indexOf(MARK_END);
+  assert.ok(start !== -1 && end > start, "caddy validate marker missing");
+  return text.slice(start, end + MARK_END.length);
+}
+
+const caddy = require("../services/cloudtakMarketplace.caddy");
+const applyHost = caddy.applyScript({
+  b64: Buffer.from("{\n}\n", "utf8").toString("base64"),
+  hostPath: "/etc/caddy/Caddyfile",
+  via: "systemd",
+  validateCmd: "caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile",
+  reloadCmd: "systemctl reload caddy",
+});
+const helperFn = extractMarked(source).replace(/\r\n/g, "\n");
+const applyFn = extractMarked(applyHost).replace(/\r\n/g, "\n");
+assert.strictEqual(applyFn, helperFn, "deploy script and marketplace-helper must share the validate filter");
+
+const samples = [
+  {
+    name: "info and warn plus log permission denied",
+    expect: "inconclusive",
+    sample: [
+      '{"level":"info","ts":1,"msg":"using config from file","file":"/tmp/Caddyfile"}',
+      '{"level":"info","ts":1,"msg":"adapted config to JSON","adapter":"caddyfile"}',
+      '{"level":"warn","ts":1,"msg":"Caddyfile input is not formatted; run caddy fmt --overwrite to fix inconsistencies","adapter":"caddyfile","file":"/tmp/Caddyfile","line":2}',
+      'Error: loading initial config: loading new config: setting up custom log log0: opening log writer using &logging.FileWriter{Filename:"/var/log/caddy/takportal-access.log"}: open /var/log/caddy/takportal-access.log: permission denied',
+    ].join("\n"),
+  },
+  {
+    name: "json error on the caddy data dir",
+    expect: "inconclusive",
+    sample: [
+      '{"level":"info","msg":"using config from file"}',
+      '{"level":"warn","msg":"Caddyfile input is not formatted"}',
+      '{"level":"error","msg":"open /var/lib/caddy/.local/share/caddy/instance.uuid: permission denied"}',
+    ].join("\n"),
+  },
+  {
+    name: "fatal permission denied on the caddy data dir",
+    expect: "inconclusive",
+    sample: '{"level":"fatal","msg":"open /var/lib/caddy/locks: permission denied"}',
+  },
+  {
+    name: "EACCES on a caddy log",
+    expect: "inconclusive",
+    sample: "Error: open /var/log/caddy/takportal-access.log: EACCES",
+  },
+  {
+    name: "syntax error with info lines",
+    expect: "reject",
+    sample: [
+      '{"level":"info","msg":"using config from file","file":"/tmp/Caddyfile"}',
+      "Error: adapting config using caddyfile: parsing caddyfile tokens for 'respnd': unrecognized directive: respnd",
+    ].join("\n"),
+  },
+  {
+    name: "permission denied on a log plus a real config error",
+    expect: "reject",
+    sample: [
+      '{"level":"error","msg":"open /var/log/caddy/takportal-access.log: permission denied"}',
+      '{"level":"error","msg":"unrecognized directive: respnd"}',
+    ].join("\n"),
+  },
+  {
+    name: "permission denied importing a root-only file",
+    expect: "reject",
+    sample: [
+      '{"level":"info","msg":"using config from file"}',
+      "Error: adapting config using caddyfile: parsing caddyfile tokens for 'import': open /etc/shadow: permission denied",
+    ].join("\n"),
+  },
+  {
+    name: "permission denied with no log or data path",
+    expect: "reject",
+    sample: "Error: open /etc/caddy/secrets: permission denied",
+  },
+  {
+    name: "info and warn only",
+    expect: "reject",
+    sample: [
+      '{"level":"info","msg":"using config from file"}',
+      '{"level":"warn","msg":"Caddyfile input is not formatted; permission denied /var/log/caddy/takportal-access.log"}',
+    ].join("\n"),
+  },
+  {
+    name: "empty output",
+    expect: "reject",
+    sample: "",
+  },
+];
+
+function classify(sample) {
+  const script = [
+    "set -euo pipefail",
+    helperFn,
+    "sample=$(cat)",
+    'if caddy_validate_permission_inconclusive "$sample"; then',
+    "  echo inconclusive",
+    "else",
+    "  echo reject",
+    "fi",
+    "",
+  ].join("\n");
+  return spawnSync(bash, ["-c", script], {
+    encoding: "utf8",
+    input: sample,
+  });
+}
+
+for (const item of samples) {
+  const result = classify(item.sample);
+  assert.strictEqual(result.status, 0, item.name + " " + (result.stderr || result.stdout));
+  assert.strictEqual((result.stdout || "").trim(), item.expect, item.name);
+}
 
 console.log("marketplaceHelper.sudoers tests passed");

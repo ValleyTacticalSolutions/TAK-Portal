@@ -2220,6 +2220,55 @@ function formatRemoteLogLine(line) {
   return s;
 }
 
+/**
+ * Plugin install.sh support line. Keep the bash preflight in installRemoteScript
+ * matched to these two shapes (Replay: "v13.109.3 through v13.113.0" and the
+ * "supports CloudTAK vX - vY" error). Empty when the plugin states no range.
+ */
+function parsePluginCloudtakRange(text) {
+  const s = String(text || "");
+  const patterns = [
+    /supported CloudTAK:\s*v?(\d+(?:\.\d+)*)\s+through\s+v?(\d+(?:\.\d+)*)/i,
+    /supports CloudTAK\s+v?(\d+(?:\.\d+)*)\s*-\s*v?(\d+(?:\.\d+)*)/i,
+  ];
+  for (const re of patterns) {
+    const m = s.match(re);
+    if (m) return { min: m[1], max: m[2] };
+  }
+  return null;
+}
+
+function compareCloudtakVersions(a, b) {
+  const parts = (v) =>
+    String(v || "")
+      .trim()
+      .replace(/^v/i, "")
+      .split(/[-+]/)[0]
+      .split(".")
+      .map((p) => {
+        const n = parseInt(String(p).replace(/[^0-9].*$/, ""), 10);
+        return Number.isFinite(n) ? n : 0;
+      });
+  const aa = parts(a);
+  const bb = parts(b);
+  const n = Math.max(aa.length, bb.length);
+  for (let i = 0; i < n; i += 1) {
+    const da = aa[i] || 0;
+    const db = bb[i] || 0;
+    if (da < db) return -1;
+    if (da > db) return 1;
+  }
+  return 0;
+}
+
+/** "above" | "below" when version is outside range; "" when in range or unknown. */
+function cloudtakRangeMismatch(version, range) {
+  if (!version || !range || !range.min || !range.max) return "";
+  if (compareCloudtakVersions(version, range.min) < 0) return "below";
+  if (compareCloudtakVersions(version, range.max) > 0) return "above";
+  return "";
+}
+
 function summarizeCommandError(message) {
   const lines = String(message || "")
     .split(/\r?\n/)
@@ -2228,6 +2277,20 @@ function summarizeCommandError(message) {
   if (!lines.length) return "SSH command failed";
   const clip = (s) => (s.length > 220 ? s.slice(0, 217) + "..." : s);
   const joined = lines.join("\n");
+  const compatLine = [...lines].reverse().find((line) =>
+    /patch does not apply|supports CloudTAK|outside the plugin's supported range|required plugin patch does not apply|this checkout is v/i.test(
+      line
+    )
+  );
+  if (
+    compatLine &&
+    (/cannot write|ask your admin to enable marketplace installs|Direct write failed/i.test(joined) ||
+      /supports CloudTAK|this checkout is v|required plugin patch does not apply|outside the plugin's supported range/i.test(
+        compatLine
+      ))
+  ) {
+    return clip(compatLine.replace(/^ERROR:\s*/i, ""));
+  }
   if (/plugin repository not found/i.test(joined)) {
     const hit = lines.find((line) => /plugin repository not found/i.test(line));
     if (hit) return clip(hit.replace(/^ERROR:\s*/i, ""));
@@ -3784,8 +3847,126 @@ case "$TARGET" in
   */app/plugins/$DEST|*/api/web/plugins/$DEST) ;;
   *) echo "Refusing dest $TARGET" >&2; exit 1 ;;
 esac
-echo "Clearing previous plugin files at $TARGET"
-run_as_writer "rm -rf $(printf '%q' "$TARGET")"
+# install.sh plugins (Replay) delete and copy only after their own patch check.
+# Do not rm the installed tree first: a version rejection must leave it in place.
+
+# Numeric CloudTAK compare. Prints -1, 0, or 1. Patterns match parsePluginCloudtakRange.
+ct_ver_cmp() {
+  local a="$1" b="$2"
+  a="\${a#v}"; a="\${a#V}"; b="\${b#v}"; b="\${b#V}"
+  a="\${a%%-*}"; b="\${b%%-*}"
+  a="\${a%%+*}"; b="\${b%%+*}"
+  local IFS=.
+  local -a aa bb
+  read -r -a aa <<< "$a"
+  read -r -a bb <<< "$b"
+  local i na nb
+  for i in 0 1 2 3 4 5; do
+    na="\${aa[$i]:-0}"
+    nb="\${bb[$i]:-0}"
+    na="\${na%%[^0-9]*}"
+    nb="\${nb%%[^0-9]*}"
+    na="\${na:-0}"
+    nb="\${nb:-0}"
+    if [ "$((10#$na))" -lt "$((10#$nb))" ]; then echo -1; return 0; fi
+    if [ "$((10#$na))" -gt "$((10#$nb))" ]; then echo 1; return 0; fi
+  done
+  echo 0
+}
+
+plugin_cloudtak_range() {
+  local sh="$1" line vers
+  [ -f "$sh" ] || return 1
+  line=$(grep -E -m1 -i 'supported CloudTAK:[[:space:]]*v?[0-9]+([.][0-9]+)*[[:space:]]+through[[:space:]]+v?[0-9]+([.][0-9]+)*|supports CloudTAK[[:space:]]+v?[0-9]+([.][0-9]+)*[[:space:]]*-[[:space:]]*v?[0-9]+([.][0-9]+)*' "$sh" || true)
+  [ -n "$line" ] || return 1
+  vers=$(printf '%s\n' "$line" | grep -oE 'v?[0-9]+([.][0-9]+)*' | head -n 2 | sed 's/^v//')
+  [ "$(printf '%s\n' "$vers" | wc -l | tr -d '[:space:]')" -ge 2 ] || return 1
+  printf '%s\n' "$vers"
+}
+
+cloudtak_checkout_version() {
+  local f v found=""
+  for f in "$CT/package.json" "$CT/app/package.json" "$CT/api/package.json"; do
+    [ -f "$f" ] || continue
+    v=$(sed -n '1,80s/.*"version"[[:space:]]*:[[:space:]]*"\\([0-9][0-9A-Za-z.+-]*\\)".*/\\1/p' "$f" | head -n 1)
+    [ -n "$v" ] || continue
+    if [ -z "$found" ]; then
+      found="$v"
+    elif [ "$found" != "$v" ]; then
+      echo "WARNING: CloudTAK version files disagree ($found vs $v); not blocking install on the declared range" >&2
+      return 1
+    fi
+  done
+  [ -n "$found" ] || return 1
+  printf '%s\n' "$found"
+}
+
+refuse_if_cloudtak_outside_plugin_range() {
+  local sh="$1" range_text min max host cmp_min cmp_max
+  range_text=$(plugin_cloudtak_range "$sh") || return 0
+  min=$(printf '%s\n' "$range_text" | sed -n '1p')
+  max=$(printf '%s\n' "$range_text" | sed -n '2p')
+  [ -n "$min" ] && [ -n "$max" ] || return 0
+  host=$(cloudtak_checkout_version) || return 0
+  cmp_min=$(ct_ver_cmp "$host" "$min")
+  cmp_max=$(ct_ver_cmp "$host" "$max")
+  if [ "$cmp_min" -lt 0 ] || [ "$cmp_max" -gt 0 ]; then
+    echo "ERROR: $ID supports CloudTAK v$min - v$max; this checkout is v$host." >&2
+    echo "Nothing was changed. The plugin patches were not applied." >&2
+    echo "Install a plugin release that supports CloudTAK v$host, or use a CloudTAK version from v$min through v$max." >&2
+    exit 1
+  fi
+  echo "CloudTAK v$host is inside the plugin's declared range v$min - v$max"
+}
+
+# Permission denied elevates once. A patch or version rejection is not a write
+# failure: do not retry sudo/docker and do not ask to enable marketplace installs.
+run_plugin_install() {
+  local cmd="$1"
+  local log="$REPO_DIR/.marketplace-install.log"
+  local owner kind
+  owner=$(cloudtak_owner)
+  : > "$log" 2>/dev/null || true
+  classify_install_log() {
+    [ -f "$log" ] || { echo other; return 0; }
+    if grep -qiE 'patch does not apply|Nothing was changed|supports CloudTAK|likely diverged|require CloudTAK' "$log"; then
+      echo compat
+      return 0
+    fi
+    if grep -qiE 'Permission denied|Operation not permitted' "$log"; then
+      echo perm
+      return 0
+    fi
+    echo other
+  }
+  report_compat() {
+    echo "ERROR: required plugin patch does not apply, or this CloudTAK checkout is outside the plugin's supported range. Nothing was changed. This is not a marketplace permissions problem." >&2
+    grep -E 'ERROR:|Nothing was changed|supports CloudTAK|likely diverged' "$log" >&2 || true
+    exit 1
+  }
+  if ! can_write_plugins; then
+    echo "Plugin paths not fully writable by $(id -un) (CloudTAK owner: $owner); elevating"
+    if elevate_run "$cmd"; then return 0; fi
+    kind=$(classify_install_log)
+    if [ "$kind" = compat ]; then report_compat; fi
+    echo "ERROR: cannot write $PLUGIN_ROOT as $(id -un), even with \${CTAK_PRIV:-sudo}/docker elevation. Ask your admin to enable marketplace installs (checkout owner: $owner)." >&2
+    exit 1
+  fi
+  if bash -lc "$cmd"; then return 0; fi
+  kind=$(classify_install_log)
+  if [ "$kind" = compat ]; then report_compat; fi
+  if [ "$kind" = perm ]; then
+    echo "Direct write failed (permission denied); retrying with elevation"
+    if elevate_run "$cmd"; then return 0; fi
+    kind=$(classify_install_log)
+    if [ "$kind" = compat ]; then report_compat; fi
+    echo "ERROR: cannot write $PLUGIN_ROOT as $(id -un), even with \${CTAK_PRIV:-sudo}/docker elevation. Ask your admin to enable marketplace installs (checkout owner: $owner)." >&2
+    exit 1
+  fi
+  echo "ERROR: install.sh failed. Output did not show a permissions error, so sudo and docker were not used. This is not a marketplace permissions problem." >&2
+  grep -E 'ERROR:' "$log" >&2 || true
+  exit 1
+}
 
 # Generic layouts, in order:
 # 1) repo install.sh (pass --no-build / --no-pull only if that script documents them)
@@ -3793,13 +3974,14 @@ run_as_writer "rm -rf $(printf '%q' "$TARGET")"
 # 3) copy web files from catalog source, plugin/, or repo root; copy server/*.ts routes if present
 ${pluginPatchRunnerBash()}
 if [ -f "$REPO_DIR/install.sh" ]; then
+  refuse_if_cloudtak_outside_plugin_range "$REPO_DIR/install.sh"
   flags=""
   if grep -q -- '--no-build' "$REPO_DIR/install.sh"; then flags="$flags --no-build"; fi
   if grep -q -- '--no-pull' "$REPO_DIR/install.sh"; then flags="$flags --no-pull"; fi
   echo "Found install.sh; running: bash ./install.sh$flags $CT"
   chmod +x "$REPO_DIR/install.sh" 2>/dev/null || true
-  # Exit with install.sh status so run_as_writer elevates on Permission denied
-  # (a prior always-exit-0 wrapper left half-copied Replay installs as takwerx).
+  # Exit with install.sh status. Elevation retries only on Permission denied.
+  # A prior always-exit-0 wrapper left half-copied Replay installs as takwerx.
   cat > "$REPO_DIR/.ctak-run-install.sh" <<'EOS'
 #!/bin/bash
 set +e
@@ -3807,25 +3989,30 @@ repo="$1"
 ct="$2"
 shift 2
 cd "$repo" || exit 1
-bash ./install.sh "$@" "$ct"
+bash ./install.sh "$@" "$ct" >"$repo/.marketplace-install.log" 2>&1
 ec=$?
+cat "$repo/.marketplace-install.log"
 echo "$ec" > "$repo/.marketplace-install-status"
 exit "$ec"
 EOS
   chmod a+rX "$REPO_DIR/.ctak-run-install.sh" 2>/dev/null || true
-  run_as_writer "bash $(printf '%q' "$REPO_DIR/.ctak-run-install.sh") $(printf '%q' "$REPO_DIR") $(printf '%q' "$CT")$flags"
+  run_plugin_install "bash $(printf '%q' "$REPO_DIR/.ctak-run-install.sh") $(printf '%q' "$REPO_DIR") $(printf '%q' "$CT")$flags"
   install_ec=1
   if [ -f "$REPO_DIR/.marketplace-install-status" ]; then
     install_ec=$(tr -cd '0-9' < "$REPO_DIR/.marketplace-install-status" || echo 1)
   fi
   rm -f "$REPO_DIR/.ctak-run-install.sh" "$REPO_DIR/.marketplace-install-status" || true
+  if [ "$install_ec" != 0 ] && [ -f "$REPO_DIR/.marketplace-install.log" ] && grep -qiE 'patch does not apply|Nothing was changed|supports CloudTAK' "$REPO_DIR/.marketplace-install.log"; then
+    echo "ERROR: required plugin patch does not apply. The drifted patch applicator was not run, so core CloudTAK files were left unchanged." >&2
+    exit 1
+  fi
   if [ "$install_ec" != 0 ] && [ ! -d "$TARGET" ] && [ ! -e "$CT/api/web/plugins/$DEST" ]; then
     echo "ERROR: install.sh failed before plugin files were copied" >&2
     exit 1
   fi
-  # Only fall back to drifted patch apply when install.sh itself failed (e.g. git
-  # apply --check). Successful install.sh already applied patches; re-running the
-  # drifted applicator can fail on test fixtures and mark a good install as failed.
+  # Drifted apply is only for a copy that landed while git apply --check failed
+  # on offsets. A clean "patch does not apply / nothing was changed" rejection
+  # exits above and must not partially rewrite core files such as atlas-database.ts.
   if [ "$install_ec" != 0 ]; then
     if [ -d "$TARGET" ] && find "$REPO_DIR" -name '*.patch' -not -path '*/node_modules/*' -print -quit | grep -q .; then
       echo "install.sh exited $install_ec; applying patches that did not match this CloudTAK checkout"
@@ -3836,9 +4023,13 @@ EOS
     fi
   fi
 elif [ -n "$INSTALL" ]; then
+  echo "Clearing previous plugin files at $TARGET"
+  run_as_writer "rm -rf $(printf '%q' "$TARGET")"
   echo "Running installer: cd $REPO_DIR && bash $INSTALL $CT"
   run_as_writer "cd $(printf '%q' "$REPO_DIR") && bash $INSTALL $(printf '%q' "$CT")"
 else
+  echo "Clearing previous plugin files at $TARGET"
+  run_as_writer "rm -rf $(printf '%q' "$TARGET")"
   WEBSRC="$REPO_DIR"
   if [ "$SRC" != "." ] && [ -d "$REPO_DIR/$SRC" ]; then
     WEBSRC="$REPO_DIR/$SRC"
@@ -4922,6 +5113,9 @@ module.exports = {
   deployStaged,
   selectLogJobs,
   summarizeCommandError,
+  parsePluginCloudtakRange,
+  compareCloudtakVersions,
+  cloudtakRangeMismatch,
   formatRemoteLogLine,
   listJobs,
   clearIdleJobs,

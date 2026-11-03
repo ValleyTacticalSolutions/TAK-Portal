@@ -114,12 +114,82 @@ assert.match(marketplace.uninstallRemoteScript("/root/CloudTAK", "replay", [], "
 const replayInstall = marketplace.installRemoteScript("/root/CloudTAK", replay);
 assert.match(replayInstall, /apply_plugin_patches/);
 assert.match(replayInstall, /marketplace-install-status/);
-assert.match(replayInstall, /exit "\$ec"/, "install.sh wrapper must exit with install status so elevation retries");
+assert.match(replayInstall, /exit "\$ec"/, "install.sh wrapper must exit with install status");
 assert.match(replayInstall, /api\/stateless\/lib/, "reclaim/can_write cover Replay server lib paths");
 assert.match(replayInstall, /install_ec" != 0[\s\S]*apply_plugin_patches/, "drifted patches only after install.sh failure");
+{
+  const installBranch = replayInstall.slice(
+    replayInstall.indexOf('if [ -f "$REPO_DIR/install.sh" ]'),
+    replayInstall.indexOf('elif [ -n "$INSTALL" ]')
+  );
+  assert.match(installBranch, /refuse_if_cloudtak_outside_plugin_range/);
+  assert.match(installBranch, /run_plugin_install/);
+  assert.doesNotMatch(installBranch, /run_as_writer/);
+  assert.doesNotMatch(installBranch, /Clearing previous plugin files/);
+  assert.match(
+    installBranch,
+    /patch does not apply\|Nothing was changed[\s\S]*drifted patch applicator was not run[\s\S]*apply_plugin_patches/
+  );
+  const replayHeader = "# Supported CloudTAK: v13.109.3 through v13.113.0 (every release in that range";
+  const replayErr = "Nothing was changed. This plugin supports CloudTAK v13.109.3 - v13.113.0;";
+  assert.deepStrictEqual(marketplace.parsePluginCloudtakRange(replayHeader), { min: "13.109.3", max: "13.113.0" });
+  assert.deepStrictEqual(marketplace.parsePluginCloudtakRange(replayErr), { min: "13.109.3", max: "13.113.0" });
+  assert.strictEqual(marketplace.parsePluginCloudtakRange("no range here"), null);
+  const replayRange = { min: "13.109.3", max: "13.113.0" };
+  assert.strictEqual(marketplace.cloudtakRangeMismatch("13.114.2", replayRange), "above");
+  assert.strictEqual(marketplace.cloudtakRangeMismatch("13.113.0", replayRange), "");
+  assert.strictEqual(marketplace.cloudtakRangeMismatch("13.109.3", replayRange), "");
+  assert.strictEqual(marketplace.cloudtakRangeMismatch("13.109.2", replayRange), "below");
+  assert.strictEqual(marketplace.cloudtakRangeMismatch("13.9.0", replayRange), "below");
+  assert.strictEqual(marketplace.compareCloudtakVersions("13.114.2", "13.113.0"), 1);
+  assert.match(
+    marketplace.summarizeCommandError(
+      [
+        "ERROR: patch does not apply cleanly: app/src/workers/atlas-database.ts",
+        "Nothing was changed. This plugin supports CloudTAK v13.109.3 - v13.113.0;",
+        "ERROR: cannot write /home/takwerx/CloudTAK/app/plugins as takwerx, even with sudo/docker elevation. Ask your admin to enable marketplace installs",
+      ].join("\n")
+    ),
+    /supports CloudTAK v13\.109\.3 - v13\.113\.0/
+  );
+  assert.doesNotMatch(
+    marketplace.summarizeCommandError(
+      "ERROR: replay supports CloudTAK v13.109.3 - v13.113.0; this checkout is v13.114.2."
+    ),
+    /ask your admin/i
+  );
+}
 assert.match(replayInstall, /strip_marketplace_plugin_tests/, "Replay api/test copies are stripped before image rebuild");
 assert.ok(pluginPatch.isOptionalPatchTarget("api/test/fixtures/get_schema.json"));
 assert.ok(!pluginPatch.isOptionalPatchTarget("app/src/workers/atlas-database.ts"));
+{
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "ctak-partial-patch-repo-"));
+  const ct = fs.mkdtempSync(path.join(os.tmpdir(), "ctak-partial-patch-ct-"));
+  const rel = path.join("app", "src", "workers", "atlas-database.ts");
+  fs.mkdirSync(path.dirname(path.join(ct, rel)), { recursive: true });
+  fs.mkdirSync(path.join(repo, "core-integration", "app", "src", "workers"), { recursive: true });
+  const original = "alpha\nbeta\ngamma\n";
+  fs.writeFileSync(path.join(ct, rel), original);
+  const patch = [
+    "--- a/app/src/workers/atlas-database.ts",
+    "+++ b/app/src/workers/atlas-database.ts",
+    "@@",
+    " alpha",
+    "-beta",
+    "+BETA",
+    " gamma",
+    "@@",
+    " missing-context",
+    "-nope",
+    "+NOPE",
+    "",
+  ].join("\n");
+  fs.writeFileSync(path.join(repo, "core-integration", rel + ".patch"), patch);
+  const partial = pluginPatch.applyRepoPatches(repo, ct);
+  assert.strictEqual(partial.ok, false);
+  assert.ok(partial.skipped.some((s) => /atlas-database/.test(s)));
+  assert.strictEqual(fs.readFileSync(path.join(ct, rel), "utf8"), original, "failed required hunk must not write the file");
+}
 const helloworld = normalized.plugins.find((p) => p.id === "helloworld");
 const udashHidden = normalized.plugins.find((p) => p.id === "udash");
 assert.strictEqual(helloworld.hidden, true, "helloworld hidden while upstream repo 404s");
@@ -641,8 +711,12 @@ assert.match(applyHost, /marketplace-helper apply-caddyfile/);
 assert.match(applyHost, /\/etc\/caddy\/Caddyfile/);
 assert.match(applyHost, /need write access or marketplace-helper|Install\/grant marketplace-helper/i);
 assert.match(applyHost, /caddy_validate_ok/);
+assert.match(applyHost, /caddy_validate_permission_inconclusive/);
+assert.match(applyHost, /\/var\/log\/caddy/);
+assert.match(applyHost, /\/var\/lib\/caddy/);
 assert.match(applyHost, /permission denied|EACCES/i);
 assert.match(applyHost, /inconclusive.*continuing/i);
+assert.doesNotMatch(applyHost, /sed '\/\^\[\[:space:\]\]\*\$\/d'/);
 const probed = caddy.parseProbe("CADDY_NONE\n");
 assert.strictEqual(probed.available, false);
 

@@ -580,17 +580,35 @@ run_cmd() {
   if "\$PRIV" -n bash -lc "\$cmd" 2>/dev/null; then return 0; fi
   return 1
 }
+# BEGIN caddy_validate_permission_inconclusive
+# Return 0 when every error/fatal line is permission-denied on a Caddy log or
+# data path. Info/warn lines are ignored. Any other error returns 1 (#76, #81).
+caddy_validate_permission_inconclusive() {
+  local out="\${1-}"
+  local filtered
+  filtered=\$(printf '%s\\n' "\$out" | grep -Ei '"level"[[:space:]]*:[[:space:]]*"(error|fatal)"|^[[:space:]]*error' || true)
+  [ -n "\$filtered" ] || return 1
+  if printf '%s\\n' "\$filtered" | grep -Eiv 'permission denied|EACCES|operation not permitted' >/dev/null; then
+    return 1
+  fi
+  if printf '%s\\n' "\$filtered" | grep -Eiv '/var/log/caddy|/var/lib/caddy' >/dev/null; then
+    return 1
+  fi
+  return 0
+}
+# END caddy_validate_permission_inconclusive
 # caddy validate provisions config and may open log/data paths owned by the caddy user.
-# When every error line is permission-denied on a path, treat validate as inconclusive and continue.
+# Info/warn lines ("using config from file", "adapted config to JSON", "Caddyfile
+# input is not formatted") are not errors. Continue only when every error line is
+# permission-denied on /var/log/caddy or /var/lib/caddy. Syntax errors and
+# permission errors on other paths (import /etc/shadow) still reject.
 caddy_validate_ok() {
   local cmd="\$1" out rc=0
   [ -n "\$cmd" ] || return 0
   out=\$(bash -lc "\$cmd" 2>&1) || rc=\$?
   if [ "\$rc" -eq 0 ]; then return 0; fi
   if "\$PRIV" -n bash -lc "\$cmd" >/dev/null 2>&1; then return 0; fi
-  local filtered
-  filtered=\$(printf '%s\\n' "\$out" | sed '/^[[:space:]]*\$/d')
-  if [ -n "\$filtered" ] && ! printf '%s\\n' "\$filtered" | grep -Eiv 'permission denied|EACCES|operation not permitted' >/dev/null; then
+  if caddy_validate_permission_inconclusive "\$out"; then
     echo "Caddy validate inconclusive (permission denied on log/data paths); continuing." >&2
     return 0
   fi

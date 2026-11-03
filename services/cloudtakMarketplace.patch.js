@@ -392,15 +392,24 @@ function applyRepoPatches(repoDir, ctRoot) {
       }
       const source = fs.readFileSync(target, "utf8");
       const result = applyPatchToText(source, fs.readFileSync(patchPath, "utf8"));
+      // All-or-nothing per file. A later hunk can fail because upstream changed
+      // behavior (Replay atlas-database.ts vs FeatureOutbox). Writing the hunks
+      // that still matched would edit core delete/archive code the plugin refused.
+      if (!result.ok) {
+        if (result.applied && !optional) {
+          console.error(`ERROR: left ${file.target} unchanged; a required hunk did not apply`);
+        }
+        for (const reason of result.skipped) {
+          const msg = `${file.target} ${reason}`;
+          if (optional) optionalSkipped.push(msg);
+          else skipped.push(msg);
+        }
+        continue;
+      }
       if (result.applied) {
         fs.writeFileSync(target, result.text);
         applied += result.applied;
         console.log(`Applied ${result.applied} drifted hunk(s) in ${file.target}`);
-      }
-      for (const reason of result.skipped) {
-        const msg = `${file.target} ${reason}`;
-        if (optional) optionalSkipped.push(msg);
-        else skipped.push(msg);
       }
     }
   }
