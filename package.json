@@ -47,7 +47,7 @@
     "jimp": "0.22.12",
     "maplibre-gl": "6.16.0",
     "marked": "^18.0.9",
-    "milsymbol": "^3.0.4",
+    "milsymbol": "^3.0.5",
     "multer": "^2.5.0",
     "node-forge": "^1.4.2",
     "nodemailer": "^10.1.4",
