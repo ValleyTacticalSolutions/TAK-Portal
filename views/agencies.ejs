@@ -2564,6 +2564,31 @@ async function finishAgencyAttributesEditing() {
     }
   }
 
+  // Field-specific saves do not hit PUT /:index (which used to ensure this).
+  // Always ensure the Agency Admin Authentik group exists for the edited agency.
+  if (editingAgencyId) {
+    try {
+      if (!hasWork && editAgencySaveBtn) editAgencySaveBtn.disabled = true;
+      if (!hasWork) setEditMsg("Verifying agency admin group…", true);
+      const res = await fetch(
+        `/api/agencies/${encodeURIComponent(editingAgencyId)}/ensure-admin-group`,
+        { method: "POST", headers: { Accept: "application/json" } }
+      );
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof out.error === "string"
+            ? out.error
+            : out.error?.detail || out.error || "Failed to ensure agency admin group"
+        );
+      }
+      if (out.created) summaries.push("Agency admin group created");
+      else summaries.push("Agency admin group verified");
+    } catch (e) {
+      errors.push(e.message || "Failed to ensure agency admin group");
+    }
+  }
+
   if (editAgencySaveBtn) editAgencySaveBtn.disabled = false;
   if (errors.length) {
     setEditMsg(errors.join(" | "), false);

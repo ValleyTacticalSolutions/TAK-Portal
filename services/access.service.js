@@ -1150,6 +1150,14 @@ async function syncPortalRoleGroups(userId, opts = {}) {
 
   const directoryRepo = require("./directoryRepo.service");
   const agenciesStore = require("./agencies.service");
+  const desiredRole = String(opts.role || "").trim().toLowerCase();
+  if (desiredRole === "agency_admin") {
+    const agencyAdminGroupSvc = require("./agencyAdminGroup.service");
+    await agencyAdminGroupSvc.ensureAgencyAdminGroupsForSuffixes(
+      opts.managedAgencySuffixes
+    );
+  }
+
   const names = [];
   const agencies = agenciesStore.load() || [];
   for (const a of agencies) {
@@ -1161,7 +1169,13 @@ async function syncPortalRoleGroups(userId, opts = {}) {
   for (const n of raw.split(/[;,]/)) {
     if (n.trim()) names.push(n.trim());
   }
-  const allGroups = opts.allGroups || (await directoryRepo.getGroupsByNames(names));
+  // Re-fetch after ensure so newly created AgencyAdmin groups are visible.
+  const fetchedGroups = await directoryRepo.getGroupsByNames(names);
+  const byPk = new Map();
+  for (const g of [...(Array.isArray(opts.allGroups) ? opts.allGroups : []), ...fetchedGroups]) {
+    if (g && g.pk != null) byPk.set(String(g.pk), g);
+  }
+  const allGroups = Array.from(byPk.values());
   const currentGroupIds = Array.isArray(opts.currentGroupIds)
     ? opts.currentGroupIds
     : Array.isArray(target.groups)

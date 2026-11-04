@@ -71,6 +71,7 @@ const TEST_FILES = [
   "portalHidden.test.js",
   "hiddenPrefixMigration.test.js",
   "hiddenPrefixLike.test.js",
+  "agencyAdminGroupEnsure.test.js",
 ];
 
 const testsDir = path.join(__dirname, "..", "tests");

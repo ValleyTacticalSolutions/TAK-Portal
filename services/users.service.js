@@ -1445,9 +1445,36 @@ async function createUser(
       if (!suffixes.includes(String(agency.suffix || "").trim().toLowerCase())) {
         suffixes = [...suffixes, String(agency.suffix || "").trim().toLowerCase()];
       }
-      const adminPkSet = accessSvc.resolveAgencyAdminGroupIdsForSuffixes(suffixes, allGroupsLocal);
+      let adminPkSet = accessSvc.resolveAgencyAdminGroupIdsForSuffixes(suffixes, allGroupsLocal);
       for (const g of allGroupsLocal) {
         if (adminPkSet.has(String(g.pk))) extra.push(g);
+      }
+      if (!extra.length) {
+        // Agencies edit Save used to skip ensure; create the missing admin group(s) now.
+        const agencyAdminGroupSvc = require("./agencyAdminGroup.service");
+        await agencyAdminGroupSvc.ensureAgencyAdminGroupsForSuffixes(suffixes);
+        const ensuredNames = [];
+        for (const sfx of suffixes) {
+          const ag = agenciesStore.load().find(
+            (a) =>
+              String(a.suffix || "").trim().toLowerCase() ===
+              String(sfx).trim().toLowerCase()
+          );
+          if (!ag) continue;
+          for (const n of accessSvc.getAllAgencyAdminGroupNames(ag) || []) {
+            if (n) ensuredNames.push(n);
+          }
+        }
+        const ensuredGroups = await directoryRepo.getGroupsByNames(ensuredNames);
+        for (const g of ensuredGroups) {
+          allGroupsLocal.push(g);
+          byPk.set(String(g.pk), g);
+          byNameLower.set(String(g.name || "").trim().toLowerCase(), g);
+        }
+        adminPkSet = accessSvc.resolveAgencyAdminGroupIdsForSuffixes(suffixes, allGroupsLocal);
+        for (const g of allGroupsLocal) {
+          if (adminPkSet.has(String(g.pk))) extra.push(g);
+        }
       }
       if (!extra.length) {
         throw new Error("Cannot assign Agency Admin: agency admin group was not found in Authentik.");

@@ -17,56 +17,15 @@ const agencyDeleteSvc = require("../services/agencyDelete.service");
 const userRequestsSvc = require("../services/userRequests.service");
 const autoCreateGroupsSvc = require("../services/autoCreateGroups.service");
 const autoCreateDataSyncSvc = require("../services/autoCreateDataSync.service");
-const { markHiddenAttributes } = require("../services/portalHidden.util");
+const agencyAdminGroupSvc = require("../services/agencyAdminGroup.service");
 const upload = multer({ storage: multer.memoryStorage() });
 
 function getAgencyAdminGroupName(agency) {
-  const abbr = store.normalizeGroupPrefix(agency?.groupPrefix);
-  const countyAbbrev = String(agency?.countyAbbrev || "").trim().toUpperCase();
-  if (!abbr) return null;
-  if (countyAbbrev) {
-    return `authentik-${countyAbbrev}-${abbr}-AgencyAdmin`;
-  }
-  // Legacy pattern (no county abbreviation stored yet)
-  return `authentik-${abbr}-AgencyAdmin`;
+  return agencyAdminGroupSvc.getAgencyAdminGroupName(agency);
 }
 
 async function ensureAgencyAdminGroupExists(agency) {
-  const name = getAgencyAdminGroupName(agency);
-  if (!name) throw new Error("Agency abbreviation / short name is required");
-
-  // Create (idempotent-ish): if the group already exists, Authentik will reject.
-  // We treat "already exists" as success.
-  // Stamp tak_portal_hidden so AgencyAdmin stays hidden after prefix migration.
-  const attributes = markHiddenAttributes({
-    created_at: new Date().toISOString(),
-    created_type: "Agency",
-    created_type_detail: String(agency?.name || agency?.groupPrefix || "").trim() || null,
-    description: `Agency admin group for ${String(agency?.name || agency?.groupPrefix || "").trim()}`,
-  });
-
-  try {
-    await groupsService.createGroup(name, { attributes });
-    return { created: true, name };
-  } catch (err) {
-    const msg = String(err?.response?.data?.detail || err?.response?.data || err?.message || "");
-    // Common Authentik duplicate patterns include "unique" / "already exists".
-    const lower = msg.toLowerCase();
-    if (lower.includes("already") || lower.includes("exists") || lower.includes("unique")) {
-      try {
-        const existing = await getGroupByNameUnfiltered(name);
-        if (existing && store.isAgencyOwnedGroup(existing, agency)) {
-          return { created: false, name };
-        }
-      } catch (_) {
-        // fall through
-      }
-      throw new Error(
-        `Authentik group "${name}" already exists and is not owned by this agency`
-      );
-    }
-    throw err;
-  }
+  return agencyAdminGroupSvc.ensureAgencyAdminGroupExists(agency);
 }
 
 // Hidden prefixes (often including "authentik-") apply to paged /api/groups search.
@@ -435,6 +394,34 @@ router.get("/:index/admin-group", async (req, res) => {
     return res.json({ group: g });
   } catch (err) {
     return res.status(500).json({ error: err?.response?.data || err?.message || "Failed to resolve admin group" });
+  }
+});
+
+// Create the AgencyAdmin Authentik group when missing (idempotent).
+// Edit-agency Save uses field-specific endpoints and does not hit PUT /:index,
+// so the UI calls this explicitly on every Save Changes.
+router.post("/:index/ensure-admin-group", async (req, res) => {
+  try {
+    const idx = Number(req.params.index);
+    const agencies = store.load();
+    if (!Number.isInteger(idx) || !agencies[idx]) {
+      return res.status(404).json({ error: "Not found" });
+    }
+
+    const a = agencies[idx];
+    if (!accessSvc.isSuffixAllowed(req.authentikUser, a.suffix)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const result = await ensureAgencyAdminGroupExists(a);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    return res.status(400).json({
+      error:
+        err?.response?.data ||
+        err?.message ||
+        "Failed to ensure agency admin group",
+    });
   }
 });
 
