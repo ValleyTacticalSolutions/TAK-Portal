@@ -64,7 +64,7 @@
   },
   "devDependencies": {
     "@types/geojson": "^7946.0.16",
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
   }
 }
