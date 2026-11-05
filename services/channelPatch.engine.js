@@ -127,16 +127,29 @@ function queueRuntime(patchId, fields) {
 
 function flushRuntime() {
   runtimeFlushTimer = null;
+  // One replace for the whole flush. A save per dirty patch overlaps itself:
+  // each replace deletes every row and inserts them again, and the second
+  // insert hits channel_patches_pkey.
+  let changed = false;
   for (const [id, row] of runtimeByPatch) {
     if (!row?.dirty) continue;
     try {
-      store.touchRuntime(id, {
-        lastForwardAt: row.lastForwardAt ?? undefined,
-        lastError: row.lastError ?? undefined,
-      });
+      const updated = store.touchRuntime(
+        id,
+        {
+          lastForwardAt: row.lastForwardAt ?? undefined,
+          lastError: row.lastError ?? undefined,
+        },
+        { persist: false }
+      );
+      if (updated) changed = true;
       runtimeByPatch.set(id, { ...row, dirty: false });
     } catch (_) {}
   }
+  if (!changed) return;
+  try {
+    store.persistCached();
+  } catch (_) {}
 }
 
 function clearExistingDests(detail) {

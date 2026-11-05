@@ -273,20 +273,28 @@ function writeFile(items) {
 
 function load() {
   if (_cache) return _cache.slice();
-  const items = readFile()
-    .map((row) => normalizePatch(row))
-    .filter(Boolean);
+  const items = pgCache.dedupeChannelPatches(
+    readFile()
+      .map((row) => normalizePatch(row))
+      .filter(Boolean)
+  );
   _cache = items;
   return items.slice();
 }
 
 function save(items) {
-  const arr = (Array.isArray(items) ? items : [])
-    .map((row) => normalizePatch(row))
-    .filter(Boolean);
+  const arr = pgCache.dedupeChannelPatches(
+    (Array.isArray(items) ? items : [])
+      .map((row) => normalizePatch(row))
+      .filter(Boolean)
+  );
   _cache = arr;
   writeFile(arr);
   return arr.slice();
+}
+
+function persistCached() {
+  writeFile(_cache || []);
 }
 
 function list() {
@@ -401,7 +409,7 @@ function remove(id) {
   return true;
 }
 
-function touchRuntime(id, { lastForwardAt, lastError } = {}) {
+function touchRuntime(id, { lastForwardAt, lastError } = {}, options = {}) {
   const key = safeStr(id).trim();
   const items = load();
   const idx = items.findIndex((p) => p.id === key);
@@ -412,7 +420,7 @@ function touchRuntime(id, { lastForwardAt, lastError } = {}) {
   row.updatedAt = items[idx].updatedAt;
   items[idx] = row;
   _cache = items;
-  writeFile(items);
+  if (!options || options.persist !== false) writeFile(items);
   return row;
 }
 
@@ -428,6 +436,7 @@ module.exports = {
   update,
   remove,
   touchRuntime,
+  persistCached,
   invalidateCache,
   normalizePatch,
   extractGroupNames,

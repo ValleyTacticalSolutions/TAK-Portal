@@ -396,23 +396,101 @@ async function replaceAutoCreateDataSync(obj) {
   return persistCatch("autoCreateDataSync", () => persistLedgerSql("auto_create_data_sync", caches.autoCreateDataSync));
 }
 
-async function persistChannelPatchesSql(list) {
+// Distinct from the json-import session lock (738201). xact lock space is shared.
+const CHANNEL_PATCH_ADVISORY_LOCK = 738202;
+
+/**
+ * One row per id. Later entries win. A repeated id in a single replace used to
+ * make the second INSERT fail channel_patches_pkey.
+ */
+function dedupeChannelPatches(list) {
+  const byId = new Map();
+  for (const p of Array.isArray(list) ? list : []) {
+    if (!p || typeof p !== "object") continue;
+    const id = String(p.id ?? "").trim();
+    if (!id) continue;
+    byId.set(id, p);
+  }
+  return Array.from(byId.values());
+}
+
+function isChannelPatchKeyConflict(err) {
+  if (!err) return false;
+  if (err.code === "23505") return true;
+  return String(err.message || "").includes("channel_patches_pkey");
+}
+
+/**
+ * Replace the channel_patches table. Callers must already be inside a transaction.
+ * The advisory lock serializes this with any other connection doing the same
+ * delete-all + insert. Without it, two READ COMMITTED replaces can both pass
+ * DELETE and then insert the same primary key.
+ */
+async function writeChannelPatchRows(client, list) {
+  await client.query("SELECT pg_advisory_xact_lock($1::bigint)", [CHANNEL_PATCH_ADVISORY_LOCK]);
+  await client.query("DELETE FROM channel_patches");
+  const rows = dedupeChannelPatches(list);
+  for (const p of rows) {
+    const id = String(p.id).trim();
+    await client.query(
+      `INSERT INTO channel_patches (id, payload, updated_at) VALUES ($1,$2::jsonb, now())
+       ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()`,
+      [id, JSON.stringify(p)]
+    );
+  }
+  return rows.length;
+}
+
+async function persistChannelPatchesOnce(list) {
   await db.withTransaction(async (c) => {
-    await c.query("DELETE FROM channel_patches");
-    for (const p of list || []) {
-      const id = String(p.id || "").trim();
-      if (!id) continue;
-      await c.query(
-        `INSERT INTO channel_patches (id, payload, updated_at) VALUES ($1,$2::jsonb, now())`,
-        [id, JSON.stringify(p)]
-      );
-    }
+    await writeChannelPatchRows(c, list);
   });
 }
 
-async function replaceChannelPatches(list) {
-  caches.channelPatches = clone(list || []);
-  return persistCatch("channel-patches", () => persistChannelPatchesSql(caches.channelPatches));
+async function persistChannelPatchesSql(list) {
+  try {
+    await persistChannelPatchesOnce(list);
+  } catch (err) {
+    if (!isChannelPatchKeyConflict(err)) throw err;
+    console.error(
+      "[pg-cache] channel-patches duplicate key; retrying save:",
+      err?.message || err
+    );
+    try {
+      await persistChannelPatchesOnce(list);
+    } catch (retryErr) {
+      if (!isChannelPatchKeyConflict(retryErr)) throw retryErr;
+      // Do not reject. An unhandled unique-violation here exits Node, and
+      // Docker restarts the portal. The in-memory list is kept for the next save.
+      console.error(
+        "[pg-cache] channel-patches persist failed:",
+        retryErr?.message || retryErr
+      );
+    }
+  }
+}
+
+// In-process saves must not each hold a pooled connection while waiting on the
+// advisory lock. touchRuntime used to start one full replace per dirty patch.
+let channelPatchWriteTail = Promise.resolve();
+
+function enqueueChannelPatchWrite(list) {
+  const snapshot = clone(list || []);
+  const job = channelPatchWriteTail.then(() => persistChannelPatchesSql(snapshot));
+  channelPatchWriteTail = job.then(
+    () => {},
+    () => {}
+  );
+  return job;
+}
+
+function replaceChannelPatches(list) {
+  const next = dedupeChannelPatches(clone(list || []));
+  caches.channelPatches = next;
+  // Snapshot now. persistCatch runs on a later turn, and a second save may
+  // already have replaced the cache by then.
+  const snapshot = clone(next);
+  return persistCatch("channel-patches", () => enqueueChannelPatchWrite(snapshot));
 }
 
 async function persistLocatorsSql(store) {
@@ -656,6 +734,8 @@ module.exports = {
   replaceAutoCreateGroups,
   replaceAutoCreateDataSync,
   replaceChannelPatches,
+  dedupeChannelPatches,
+  writeChannelPatchRows,
   replaceLocators,
   replaceGeofences,
   persistGeofenceMembershipsSql,

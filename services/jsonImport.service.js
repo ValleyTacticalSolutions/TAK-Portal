@@ -315,19 +315,13 @@ async function importLocators(data) {
 }
 
 async function importChannelPatches(data) {
+  const pgCache = require("./pgCache");
   const arr = Array.isArray(data) ? data : [];
+  let count = 0;
   await db.withTransaction(async (c) => {
-    await c.query("DELETE FROM channel_patches");
-    for (const p of arr) {
-      const id = String(p.id || "").trim();
-      if (!id) continue;
-      await c.query(
-        `INSERT INTO channel_patches (id, payload, updated_at) VALUES ($1,$2::jsonb, now())`,
-        [id, JSON.stringify(p)]
-      );
-    }
+    count = await pgCache.writeChannelPatchRows(c, arr);
   });
-  return arr.length;
+  return count;
 }
 
 async function importMouStreams(data) {

@@ -66,6 +66,13 @@ async function query(text, params) {
 
 async function withTransaction(fn) {
   const client = await getPool().connect();
+  // Checked-out clients have no pool error listener. A backend error emitted
+  // on the client (instead of, or in addition to, the query rejection) is an
+  // uncaught 'error' event and exits the process.
+  const onClientError = (err) => {
+    console.error("[db] transaction client error:", err?.message || err);
+  };
+  if (typeof client.on === "function") client.on("error", onClientError);
   try {
     await client.query("BEGIN");
     const result = await fn(client);
@@ -79,6 +86,9 @@ async function withTransaction(fn) {
     }
     throw e;
   } finally {
+    if (typeof client.removeListener === "function") {
+      client.removeListener("error", onClientError);
+    }
     client.release();
   }
 }
