@@ -812,7 +812,8 @@ assert.match(installScript, /docker compose --progress=plain/);
 {
   const rebuild = marketplace.rebuildRemoteScript("/root/CloudTAK", "api");
   assert.match(rebuild, /=== CloudTAK rebuild: docker compose build/);
-  assert.match(rebuild, /stdbuf -oL -eL cat/);
+  assert.match(rebuild, /stdbuf -oL -eL tee/);
+  assert.match(rebuild, /docker_compose_with_pull_retry docker compose --progress=plain/);
   assert.match(marketplace.formatRemoteLogLine("#12 DONE 45.2s"), /DONE 45\.2s/);
   assert.match(
     marketplace.formatRemoteLogLine(" => => # /home/etl/api/common/hub/index.ts"),

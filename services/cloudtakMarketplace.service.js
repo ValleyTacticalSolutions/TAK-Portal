@@ -2269,8 +2269,85 @@ function cloudtakRangeMismatch(version, range) {
   return "";
 }
 
-function summarizeCommandError(message) {
+const DOCKER_HUB_RATE_LIMIT_MESSAGE =
+  "Docker Hub is limiting pulls from this address, try again later.";
+const DOCKER_PULL_RETRY_BEGIN = "# BEGIN docker_pull_retry";
+const DOCKER_PULL_RETRY_END = "# END docker_pull_retry";
+
+function dockerPullRetryBash() {
+  const src = fs.readFileSync(path.join(__dirname, "..", "host-helpers", "marketplace-helper"), "utf8");
+  const start = src.indexOf(DOCKER_PULL_RETRY_BEGIN);
+  const end = src.indexOf(DOCKER_PULL_RETRY_END);
+  if (start < 0 || end <= start) {
+    throw new Error("marketplace-helper is missing the docker pull retry block");
+  }
+  return src.slice(start, end + DOCKER_PULL_RETRY_END.length);
+}
+
+function lineIsDockerHubRateLimit(text) {
+  const s = String(text || "");
+  if (/toomanyrequests|too many requests|pull rate limit|rate limit exceeded|429 Too Many Requests/i.test(s)) {
+    return true;
+  }
+  return /:\s*429(?:[^0-9]|$)/.test(s) && /docker|registry|manifest|blob|pull/i.test(s);
+}
+
+function lineIsTransientDockerPull(text) {
+  const s = String(text || "");
+  if (lineIsDockerHubRateLimit(s)) return false;
+  const pullish = /docker|registry|failed to copy|failed to fetch|error pulling|blob|manifest/i.test(s);
+  if (!pullish) return false;
+  return /unexpected EOF|(?:^|[^A-Za-z0-9])EOF(?:[^A-Za-z0-9]|$)|connection reset by peer|broken pipe|i\/o timeout|TLS handshake timeout|Client\.Timeout exceeded|use of closed network connection|short read|http2: server sent GOAWAY|:\s*5\d\d(?:[^0-9]|$)|status(?: code)?:\s*5\d\d(?:[^0-9]|$)|(?:^|[^0-9])5\d\d (?:Bad Gateway|Service Unavailable|Internal Server Error|Gateway Timeout)/i.test(
+    s
+  );
+}
+
+/** "rate-limit" | "transient" | "other". Looks at each line and the line before it. */
+function classifyDockerPullFailure(message) {
   const lines = String(message || "")
+    .split(/\r?\n/)
+    .map((s) => s.replace(/[ \t]+/g, " ").trim())
+    .filter(Boolean);
+  let transient = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    const window = `${i > 0 ? lines[i - 1] : ""} ${lines[i]}`;
+    if (lineIsDockerHubRateLimit(lines[i]) || lineIsDockerHubRateLimit(window)) return "rate-limit";
+    if (lineIsTransientDockerPull(lines[i]) || lineIsTransientDockerPull(window)) transient = true;
+  }
+  return transient ? "transient" : "other";
+}
+
+/** Full pull-error lines for the job log. Not clipped. */
+function pullFailureLogLines(message) {
+  const lines = String(message || "")
+    .split(/\r?\n/)
+    .map((s) => s.replace(/[ \t]+/g, " ").trim())
+    .filter(Boolean);
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const prev = i > 0 ? lines[i - 1] : "";
+    const window = `${prev} ${lines[i]}`;
+    const kind = classifyDockerPullFailure(window);
+    if (kind === "other") continue;
+    if (prev && !out.includes(prev)) out.push(prev);
+    if (!out.includes(lines[i])) out.push(lines[i]);
+  }
+  return out.slice(-12);
+}
+
+function summarizeCommandError(message) {
+  const raw = String(message || "");
+  const pullKind = classifyDockerPullFailure(raw);
+  if (pullKind === "rate-limit") return DOCKER_HUB_RATE_LIMIT_MESSAGE;
+  if (pullKind === "transient") {
+    const full = pullFailureLogLines(raw);
+    if (full.length) {
+      const last = full[full.length - 1];
+      if (classifyDockerPullFailure(last) !== "other") return last;
+      return full.slice(-2).join(" ");
+    }
+  }
+  const lines = raw
     .split(/\r?\n/)
     .map((s) => s.replace(/\s+/g, " ").trim())
     .filter(Boolean);
@@ -2312,6 +2389,22 @@ function summarizeCommandError(message) {
     return clip(line);
   }
   return clip(lines[lines.length - 1]);
+}
+
+function recordCommandFailure(job, logPrefix, err) {
+  const raw = err && err.message ? String(err.message) : String(err || "");
+  const summary = summarizeCommandError(raw);
+  for (const line of pullFailureLogLines(raw)) {
+    if (line === summary) continue;
+    appendJobLog(job.id, line);
+  }
+  updateJob(job.id, {
+    status: "failed",
+    finishedAt: new Date().toISOString(),
+    error: summary,
+  });
+  appendJobLog(job.id, `${logPrefix}${summary}`);
+  markJobInstallError(job, summary);
 }
 
 function appendJobLog(jobId, line) {
@@ -2998,6 +3091,7 @@ function pluginRuntimePrivilegeBash() {
 
 function pluginRuntimeExtrasBash() {
   return [
+    dockerPullRetryBash(),
     'target_ct="$1"',
     'repo_dir="$2"',
     'plugin_id="$3"',
@@ -3071,7 +3165,7 @@ function pluginRuntimeExtrasBash() {
     'SVC="$compose_svc_hint"',
     "start_overlay() {",
     '  echo "Starting plugin Docker service${SVC:+ $SVC} from $OVERRIDE"',
-    '  ( cd "$STACK" && COMPOSE_ANSI=never COMPOSE_PROGRESS=plain docker compose --progress=plain -f "$CF" -f "$OVERRIDE" up -d --build ${SVC:+$SVC} )',
+    '  ( cd "$STACK" && COMPOSE_ANSI=never COMPOSE_PROGRESS=plain docker_compose_with_pull_retry docker compose --progress=plain -f "$CF" -f "$OVERRIDE" up -d --build ${SVC:+$SVC} )',
     "}",
     "ensure_caddy_on_cloudtak_network() {",
     '  local runtime="" caddy="" net="" name id image',
@@ -4423,17 +4517,14 @@ export COMPOSE_ANSI=never
 export COMPOSE_PROGRESS=plain
 export DOCKER_BUILDKIT=1
 # docker() is shadowed by pluginPrivilegeBash to use $CTAK_PRIV docker when needed.
-# Line-buffer through stdbuf/cat so the Portal job log keeps advancing during long RUN steps
+# Line-buffer through stdbuf/tee so the Portal job log keeps advancing during long RUN steps
 # (npm install / vue-tsc) instead of looking silenced until the step finishes.
+${dockerPullRetryBash()}
 set -o pipefail
-if command -v stdbuf >/dev/null 2>&1; then
-  docker compose --progress=plain "\${COMPOSE_ARGS[@]}" build --no-cache "$SVC" < /dev/null | stdbuf -oL -eL cat
-else
-  docker compose --progress=plain "\${COMPOSE_ARGS[@]}" build --no-cache "$SVC" < /dev/null
-fi
+docker_compose_with_pull_retry docker compose --progress=plain "\${COMPOSE_ARGS[@]}" build --no-cache "$SVC"
 echo "CloudTAK image build finished."
 echo "=== CloudTAK rebuild: recreating containers ==="
-docker compose --progress=plain "\${COMPOSE_ARGS[@]}" up -d --force-recreate "$SVC"
+docker_compose_with_pull_retry docker compose --progress=plain "\${COMPOSE_ARGS[@]}" up -d --force-recreate "$SVC"
 echo "CloudTAK container recreate finished."
 echo "Waiting for $SVC to be running"
 n=0
@@ -4726,14 +4817,7 @@ async function runChangeBatch(jobs) {
         });
         continue;
       }
-      const summary = summarizeCommandError(err.message || String(err));
-      updateJob(job.id, {
-        status: "failed",
-        finishedAt: new Date().toISOString(),
-        error: summary,
-      });
-      appendJobLog(job.id, `FAILED ${summary}`);
-      markJobInstallError(job, summary);
+      recordCommandFailure(job, "FAILED ", err);
     }
   }
 
@@ -4755,15 +4839,17 @@ async function runChangeBatch(jobs) {
       }
     } catch (err) {
       const cancelled = _cancelRequested || isCancelledError(err);
-      const summary = cancelled ? "Cancelled." : summarizeCommandError(err.message || String(err));
-      for (const j of succeeded) {
-        updateJob(j.id, {
-          status: cancelled ? "cancelled" : "failed",
-          finishedAt: new Date().toISOString(),
-          error: summary,
-        });
-        appendJobLog(j.id, cancelled ? "Cancelled." : `Rebuild failed: ${summary}`);
-        if (!cancelled) markJobInstallError(j, summary);
+      if (cancelled) {
+        for (const j of succeeded) {
+          updateJob(j.id, {
+            status: "cancelled",
+            finishedAt: new Date().toISOString(),
+            error: "Cancelled.",
+          });
+          appendJobLog(j.id, "Cancelled.");
+        }
+      } else {
+        for (const j of succeeded) recordCommandFailure(j, "Rebuild failed: ", err);
       }
     }
   } else if (succeeded.length) {
@@ -5113,6 +5199,10 @@ module.exports = {
   deployStaged,
   selectLogJobs,
   summarizeCommandError,
+  classifyDockerPullFailure,
+  pullFailureLogLines,
+  dockerPullRetryBash,
+  DOCKER_HUB_RATE_LIMIT_MESSAGE,
   parsePluginCloudtakRange,
   compareCloudtakVersions,
   cloudtakRangeMismatch,

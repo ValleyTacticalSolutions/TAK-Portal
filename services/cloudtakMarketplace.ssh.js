@@ -329,6 +329,9 @@ function sshStatus() {
   };
 }
 
+// Wide enough that a registry URL and its HTTP status stay on one line.
+const SSH_PTY_COLS = 1024;
+
 let activeAbort = null;
 
 function abortActiveCommand() {
@@ -489,7 +492,7 @@ function execOverSsh(connectConfig, command, timeoutMs = 30000, onChunk) {
           done(cancelledPayload());
           return;
         }
-        conn.exec(command, { pty: { term: "xterm", cols: 120, rows: 32 } }, (err, strm) => {
+        conn.exec(command, { pty: { term: "xterm", cols: SSH_PTY_COLS, rows: 40 } }, (err, strm) => {
           if (err) {
             done({
               ok: false,
@@ -907,6 +910,7 @@ module.exports = {
   sendRemoteInterrupt,
   stripAnsi,
   feedPtyChunk,
+  SSH_PTY_COLS,
   detectCheckout,
   testConnection,
   shellQuote,

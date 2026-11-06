@@ -148,6 +148,89 @@ compose_file_args() {
   fi
 }
 
+# BEGIN docker_pull_retry
+# Retry a Docker Hub layer that dropped or came back 5xx. Do not retry a 429.
+# DOCKER_PULL_RETRY_SLEEP is seconds between tries (default 5; tests use 0).
+docker_pull_failure_kind() {
+  local line prev="" window transient=0
+  transient=0
+  prev=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    window="$prev $line"
+    if grep -qiE 'toomanyrequests|too many requests|pull rate limit|rate limit exceeded|429 Too Many Requests' <<<"$window"; then
+      printf '%s\n' ratelimit
+      return 0
+    fi
+    if grep -qiE 'docker|registry|manifest|blob|pull' <<<"$window" && grep -qE ':[[:space:]]*429([^0-9]|$)' <<<"$window"; then
+      printf '%s\n' ratelimit
+      return 0
+    fi
+    if grep -qiE 'docker|registry|failed to copy|failed to fetch|error pulling|blob|manifest' <<<"$window" \
+      && grep -qiE 'unexpected EOF|(^|[^A-Za-z0-9])EOF([^A-Za-z0-9]|$)|connection reset by peer|broken pipe|i/o timeout|TLS handshake timeout|Client\.Timeout exceeded|use of closed network connection|short read|http2: server sent GOAWAY|:[[:space:]]*5[0-9][0-9]([^0-9]|$)|status( code)?:?[[:space:]]*5[0-9][0-9]([^0-9]|$)|(^|[^0-9])5[0-9][0-9] (Bad Gateway|Service Unavailable|Internal Server Error|Gateway Timeout)' <<<"$window"; then
+      transient=1
+    fi
+    prev="$line"
+  done
+  if [ "$transient" -eq 1 ]; then
+    printf '%s\n' transient
+  else
+    printf '%s\n' other
+  fi
+  return 0
+}
+
+docker_compose_with_pull_retry() {
+  local attempt=1 max=3 log ec kind sleep_s pipefail_on=0 errexit_on=0
+  sleep_s="${DOCKER_PULL_RETRY_SLEEP:-5}"
+  case "$sleep_s" in
+    ''|*[!0-9]*) sleep_s=5 ;;
+  esac
+  case $- in *e*) errexit_on=1 ;; esac
+  if set -o | grep -Eq '^pipefail[[:space:]]+on$'; then
+    pipefail_on=1
+  fi
+  while [ "$attempt" -le "$max" ]; do
+    log=$(mktemp)
+    set +e
+    set +o pipefail
+    if command -v stdbuf >/dev/null 2>&1; then
+      "$@" < /dev/null 2>&1 | stdbuf -oL -eL tee "$log"
+    else
+      "$@" < /dev/null 2>&1 | tee "$log"
+    fi
+    ec=${PIPESTATUS[0]}
+    if [ "$pipefail_on" -eq 1 ]; then
+      set -o pipefail
+    fi
+    if [ "$errexit_on" -eq 1 ]; then
+      set -e
+    else
+      set +e
+    fi
+    if [ "$ec" -eq 0 ]; then
+      rm -f "$log"
+      return 0
+    fi
+    kind=$(docker_pull_failure_kind < "$log")
+    rm -f "$log"
+    if [ "$kind" = ratelimit ]; then
+      echo "Docker Hub is limiting pulls from this address, try again later." >&2
+      return "$ec"
+    fi
+    if [ "$kind" = transient ] && [ "$attempt" -lt "$max" ]; then
+      echo "Docker image pull failed (server error or dropped connection); retrying (attempt $attempt of $max)." >&2
+      attempt=$((attempt + 1))
+      if [ "$sleep_s" != 0 ]; then
+        sleep "$sleep_s"
+      fi
+      continue
+    fi
+    return "$ec"
+  done
+  return 1
+}
+# END docker_pull_retry
+
 cmd_rebuild() {
   local ct="${1:-}" svc="${2:-api}"
   is_abs_no_dotdot "$ct" || die "invalid cloudtak path"
@@ -166,15 +249,10 @@ cmd_rebuild() {
   export COMPOSE_PROGRESS=plain
   export DOCKER_BUILDKIT=1
   echo "=== CloudTAK rebuild: docker compose build --no-cache (live output below) ==="
-  set -o pipefail
-  if command -v stdbuf >/dev/null 2>&1; then
-    docker compose --progress=plain "${args[@]}" build --no-cache "$svc" < /dev/null | stdbuf -oL -eL cat
-  else
-    docker compose --progress=plain "${args[@]}" build --no-cache "$svc" < /dev/null
-  fi
+  docker_compose_with_pull_retry docker compose --progress=plain "${args[@]}" build --no-cache "$svc"
   echo "CloudTAK image build finished."
   echo "=== CloudTAK rebuild: recreating containers ==="
-  docker compose --progress=plain "${args[@]}" up -d --force-recreate "$svc"
+  docker_compose_with_pull_retry docker compose --progress=plain "${args[@]}" up -d --force-recreate "$svc"
   echo "CloudTAK container recreate finished."
   echo "REBUILD_OK"
 }
