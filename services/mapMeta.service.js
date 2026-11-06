@@ -1859,7 +1859,8 @@ function classifyMarkerOrigin(marker) {
 }
 
 /**
- * Channel-patch rebroadcast stamps __takportal_patch with the destination catalog name.
+ * Channel-patch rebroadcast stamps __takportal_patch with destination catalog
+ * names. Several dests on one event are joined with "|".
  * Merge those into map attribution so patched channel counts reflect delivery.
  */
 function parsePortalPatchDestGroups(detail) {
@@ -1869,8 +1870,13 @@ function parsePortalPatchDestGroups(detail) {
   const attrs = tag._attributes || tag;
   const toRaw = normalizeGroupName(attrs.to || attrs.toGroup || "");
   if (!toRaw) return [];
-  const channelName = toChannelGroupName(toRaw) || toRaw;
-  return filterAssignableChannelGroups([channelName]);
+  const channels = [];
+  for (const part of toRaw.split("|")) {
+    const name = normalizeGroupName(part);
+    if (!name) continue;
+    channels.push(toChannelGroupName(name) || name);
+  }
+  return filterAssignableChannelGroups(channels);
 }
 
 /** Optional hook registered by channelPatch.engine (avoids circular require). */

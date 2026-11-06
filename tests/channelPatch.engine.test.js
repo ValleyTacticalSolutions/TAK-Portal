@@ -146,8 +146,118 @@ assert.deepStrictEqual(uniPeers.get("cpd main"), ["SPD Main"]);
 assert.deepStrictEqual(uniPeers.get("spd main").sort(), ["CPD Main", "DAVIS Main"].sort());
 
 assert.strictEqual(
-  engine.patchedUid("ANDROID-abc", "tak_CPD Main", "HCSO-DAVIS-3598"),
-  "HCSO-DAVIS-3598.takportal.cpd-main"
+  engine.patchedUid("ANDROID-abc", "HCSO-DAVIS-3598"),
+  "HCSO-DAVIS-3598.takportal.ANDROID-abc"
+);
+assert.notStrictEqual(
+  engine.patchedUid("ANDROID-abc", "HCSO-DAVIS-3598"),
+  engine.patchedUid("ANDROID-def", "HCSO-DAVIS-3598"),
+  "same callsign on two devices stays two contacts"
+);
+assert.strictEqual(
+  engine.patchedUid("ANDROID-3a1bc5b11e5c213e", "TN_HalavaA.a9+.a"),
+  "TN_HalavaA.a9-.a.takportal.ANDROID-3a1bc5b11e5c213e"
+);
+assert.ok(
+  engine.patchedUid("ANDROID-abc", "HCSO-DAVIS-3598").includes(".takportal."),
+  "clone UID stays excluded from connected-user metrics"
+);
+
+// One source event fans out to many channels as a single clone.
+const fanoutDetail = {
+  contact: {
+    _attributes: {
+      callsign: "TN_HalavaA.a9+.a",
+      endpoint: "192.168.1.10:4242:tcp",
+    },
+  },
+  __group: { _attributes: { name: "Cyan", role: "Team Member" } },
+  usericon: { _attributes: { iconsetpath: "COT_MAPPING_2525C/a-f/a-f-G-U-C" } },
+};
+const fanout = engine.applyPatchIdentity(fanoutDetail, {
+  srcUid: "ANDROID-3a1bc5b11e5c213e",
+  destGroups: [
+    "tak_TBI Alpha",
+    "tak_Aircraft Known",
+    "tak_CBCOEMHS PSMA 1",
+    "tak_TBI Alpha",
+  ],
+  patchId: "56c6be39-aaaa|other-patch",
+  fromGroup: "tn mutual aid",
+});
+assert.strictEqual(
+  fanout.uid,
+  "TN_HalavaA.a9-.a.takportal.ANDROID-3a1bc5b11e5c213e"
+);
+assert.deepStrictEqual(fanout.martiGroups, [
+  "TBI Alpha",
+  "Aircraft Known",
+  "CBCOEMHS PSMA 1",
+]);
+assert.strictEqual(fanoutDetail.contact._attributes.endpoint, undefined);
+assert.strictEqual(fanoutDetail.contact._attributes.callsign, "TN_HalavaA.a9+.a");
+assert.deepStrictEqual(fanoutDetail.__group, {
+  _attributes: { name: "Cyan", role: "Team Member" },
+});
+assert.deepStrictEqual(
+  fanoutDetail.marti.dest.map((d) => d._attributes.group),
+  fanout.martiGroups
+);
+assert.deepStrictEqual(
+  fanoutDetail.filtergroup.map((g) => g._attributes.group),
+  fanout.martiGroups
+);
+assert.strictEqual(
+  fanoutDetail.__takportal_patch._attributes.srcUid,
+  "ANDROID-3a1bc5b11e5c213e"
+);
+assert.ok(
+  fanoutDetail.__takportal_patch._attributes.to.includes("tak_TBI Alpha")
+);
+assert.ok(
+  fanoutDetail.__takportal_patch._attributes.to.includes("tak_Aircraft Known")
+);
+assert.ok(
+  !fanout.uid.includes("tbi-alpha"),
+  "destination channel is not part of the clone UID"
+);
+
+const otherChannel = {
+  contact: { _attributes: { callsign: "TN_HalavaA.a9+.a" } },
+};
+const sameDevice = engine.applyPatchIdentity(otherChannel, {
+  srcUid: "ANDROID-3a1bc5b11e5c213e",
+  destGroups: ["tak_TN Mutual Aid"],
+  patchId: "p2",
+  fromGroup: "source",
+});
+assert.strictEqual(
+  sameDevice.uid,
+  fanout.uid,
+  "another patched channel reuses the same clone UID"
+);
+assert.deepStrictEqual(otherChannel.filtergroup, {
+  _attributes: { group: "TN Mutual Aid" },
+});
+
+const longUid = `ANDROID-${"a".repeat(80)}`;
+const longClone = engine.patchedUid(longUid, "CALLSIGN");
+assert.ok(longClone.length <= 128, "clone UID stays inside the CoT uid limit");
+assert.notStrictEqual(
+  longClone,
+  engine.patchedUid(`${longUid}-other`, "CALLSIGN"),
+  "long source UIDs do not collapse onto one clone"
+);
+assert.ok(longClone.includes(".takportal."));
+
+assert.throws(
+  () =>
+    engine.applyPatchIdentity(
+      { contact: { _attributes: { callsign: "X" } } },
+      { srcUid: "ANDROID-abc", destGroups: [] }
+    ),
+  /Empty Marti dest group/,
+  "a copy with no dest must not be written on the webadmin stream"
 );
 
 // Patched copies must keep callsign on <contact> (ATAK shows "NO CALLSIGN" otherwise)

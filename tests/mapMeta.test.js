@@ -226,4 +226,26 @@ assert.deepStrictEqual(
 
 mapMeta.rebuildSubscriptionIndex([]);
 
+assert.deepStrictEqual(
+  mapMeta.resolveGroupsForMarker(
+    {
+      uid: "TN_HalavaA.a9-.a.takportal.ANDROID-3a1bc5b11e5c213e",
+      type: "a-f-G-U-C",
+      stale: futureStale,
+    },
+    {
+      __takportal_patch: {
+        _attributes: {
+          patchId: "56c6be39",
+          from: "tn mutual aid",
+          to: "tak_TBI Alpha|tak_Aircraft Known",
+          srcUid: "ANDROID-3a1bc5b11e5c213e",
+        },
+      },
+    }
+  ).sort(),
+  ["tak_Aircraft Known", "tak_TBI Alpha"].sort(),
+  "one patched clone attributes to every destination channel"
+);
+
 console.log("mapMeta.test.js OK");
