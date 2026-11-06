@@ -11,11 +11,13 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
-### v2.0.31 - IN PROGRESS
-🐛 `Bug Fix` - CloudTAK Marketplace refuses a plugin install when the checkout is outside the range declared in install.sh (Replay on 13.114.2), reports that instead of a permissions error, and does not partially apply a core patch such as atlas-database.ts (#75)<br>
+### v2.0.31 - 11/5/26
 ✨ `Enhancement` - Optional phone number field added to users page - Must be enabled in Settings, Branding & Appearance<br>
 ✨ `Enhancement` - Channel Patching - Adds support for uni-directional patches<br>
+🐛 `Bug Fix` - CloudTAK Marketplace refuses a plugin install when the checkout is outside the range declared in install.sh (Replay on 13.114.2), reports that instead of a permissions error, and does not partially apply a core patch such as atlas-database.ts (#75)<br>
 🐛 `Bug Fix` - CloudTAK Marketplace Deploy To Caddy ignores Caddy info/warn lines when `caddy validate` fails only with permission denied on `/var/log/caddy` or `/var/lib/caddy`. Syntax errors and permission errors on other paths still stop the deploy (#76)<br>
+🐛 `Bug Fix` - Fixes issue with channel patching failing due to duplicated keys<br>
+⬆️ `Dependency Update` - #91 - Bump pg from 8.16.3 to 8.23.1, #90 - Bump milsymbol from 3.0.4 to 3.0.5, #89 - Bump geotiff-geokeys-to-proj4 from 2024.4.13 to 2026.10.9, #88 - Bump esbuild from 0.28.1 to 0.28.2, #87 - Bump dotenv from 17.4.2 to 18.0.9
 
 ### v2.0.30 - 1/1/26
 ✨ `Enhancement` - Restrict allowed special characters for usernames based off TAK Server testing<br>
