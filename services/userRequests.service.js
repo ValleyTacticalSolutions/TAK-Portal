@@ -22,6 +22,11 @@ function normalizeEmail(v) {
   return String(v || "").trim().toLowerCase();
 }
 
+function normalizeRequestPhone(raw) {
+  if (!usersSvc.isUserPhoneNumberFieldEnabled()) return "";
+  return String(raw ?? "").trim().slice(0, 40);
+}
+
 function normalizeStr(v) {
   return String(v || "").trim();
 }
@@ -463,6 +468,7 @@ function validateCreate(input) {
     agency
   );
   const radioCallsign = normalizeStr(input.radioCallsign);
+  const phone = normalizeRequestPhone(input.phone);
   const otherAgency = normalizeStr(input.otherAgency);
   const otherReason = normalizeStr(input.otherReason);
   const requestedAgency = normalizeRequestedAgencyFields(input || {});
@@ -548,6 +554,7 @@ function validateCreate(input) {
     email,
     badgeNumber,
     radioCallsign,
+    phone,
     agencySuffix,
     otherAgency,
     otherReason,
@@ -635,6 +642,7 @@ async function tryAutoApproveRequest(agency, validated, reqObj) {
       firstName: validated.firstName,
       lastName: validated.lastName,
       radioCallsign: validated.radioCallsign,
+      phone: validated.phone,
       templateIndex: String(defaultTpl.name || "").trim(),
       permissions: "user",
     },
@@ -685,6 +693,7 @@ async function createRequest(input) {
     email: v.email,
     badgeNumber: v.badgeNumber,
     radioCallsign: v.radioCallsign || null,
+    phone: v.phone || null,
     agencySuffix: v.agencySuffix,
     agencyName: agency ? String(agency.name || "").trim() : null,
     otherAgency: v.agencySuffix === "__other__" ? v.otherAgency : null,
@@ -809,7 +818,7 @@ Review Request: ${reviewUrl}
 Name: ${reqObj.lastName}, ${reqObj.firstName}
 Email: ${reqObj.email}
 Badge: ${reqObj.badgeNumber}
-${reqObj.radioCallsign ? `Radio Callsign: ${reqObj.radioCallsign}\n` : ""}Agency: ${
+${reqObj.radioCallsign ? `Radio Callsign: ${reqObj.radioCallsign}\n` : ""}${reqObj.phone ? `Phone: ${reqObj.phone}\n` : ""}Agency: ${
             reqObj.agencyName ||
             reqObj.otherAgency ||
             reqObj.agencySuffix
@@ -825,6 +834,11 @@ ${otherAgencyDetailsText}${reasonLine}`,
   ${
     reqObj.radioCallsign
       ? `<strong>Radio Callsign:</strong> ${escapeHtml(reqObj.radioCallsign)}<br/>`
+      : ""
+  }
+  ${
+    reqObj.phone
+      ? `<strong>Phone:</strong> ${escapeHtml(reqObj.phone)}<br/>`
       : ""
   }
   <strong>Agency:</strong> ${

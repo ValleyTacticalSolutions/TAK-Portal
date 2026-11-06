@@ -36,6 +36,7 @@ router.post("/", async (req, res) => {
         email: body.email,
         badgeNumber: body.badgeNumber,
         radioCallsign: body.radioCallsign,
+        phone: body.phone,
         agencySuffix: body.agencySuffix,
         otherAgency: body.otherAgency,
         otherReason: body.otherReason,
