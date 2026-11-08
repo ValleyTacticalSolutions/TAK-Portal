@@ -699,6 +699,15 @@ function handleCot(cot) {
     return;
   }
 
+  if (existing) {
+    const sameIconContext =
+      existing.iconsetpath === marker.iconsetpath && existing.type === marker.type;
+    if (sameIconContext && existing.iconId) {
+      marker.iconId = existing.iconId;
+      marker.iconSource = existing.iconSource;
+    }
+  }
+
   markers.set(marker.uid, marker);
   if (!marker.iconId) enrichMarkerIconAsync(marker);
   queueMarkerUpdate(marker);

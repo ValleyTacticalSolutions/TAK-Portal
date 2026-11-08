@@ -506,6 +506,57 @@ async function runTests() {
     "sensor location camera icon file must exist"
   );
 
+  const DEFAULT_UID = mapIcon.DEFAULT_ICONSET_UID;
+  assert.strictEqual(
+    mapIconResolve.isIconsetUidToken(DEFAULT_UID),
+    true,
+    "ATAK Default iconset uid (13-hex tail)"
+  );
+  const defaultStarPath = `${DEFAULT_UID}/Hiking/star.png`;
+  assert.ok(
+    mapIconResolve.parseIconsetPath(defaultStarPath),
+    "Default iconset star path must parse"
+  );
+  const aprsStar = mapIcon.resolveExplicitIcon({
+    type: "a-n-G",
+    affiliation: "neutral",
+    usericon: { iconsetpath: defaultStarPath },
+  });
+  assert.ok(aprsStar && aprsStar.source === "path", "Default iconset usericon resolves synchronously");
+  assert.ok(/Hiking\/star\.png$/i.test(aprsStar.iconId));
+  assert.ok(mapIcon.getIconFilePath(aprsStar.iconId), "Default/Hiking/star.png must exist on disk");
+  const meshStar = mapIcon.resolveExplicitIcon({
+    type: "a-f-G-U-U-S-R",
+    affiliation: "friend",
+    usericon: { iconsetpath: defaultStarPath },
+  });
+  assert.strictEqual(
+    meshStar && meshStar.source,
+    "path",
+    "usericon must beat type2525b for a-f-G-U-U-S-R"
+  );
+  assert.strictEqual(
+    mapIconRender.iconSkipsRecolor(
+      { iconSource: "path", teamColor: "#0062ff", origin: "feed", type: "a-n-G" },
+      aprsStar.iconId
+    ),
+    false,
+    "path icon with team color should be tinted"
+  );
+
+  const spotExplicit = mapIcon.resolveExplicitIcon({
+    type: "b-m-p-s-m",
+    affiliation: "neutral",
+    usericon: { iconsetpath: "COT_MAPPING_SPOTMAP/b-m-p-s-m/-16776213" },
+  });
+  assert.strictEqual(spotExplicit, null, "colored spot map must not resolve to a PNG icon");
+  const spotAsync = await mapIcon.resolveIconAsync({
+    type: "b-m-p-s-m",
+    affiliation: "neutral",
+    usericon: { iconsetpath: "COT_MAPPING_SPOTMAP/b-m-p-s-m/-16776213" },
+  });
+  assert.strictEqual(spotAsync, null, "spot map async path must stay un-iconed");
+
   console.log("mapIcon.test.js: all assertions passed");
 }
 

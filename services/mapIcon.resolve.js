@@ -366,9 +366,11 @@ function resolveAliasedIcon(alias, iconsetsByUid) {
 
 function isIconsetUidToken(uid) {
   const s = String(uid || "").trim();
+  if (!s) return false;
   if (/^[0-9a-f]{64}$/i.test(s)) return true;
+  // RFC 4122 UUID plus ATAK Default iconset (last group is 13 hex, not 12).
   if (
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12,13}$/i.test(s)
   ) {
     return true;
   }
@@ -398,6 +400,9 @@ function parseIconsetPath(iconsetpath) {
 
   if (/^COT_MAPPING_SPOTMAP\//i.test(raw)) {
     const parts = raw.split("/").filter(Boolean);
+    if (parts.length >= 3) {
+      return { mode: "spot", cotType: parts[1], color: parts[2] };
+    }
     const cotType = parts.length > 1 ? parts.slice(1).join("-") : "";
     return { mode: "type", cotType };
   }
@@ -471,6 +476,9 @@ function resolvePngIcon(
 
   const originalIsGroundEud = isStandardGroundEudType(cotType);
   const parsedPath = parseIconsetPath(ui.iconsetpath);
+  if (parsedPath?.mode === "spot") {
+    return null;
+  }
   if (parsedPath?.mode === "type") {
     // COT_MAPPING_2525B remaps must not turn a ground EUD into air/2525 art.
     if (!originalIsGroundEud && !isStandardGroundEudType(parsedPath.cotType)) {

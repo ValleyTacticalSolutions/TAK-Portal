@@ -140,6 +140,7 @@ async function resolveIconAsync({ type, affiliation, detail, usericon }) {
 
   const ui = usericon || mapIconResolve.parseUserIcon(detail);
   const parsedPath = mapIconResolve.parseIconsetPath(ui.iconsetpath);
+  if (parsedPath?.mode === "spot") return null;
   let cotType = String(type || "").trim();
   if (
     parsedPath?.mode === "type" &&
@@ -388,6 +389,18 @@ async function ensureIconsets() {
     }
 
     await mergeIconSupplements();
+
+    for (const iconset of iconsetsByUid.values()) {
+      if (!mapIconResolve.isIconsetUidToken(iconset.uid)) {
+        console.warn(
+          "[map-icon] iconset",
+          iconset.dirName,
+          "uid",
+          iconset.uid,
+          "will never match <usericon> paths"
+        );
+      }
+    }
   })();
 
   return initPromise.current;
