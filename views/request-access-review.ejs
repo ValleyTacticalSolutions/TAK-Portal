@@ -51,6 +51,9 @@
         grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 10px;
       }
+      .approveEmailPwdRow.hasPhone{
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
       .approveFinalRow > label{
         margin: 0;
       }
@@ -96,6 +99,7 @@
       }
       @media (max-width: 640px) {
         .approveEmailPwdRow,
+        .approveEmailPwdRow.hasPhone,
         .approveFinalRow{
           grid-template-columns: 1fr;
         }
@@ -120,6 +124,7 @@
       }
       @media (max-width: 990px) {
         .approveEmailPwdRow,
+        .approveEmailPwdRow.hasPhone,
         .approveFinalRow{
           grid-template-columns: 1fr;
         }
@@ -155,6 +160,8 @@
         <h1>Review Access Request</h1>
         <%
           const usernamePrefixLabel = String((settings && settings.USERNAME_PREFIX_LABEL) || "").trim() || "Badge Number / Username";
+          const userPhoneFieldEnabled =
+            String((settings && settings.USER_PHONE_NUMBER_FIELD_ENABLED) || "").toLowerCase() === "true";
         %>
         <div class="card">
           <h2 style="margin-top:0;" id="reviewCardTitle">User Access Request</h2>
@@ -207,7 +214,7 @@
               <input name="lastName" placeholder="Doe" required />
             </label>
 
-            <div class="approveEmailPwdRow">
+            <div class="approveEmailPwdRow<%= userPhoneFieldEnabled ? ' hasPhone' : '' %>">
               <label>Email (optional)
                 <input name="email" type="email" placeholder="example@agency.gov" />
               </label>
@@ -243,6 +250,12 @@
               <label>Radio Callsign (optional)
                 <input name="radioCallsign" type="text" placeholder="ex. T05 or C10 or B01G" autocomplete="off" />
               </label>
+
+              <% if (userPhoneFieldEnabled) { %>
+              <label>Phone (optional)
+                <input name="phone" type="tel" placeholder="ex. 555-555-0123" autocomplete="off" maxlength="40" />
+              </label>
+              <% } %>
             </div>
 
             <div class="approveFinalRow">
@@ -685,6 +698,7 @@
         form.lastName.value = reviewRequest.lastName || "";
         form.email.value = reviewRequest.email || "";
         form.radioCallsign.value = reviewRequest.radioCallsign || "";
+        if (form.phone) form.phone.value = reviewRequest.phone || "";
 
         fillAgencySelect();
         const requestedAgency = String(reviewRequest.agencySuffix || "").trim().toLowerCase();

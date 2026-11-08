@@ -12,8 +12,12 @@
         grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 14px;
       }
+      .requestAccessContactRow.hasPhone {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
       @media (max-width: 990px) {
-        .requestAccessContactRow {
+        .requestAccessContactRow,
+        .requestAccessContactRow.hasPhone {
           grid-template-columns: 1fr;
         }
       }
@@ -97,6 +101,8 @@
       typeof portalTitle !== "undefined" && portalTitle ? portalTitle : "TAK Portal";
     const usernamePrefixLabel = String((settings && settings.USERNAME_PREFIX_LABEL) || "").trim() || "Badge Number / Username";
     const requireAllDetailsForNewAgency = !!requireAllAgencyDetails;
+    const userPhoneFieldEnabled =
+      String((settings && settings.USER_PHONE_NUMBER_FIELD_ENABLED) || "").toLowerCase() === "true";
   %>
   <h1>Request <%= brandedPortalTitle %> Access</h1>
 
@@ -125,7 +131,7 @@
         <input name="lastName" placeholder="Doe" required value="<%= (form && form.lastName) ? form.lastName : '' %>" />
       </label>
 
-      <div class="requestAccessContactRow">
+      <div class="requestAccessContactRow<%= userPhoneFieldEnabled ? ' hasPhone' : '' %>">
         <label>Email Address
           <input name="email" type="email" placeholder="example@agency.gov" required value="<%= (form && form.email) ? form.email : '' %>" />
         </label>
@@ -150,6 +156,19 @@
             value="<%= (form && form.radioCallsign) ? form.radioCallsign : '' %>"
           />
         </label>
+
+        <% if (userPhoneFieldEnabled) { %>
+        <label>Phone Number (optional)
+          <input
+            name="phone"
+            type="tel"
+            placeholder="ex. 555-555-0123"
+            autocomplete="off"
+            maxlength="40"
+            value="<%= (form && form.phone) ? form.phone : '' %>"
+          />
+        </label>
+        <% } %>
       </div>
 
       <label style="grid-column: 1 / -1;">Agency

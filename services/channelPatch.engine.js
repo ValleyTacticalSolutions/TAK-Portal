@@ -4,14 +4,20 @@
  * Bidirectional: full mesh (both ways). Unidirectional: sources → destinations only
  * (left/right lists + ltr|rtl arrow resolved by channelPatch.store.resolveFlowEnds).
  *
- * Important: patched CoT is written on the portal's webadmin TLS stream. Reusing the
- * EUD's UID/SA would make TAK Server treat webadmin as a second instance of that
- * client (same callsign, admin's full group list). We therefore:
- *  - assign a distinct UID per dest (…callsign.takportal.dest)
- *  - keep type, team (__group), usericon, color, and the rest of the marker payload
- *  - keep <contact callsign> so ATAK does not label markers "NO CALLSIGN"
- *  - strip only endpoint / flow-tags / detail uid so the copy is not a live ClientEndpoint
- *  - ignore our own echoes on the map stream
+ * Patched CoT is written on the portal's webadmin TLS stream. Reusing the EUD's
+ * UID would make TAK Server treat webadmin as a second instance of that client
+ * (same callsign, admin's full group list). A distinct UID per destination did
+ * the same thing to ATAK: contacts are keyed by UID, so one person in several
+ * patched channels showed up once per channel.
+ *
+ * Each source UID therefore gets one stable clone (…callsign.takportal.<srcUid>),
+ * and that single event lists every destination group. TAK group membership
+ * decides who receives it. Someone already in a destination channel updates the
+ * same clone instead of growing another contact.
+ *
+ * The copy keeps type, team (__group), usericon, color, and <contact callsign>.
+ * Endpoint / flow-tags / detail uid are stripped so it is not a live ClientEndpoint.
+ * Our own echoes on the map stream are ignored.
  */
 const cotStream = require("./cotStream.service");
 const mapMeta = require("./mapMeta.service");
@@ -168,26 +174,62 @@ function stampPatchTag(detail, meta) {
   };
 }
 
-function setFilterGroup(detail, groupName) {
-  const g = safeStr(groupName).trim();
-  if (!g) return;
-  detail.filtergroup = { _attributes: { group: g } };
+function setFilterGroups(detail, groupNames) {
+  const groups = [];
+  const seen = new Set();
+  for (const name of groupNames || []) {
+    const g = safeStr(name).trim();
+    if (!g) continue;
+    const key = g.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    groups.push(g);
+  }
+  if (!groups.length) return;
+  if (groups.length === 1) {
+    detail.filtergroup = { _attributes: { group: groups[0] } };
+    return;
+  }
+  detail.filtergroup = groups.map((group) => ({ _attributes: { group } }));
 }
 
-function patchedUid(srcUid, destGroup, callsign) {
-  // Distinct UID per dest so TAK does not bind the copy to the webadmin
-  // ClientEndpoint as a second instance of the real EUD. Callsign prefix
-  // keeps UIDs readable in logs / filters (see takMetrics .takportal. exclude).
-  const label =
-    safeStr(callsign).trim() || safeStr(srcUid).trim() || "unit";
-  const slugLabel = label
+const PATCH_UID_MAX = 128;
+
+function slugToken(value) {
+  return safeStr(value)
+    .trim()
     .replace(/[^a-zA-Z0-9._-]+/g, "-")
     .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 48);
-  const dest = groupKey(destGroup) || toMartiGroupName(destGroup) || "dest";
-  const slugDest = dest.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "");
-  return `${slugLabel || "unit"}.takportal.${slugDest || "dest"}`.slice(0, 128);
+    .replace(/^-|-$/g, "");
+}
+
+function fnv1a32(text) {
+  let h = 0x811c9dc5;
+  const s = safeStr(text);
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * One clone UID per source EUD, shared by every destination channel.
+ * Not the real UID: this write is on the webadmin stream.
+ * Callsign prefix keeps UIDs readable in logs / filters (see takMetrics .takportal. exclude).
+ */
+function patchedUid(srcUid, callsign) {
+  const rawUid = safeStr(srcUid).trim();
+  const uidSlug = slugToken(rawUid);
+  let uidToken = uidSlug;
+  if (!uidToken || uidToken.length > 64) {
+    const base = (uidToken || "src").slice(0, 48);
+    uidToken = `${base}-${fnv1a32(rawUid || "src")}`;
+  }
+  const suffix = `.takportal.${uidToken}`;
+  const room = Math.max(4, PATCH_UID_MAX - suffix.length);
+  const label = slugToken(callsign).slice(0, room) || uidSlug.slice(0, room) || "unit";
+  return `${label}${suffix}`.slice(0, PATCH_UID_MAX);
 }
 
 function stripContactEndpoint(contact) {
@@ -249,10 +291,55 @@ function neutralizeAsInjectedCopy(detail, fallbackCallsign) {
 }
 
 /**
- * Build a CoT clone targeted at one destination group.
- * @param {string} destGroup catalog / Authentik name (may include tak_)
+ * Point one injected copy at every destination group and give it the stable clone UID.
+ * Mutates detail. Does not write.
+ * @param {object} detail CoT detail tree
+ * @param {{ srcUid?: string, destGroups?: string[], callsign?: string, patchId?: string, fromGroup?: string }} meta
+ * @returns {{ uid: string, callsign: string, martiGroups: string[], catalogDests: string[] }}
  */
-async function buildTargetedCot(sourceCot, destGroup, meta) {
+function applyPatchIdentity(detail, meta) {
+  if (!detail || typeof detail !== "object") {
+    throw new Error("Invalid CoT detail");
+  }
+  clearExistingDests(detail);
+  const callsign = neutralizeAsInjectedCopy(detail, meta?.callsign);
+  const srcUid = safeStr(meta?.srcUid).trim();
+  const uid = patchedUid(srcUid, callsign);
+
+  const martiGroups = [];
+  const catalogDests = [];
+  const seen = new Set();
+  for (const destGroup of meta?.destGroups || []) {
+    const catalog = safeStr(destGroup).trim();
+    const martiGroup = toMartiGroupName(catalog);
+    if (!martiGroup) continue;
+    const key = martiGroup.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    martiGroups.push(martiGroup);
+    catalogDests.push(catalog);
+  }
+  // No dest would fall through to webadmin's full group list.
+  if (!martiGroups.length) throw new Error("Empty Marti dest group");
+
+  detail.marti.dest = martiGroups.map((group) => ({ _attributes: { group } }));
+  setFilterGroups(detail, martiGroups);
+  stampPatchTag(detail, {
+    patchId: meta?.patchId,
+    fromGroup: meta?.fromGroup,
+    toGroup: catalogDests.join("|"),
+    srcUid,
+    callsign,
+  });
+
+  return { uid, callsign, martiGroups, catalogDests };
+}
+
+/**
+ * Build one CoT clone for every destination of this source event.
+ * @param {string[]} destGroups catalog / Authentik names (may include tak_)
+ */
+async function buildPatchedCot(sourceCot, destGroups, meta) {
   const mod = await loadNodeCot();
   const CoT = mod.default || mod.CoT;
   if (!CoT) throw new Error("node-cot CoT constructor unavailable");
@@ -262,25 +349,15 @@ async function buildTargetedCot(sourceCot, destGroup, meta) {
 
   const srcUid = safeStr(raw.event?._attributes?.uid).trim();
   const clone = new CoT(raw);
-  const detail = clone.detail();
-  clearExistingDests(detail);
-  const callsign = neutralizeAsInjectedCopy(detail, meta?.callsign);
-
-  // Distinct UID so TAK does not bind this copy to the webadmin ClientEndpoint.
-  // CoT type is left unchanged so dest clients keep the source icon.
-  clone.uid(patchedUid(srcUid, destGroup, callsign));
-
-  const martiGroup = toMartiGroupName(destGroup);
-  if (!martiGroup) throw new Error("Empty Marti dest group");
-  clone.addDest({ group: martiGroup });
-  setFilterGroup(detail, martiGroup);
-  stampPatchTag(detail, {
-    ...meta,
-    toGroup: destGroup,
+  const shaped = applyPatchIdentity(clone.detail(), {
     srcUid,
-    callsign,
+    destGroups,
+    callsign: meta?.callsign,
+    patchId: meta?.patchId,
+    fromGroup: meta?.fromGroup,
   });
-
+  // CoT type is left unchanged so dest clients keep the source icon.
+  clone.uid(shaped.uid);
   return clone;
 }
 
@@ -321,28 +398,21 @@ async function forwardCot({ marker, cot }) {
   if (!destJobs.size) return;
 
   const jobs = Array.from(destJobs.values()).slice(0, MAX_DESTS_PER_EVENT);
+  const patchIdsTouched = new Set(jobs.map((job) => job.patchId));
   try {
-    const cots = [];
-    const patchIdsTouched = new Set();
-    for (const job of jobs) {
-      try {
-        const targeted = await buildTargetedCot(cot, job.dest, {
-          patchId: job.patchId,
-          fromGroup: job.fromGroup,
-          callsign: marker?.callsign,
-        });
-        cots.push(targeted);
-        patchIdsTouched.add(job.patchId);
-      } catch (err) {
-        queueRuntime(job.patchId, {
-          lastError: err?.message || String(err),
-        });
+    // One event, every dest group. A CoT per channel minted a new ATAK contact
+    // for the same callsign each time.
+    const targeted = await buildPatchedCot(
+      cot,
+      jobs.map((job) => job.dest),
+      {
+        patchId: [...patchIdsTouched].join("|"),
+        fromGroup: [...new Set(jobs.map((job) => job.fromGroup))].join("|"),
+        callsign: marker?.callsign,
       }
-    }
+    );
 
-    if (!cots.length) return;
-
-    const ok = await cotStream.writeCot(cots, { stripFlow: true });
+    const ok = await cotStream.writeCot(targeted, { stripFlow: true });
     const now = new Date().toISOString();
     for (const id of patchIdsTouched) {
       if (ok) {
@@ -354,7 +424,11 @@ async function forwardCot({ marker, cot }) {
       }
     }
   } catch (err) {
-    console.error("[channel-patch] forward failed:", err?.message || err);
+    const message = err?.message || String(err);
+    for (const id of patchIdsTouched) {
+      queueRuntime(id, { lastError: message });
+    }
+    console.error("[channel-patch] forward failed:", message);
   }
 }
 
@@ -431,6 +505,7 @@ module.exports = {
   isPortalBridgeCot,
   toMartiGroupName,
   patchedUid,
+  applyPatchIdentity,
   neutralizeAsInjectedCopy,
   getRuntimeHint,
   PATCH_TAG,

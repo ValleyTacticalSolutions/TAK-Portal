@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.32 - 11/6/26
+🐛 `Bug Fix` - Fixes further issues with channel patching to resolve duplicates
+
 ### v2.0.31 - 11/5/26
 ✨ `Enhancement` - Optional phone number field added to users page - Must be enabled in Settings, Branding & Appearance<br>
 ✨ `Enhancement` - Channel Patching - Adds support for uni-directional patches<br>

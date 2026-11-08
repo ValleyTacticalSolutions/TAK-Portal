@@ -95,6 +95,10 @@
   gap: 10px;
 }
 
+.approveEmailPwdRow.hasPhone{
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .approveFinalRow > label{
   margin: 0;
 }
@@ -168,6 +172,7 @@
     min-width: 0;
   }
   .approveEmailPwdRow,
+  .approveEmailPwdRow.hasPhone,
   .approveFinalRow{
     grid-template-columns: 1fr;
   }
@@ -202,6 +207,7 @@
   }
 
   .approveEmailPwdRow,
+  .approveEmailPwdRow.hasPhone,
   .approveFinalRow{
     grid-template-columns: 1fr;
   }
@@ -486,6 +492,8 @@ th.sortable:hover{
   <h1>Pending User Requests</h1>
   <%
     const usernamePrefixLabel = String((settings && settings.USERNAME_PREFIX_LABEL) || "").trim() || "Badge Number / Username";
+    const userPhoneFieldEnabled =
+      String((settings && settings.USER_PHONE_NUMBER_FIELD_ENABLED) || "").toLowerCase() === "true";
   %>
 
   <div class="card">
@@ -548,7 +556,7 @@ th.sortable:hover{
               <input name="lastName" placeholder="Doe" required />
             </label>
 
-            <div class="approveEmailPwdRow">
+            <div class="approveEmailPwdRow<%= userPhoneFieldEnabled ? ' hasPhone' : '' %>">
               <label>Email (optional)
                 <input name="email" type="email" placeholder="example@agency.gov" />
               </label>
@@ -583,6 +591,12 @@ th.sortable:hover{
               <label>Radio Callsign (optional)
                 <input name="radioCallsign" type="text" placeholder="ex. T05 or C10 or B01G" autocomplete="off" />
               </label>
+
+              <% if (userPhoneFieldEnabled) { %>
+              <label>Phone (optional)
+                <input name="phone" type="tel" placeholder="ex. 555-555-0123" autocomplete="off" maxlength="40" />
+              </label>
+              <% } %>
             </div>
 
             <div class="approveFinalRow">
@@ -1030,6 +1044,8 @@ th.sortable:hover{
     form.email.value = reqObj.email || '';
     const radioCallsignInput = form.querySelector('[name="radioCallsign"]');
     if (radioCallsignInput) radioCallsignInput.value = String(reqObj.radioCallsign || '').trim();
+    const phoneInput = form.querySelector('[name="phone"]');
+    if (phoneInput) phoneInput.value = String(reqObj.phone || '').trim();
 
     const agencySelect = form.querySelector('select.agencySelect');
     const templateSelect = form.querySelector('select.templateSelect');
