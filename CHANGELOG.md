@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.33 - 11/8/26
+✨ `Enhancement` - Improves handling for icon matching
+
 ### v2.0.32 - 11/6/26
 🐛 `Bug Fix` - Fixes further issues with channel patching to resolve duplicates
 
