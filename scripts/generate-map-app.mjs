@@ -72,6 +72,7 @@ function generateMapApp() {
 
   const finalOut = `/* Auto-generated from ${path.relative(root, src)} — re-run: node scripts/generate-map-app.mjs */
 import { CotStoreClient } from "../engine/CotStoreClient";
+import { styleReadyForMarkerLayers as __styleReadyForMarkerLayers } from "../styleGate";
 import {
   OVERVIEW_MODE_ZOOM as _WORKER_OVERVIEW_ZOOM,
   VIEWPORT_PAD_RATIO as _WORKER_PAD,

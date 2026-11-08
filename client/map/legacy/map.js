@@ -2426,8 +2426,18 @@
     }
   }
 
+  function styleReadyForMarkerLayers() {
+    // Defined in client/map/styleGate.ts and imported by the map bundle.
+    // isStyleLoaded() waits for every tile. Desktop viewports miss the 3s
+    // restore deadline and the fallback rebuilds marker layers (a flash).
+    if (typeof __styleReadyForMarkerLayers === "function") {
+      return __styleReadyForMarkerLayers(map);
+    }
+    return !!(map && typeof map.isStyleLoaded === "function" && map.isStyleLoaded());
+  }
+
   function reinstallMapIconsFromCache() {
-    if (!map || !map.isStyleLoaded()) return;
+    if (!styleReadyForMarkerLayers()) return;
     iconLoadPending.clear();
     triggerMarkerRepaint();
   }
@@ -2683,7 +2693,7 @@
   }
 
   function installMapImage(imageName, source) {
-    if (!map.isStyleLoaded() || !source) {
+    if (!styleReadyForMarkerLayers() || !source) {
       return Promise.resolve(false);
     }
     const addOpts = { pixelRatio: 1 };
@@ -2794,6 +2804,15 @@
     attributionControl: true,
     transformRequest: transformMapRequest || undefined,
   });
+
+  if (typeof map.setMissingStyleImageResolver === "function") {
+    map.setMissingStyleImageResolver(function (imageId) {
+      const mapImageId = normalizeMapImageId(imageId);
+      if (!isRenderedMapImageId(mapImageId)) return;
+      const info = resolveIconMetaForImageId(mapImageId);
+      return loadRenderedMapIcon(mapImageId, info && info.apiIconId, info || {});
+    });
+  }
 
   if (typeof ResizeObserver !== "undefined") {
     const mapEl = document.getElementById("map");
@@ -4811,7 +4830,7 @@
   }
 
   function addMarkerLayers() {
-    if (!map.isStyleLoaded()) return false;
+    if (!styleReadyForMarkerLayers()) return false;
     if (markerLayersComplete()) return true;
     try {
       if (map.getSource(SOURCE_ID)) removeMarkerLayers();
@@ -4866,7 +4885,7 @@
   }
 
   function ensureMarkerLayers() {
-    if (!map.isStyleLoaded()) return false;
+    if (!styleReadyForMarkerLayers()) return false;
     if (markerLayersComplete()) {
       markerLayersReady = true;
       bindMarkerLayerHandlers();
@@ -7159,7 +7178,7 @@
 
       function tryRestore(attempt) {
         if (gen !== styleRestoreGen) return;
-        if (!map.isStyleLoaded()) {
+        if (!styleReadyForMarkerLayers()) {
           if (attempt < 400) {
             setTimeout(function () {
               tryRestore(attempt + 1);
@@ -7169,11 +7188,9 @@
         }
 
         if (!markerLayersComplete()) {
-          try {
-            removeMarkerLayers();
-          } catch (err) {
-            console.warn("[map] removeMarkerLayers failed during style restore", err);
-          }
+          // ensureMarkerLayers adds layers without deleting them first when
+          // the style cannot accept the add. Wiping first flashed the desktop
+          // map whenever a retry landed before the style document was ready.
           if (!ensureMarkerLayers()) {
             if (attempt < 400) {
               setTimeout(function () {
