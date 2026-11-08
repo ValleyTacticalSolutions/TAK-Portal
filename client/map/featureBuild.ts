@@ -183,7 +183,9 @@ export function buildPaintFeature(
   const overview = !!options.overviewMode;
   const hasMapImage = !!mapImageId;
   const iconReady = !!options.iconReady && hasMapImage && !overview;
-  // Keep iconId on the feature even before the bitmap is installed so styleimagemissing can fire.
+  // Keep the image id on the feature so MapLibre awaits the missing-image
+  // resolver and addImage runs before the tile is laid out. The team circle
+  // stays up until that install actually succeeds.
   const showCircle = overview || !hasMapImage || !iconReady ? 1 : 0;
   const drawTier = marker.drawTier != null ? Number(marker.drawTier) : markerDrawTier(marker);
   const renderSort =

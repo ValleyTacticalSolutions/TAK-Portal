@@ -77,13 +77,30 @@ async function run() {
   assert.strictEqual(cloudTak.properties.showCircle, 1);
   assert.strictEqual(cloudTak.properties.usesMapIcon, 0);
 
+  const customPending = buildPaintFeature(
+    groundEud({
+      iconSource: "usericon",
+      iconId: "34ae1613-9645-4222-a9d2-e5f243dea2865:People/walk.png",
+    }),
+    { iconReady: false }
+  );
+  assert.strictEqual(
+    customPending.properties.iconId,
+    "mimg-0123456789abcdef",
+    "icon id stays on the feature so the missing-image resolver can install it"
+  );
+  assert.strictEqual(customPending.properties.showCircle, 1);
+  assert.strictEqual(customPending.properties.usesMapIcon, 1);
+
   const custom = buildPaintFeature(
     groundEud({
       iconSource: "usericon",
       iconId: "34ae1613-9645-4222-a9d2-e5f243dea2865:People/walk.png",
-    })
+    }),
+    { iconReady: true }
   );
   assert.strictEqual(custom.properties.iconId, "mimg-0123456789abcdef");
+  assert.strictEqual(custom.properties.showCircle, 0);
   assert.strictEqual(custom.properties.usesMapIcon, 1);
 
   const forcedOff = buildPaintFeature(
@@ -127,6 +144,26 @@ async function run() {
     color: "#00ff00",
   });
   assert.strictEqual(air.properties.iconId, "mimg-abcdef0123456789");
+  assert.strictEqual(air.properties.showCircle, 1);
+  const airReady = buildPaintFeature(
+    {
+      uid: "air-1",
+      callsign: "AIRBEAR",
+      type: "a-f-A-C-F",
+      lat: 36.1,
+      lon: -86.67,
+      affiliation: "friend",
+      origin: "feed",
+      iconId: "uuid:Air/fed_fixed_wing.png",
+      iconSource: "type2525b",
+      mapImageId: "mimg-abcdef0123456789",
+      usesMapIcon: 1,
+      color: "#00ff00",
+    },
+    { iconReady: true }
+  );
+  assert.strictEqual(airReady.properties.iconId, "mimg-abcdef0123456789");
+  assert.strictEqual(airReady.properties.showCircle, 0);
 
   assert.strictEqual(darkenHexColor("#ffffff", 0.5), "#808080");
   assert.strictEqual(isMarkerStale({ stale: "2026-01-01T00:00:00.000Z" }, Date.parse("2026-01-01T00:00:01.000Z")), true);

@@ -157,6 +157,7 @@
   }
 
   function applyBasemapStyle(style) {
+    mapStyleParsed = false;
     const opts = {
       transformStyle: function (prev, next) {
         return preserveMarkerLayersInStyle(prev, next);
@@ -218,6 +219,13 @@
   const OVERVIEW_MODE_ZOOM = 5;
   const ICON_DB_NAME = "tak-portal-map-icons";
   const ICON_DB_STORE = "icons";
+  // Bump when rendered PNG bytes change without the mapImageId inputs changing.
+  // Upgrade deletes the previous store so a desktop does not keep stale tints.
+  const ICON_DB_VERSION = 2;
+  const ICON_FAIL_BACKOFF_MS = 30000;
+  const ICON_BATCH_LIMIT = 120;
+  let mapStyleParsed = false;
+  let iconLoadGen = 0;
   let iconDbPromise = null;
   let paddedViewportBounds = null;
   let viewportSourceUids = new Set();
@@ -856,9 +864,13 @@
         resolve(null);
         return;
       }
-      const req = indexedDB.open(ICON_DB_NAME, 1);
+      const req = indexedDB.open(ICON_DB_NAME, ICON_DB_VERSION);
       req.onupgradeneeded = function () {
-        req.result.createObjectStore(ICON_DB_STORE);
+        const db = req.result;
+        if (db.objectStoreNames.contains(ICON_DB_STORE)) {
+          db.deleteObjectStore(ICON_DB_STORE);
+        }
+        db.createObjectStore(ICON_DB_STORE);
       };
       req.onsuccess = function () {
         resolve(req.result);
@@ -891,14 +903,19 @@
       });
   }
 
+  const iconCacheWritten = new Set();
+
   function writeIconCache(mapImageId, blob) {
+    const id = String(mapImageId || "");
+    if (!id || iconCacheWritten.has(id)) return Promise.resolve();
     return openIconDb()
       .then(function (db) {
         if (!db || !blob) return;
         return new Promise(function (resolve, reject) {
           const tx = db.transaction(ICON_DB_STORE, "readwrite");
-          tx.objectStore(ICON_DB_STORE).put(blob, String(mapImageId));
+          tx.objectStore(ICON_DB_STORE).put(blob, id);
           tx.oncomplete = function () {
+            iconCacheWritten.add(id);
             resolve();
           };
           tx.onerror = function () {
@@ -1661,6 +1678,9 @@
   function registerServerMapImageMeta(mapImageId, apiIconId, markerProps) {
     if (!mapImageId) return;
     const canonicalId = normalizeMapImageId(mapImageId);
+    const api = String(apiIconId || "");
+    const existing = iconIdByMapImageId.get(canonicalId);
+    if (existing && existing.apiIconId && (existing.apiIconId === api || !api)) return;
     const meta = {
       apiIconId: String(apiIconId || ""),
       mapImageId: canonicalId,
@@ -1765,28 +1785,57 @@
     }
   }
 
+  function releaseDecodedIcon(image) {
+    if (image && typeof image.close === "function") {
+      try {
+        image.close();
+      } catch (_) {}
+    }
+  }
+
+  function iconFetchAllowed(mapImageId) {
+    const id = normalizeMapImageId(mapImageId);
+    const hasImage = !!(map && typeof map.hasImage === "function" && map.hasImage(id));
+    const row = iconAttempt.get(id);
+    if (typeof __iconFetchAllowed === "function") {
+      return __iconFetchAllowed(row, Date.now(), ICON_FAIL_BACKOFF_MS, hasImage);
+    }
+    if (hasImage) return false;
+    if (!row) return true;
+    if (row.state === "installed" || row.state === "pending") return false;
+    if (row.state === "failed" && Date.now() - row.at < ICON_FAIL_BACKOFF_MS) return false;
+    return true;
+  }
+
+  function settleIconInstall(canonicalId, installed, image, gen) {
+    releaseDecodedIcon(image);
+    if (gen != null && gen !== iconLoadGen) return false;
+    if (installed) {
+      iconAttempt.set(canonicalId, { state: "installed", at: Date.now() });
+      hideCirclesForMapImage(canonicalId);
+      triggerMarkerRepaint();
+      return true;
+    }
+    // addImage was refused. Do not hide the circle and do not cool down;
+    // the next resolver or sweep can retry without another decode storm.
+    iconAttempt.delete(canonicalId);
+    return false;
+  }
+
   function loadRenderedMapIcon(mapImageId, apiIconId, markerProps) {
-    if (!mapImageId) return Promise.resolve();
+    if (!mapImageId || !map) return Promise.resolve(false);
     const canonicalId = normalizeMapImageId(mapImageId);
     registerServerMapImageMeta(canonicalId, apiIconId, markerProps);
     if (map.hasImage(canonicalId)) {
+      iconAttempt.set(canonicalId, { state: "installed", at: Date.now() });
       hideCirclesForMapImage(canonicalId);
-      return Promise.resolve();
+      return Promise.resolve(true);
     }
     if (iconLoadPending.has(canonicalId)) return iconLoadPending.get(canonicalId);
+    if (!iconFetchAllowed(canonicalId)) return Promise.resolve(false);
 
-    const cachedImage = mapIconImageCache.get(canonicalId);
-    if (cachedImage) {
-      const cachedPromise = installMapImage(canonicalId, cachedImage).then(function () {
-        hideCirclesForMapImage(canonicalId);
-        triggerMarkerRepaint();
-      });
-      iconLoadPending.set(canonicalId, cachedPromise);
-      cachedPromise.finally(function () {
-        iconLoadPending.delete(canonicalId);
-      });
-      return cachedPromise;
-    }
+    const gen = iconLoadGen;
+    iconAttempt.set(canonicalId, { state: "pending", at: Date.now() });
 
     let url =
       "/api/map/icons/rendered?mapImageId=" + encodeURIComponent(canonicalId);
@@ -1813,26 +1862,31 @@
         });
       })
       .then(function (blob) {
+        if (gen !== iconLoadGen) return null;
         void writeIconCache(canonicalId, blob);
         return decodeIconBlob(blob);
       })
       .then(function (image) {
-        mapIconImageCache.set(canonicalId, image);
-        return installMapImage(canonicalId, image);
-      })
-      .then(function () {
-        hideCirclesForMapImage(canonicalId);
-        triggerMarkerRepaint();
+        if (!image || gen !== iconLoadGen) {
+          releaseDecodedIcon(image);
+          return false;
+        }
+        return installMapImage(canonicalId, image).then(function (ok) {
+          return settleIconInstall(canonicalId, ok === true, image, gen);
+        });
       })
       .catch(function (err) {
+        if (gen !== iconLoadGen) return false;
         console.warn("Failed to load rendered map icon", {
           mapImageId: canonicalId,
           err: err,
         });
+        iconAttempt.set(canonicalId, { state: "failed", at: Date.now() });
         notifyOverlayIcon(canonicalId, false);
+        return false;
       })
       .finally(function () {
-        iconLoadPending.delete(canonicalId);
+        if (iconLoadPending.get(canonicalId) === promise) iconLoadPending.delete(canonicalId);
       });
 
     iconLoadPending.set(canonicalId, promise);
@@ -2405,6 +2459,7 @@
   let cursorCoordFormatIndex = coordFormatIndexFromStored(mapPrefs.coordFormat);
   let defaultIconIds = {};
   const iconLoadPending = new Map();
+  const iconAttempt = new Map();
   const iconIdByMapImageId = new Map();
   let missionIconManifest = [];
 
@@ -2426,9 +2481,23 @@
     }
   }
 
+  function styleReadyForMarkerLayers() {
+    // client/map/styleGate.ts. Do not use map.isStyleLoaded(): it is false
+    // while any tile is loading, so addImage never ran on a busy desktop.
+    if (typeof __styleReadyForMarkerLayers === "function") {
+      return __styleReadyForMarkerLayers(map, mapStyleParsed);
+    }
+    if (mapStyleParsed) return true;
+    try {
+      const style = map && typeof map.getStyle === "function" ? map.getStyle() : null;
+      return !!(style && Array.isArray(style.layers));
+    } catch (_) {
+      return false;
+    }
+  }
+
   function reinstallMapIconsFromCache() {
-    if (!map || !map.isStyleLoaded()) return;
-    iconLoadPending.clear();
+    if (!styleReadyForMarkerLayers()) return;
     triggerMarkerRepaint();
   }
 
@@ -2453,38 +2522,58 @@
     if (!entries.length || !map) return Promise.resolve();
 
     const needed = [];
+    const seen = new Set();
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
       const mapImageId = normalizeMapImageId(entry.mapImageId || "");
-      if (!mapImageId || !isRenderedMapImageId(mapImageId)) continue;
-      if (map.hasImage(mapImageId) || iconLoadPending.has(mapImageId)) continue;
+      if (!mapImageId || !isRenderedMapImageId(mapImageId) || seen.has(mapImageId)) continue;
+      if (iconLoadPending.has(mapImageId) || !iconFetchAllowed(mapImageId)) continue;
+      seen.add(mapImageId);
       registerServerMapImageMeta(mapImageId, entry.apiIconId, entry);
       needed.push(entry);
     }
     if (!needed.length) return Promise.resolve();
+    return preloadIconChunks(needed, 0);
+  }
 
-    const batchKey = "batch:" + needed.map(function (e) {
-      return normalizeMapImageId(e.mapImageId);
-    }).join(",");
-    if (iconLoadPending.has(batchKey)) return iconLoadPending.get(batchKey);
+  function preloadIconChunks(entries, offset) {
+    if (!map || offset >= entries.length) return Promise.resolve();
+    const chunk = entries.slice(offset, offset + ICON_BATCH_LIMIT);
+    const ids = [];
+    for (let i = 0; i < chunk.length; i++) {
+      const id = normalizeMapImageId(chunk[i].mapImageId || "");
+      if (!id || iconLoadPending.has(id) || !iconFetchAllowed(id)) continue;
+      ids.push(id);
+    }
+    if (!ids.length) return preloadIconChunks(entries, offset + ICON_BATCH_LIMIT);
 
-    const promise = fetch("/api/map/icons/rendered/batch", {
+    const gen = iconLoadGen;
+    const batchKey = "batch:" + ids.join(",");
+    ids.forEach(function (id) {
+      iconAttempt.set(id, { state: "pending", at: Date.now() });
+    });
+
+    const chunkPromise = fetch("/api/map/icons/rendered/batch", {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        icons: needed.map(function (entry) {
-          return {
-            mapImageId: normalizeMapImageId(entry.mapImageId),
-            apiIconId: entry.apiIconId || "",
-            color: entry.color || "",
-            teamColor: entry.teamColor != null ? entry.teamColor : "",
-            iconSource: entry.iconSource || "",
-            origin: entry.origin || "",
-            type: entry.type || "",
-            affiliation: entry.affiliation || "",
-          };
-        }),
+        icons: chunk
+          .filter(function (entry) {
+            return ids.indexOf(normalizeMapImageId(entry.mapImageId || "")) >= 0;
+          })
+          .map(function (entry) {
+            return {
+              mapImageId: normalizeMapImageId(entry.mapImageId),
+              apiIconId: entry.apiIconId || "",
+              color: entry.color || "",
+              teamColor: entry.teamColor != null ? entry.teamColor : "",
+              iconSource: entry.iconSource || "",
+              origin: entry.origin || "",
+              type: entry.type || "",
+              affiliation: entry.affiliation || "",
+            };
+          }),
       }),
     })
       .then(function (resp) {
@@ -2492,45 +2581,65 @@
         return resp.json();
       })
       .then(function (data) {
+        if (gen !== iconLoadGen) return false;
         const icons = data.icons || {};
         const installs = [];
+        const installedIds = new Set();
         for (const mapImageId of Object.keys(icons)) {
           const b64 = icons[mapImageId];
           if (!b64) continue;
           const canonicalId = normalizeMapImageId(mapImageId);
+          installedIds.add(canonicalId);
           const blob = base64ToBlob(b64, "image/png");
           installs.push(
-            decodeIconBlob(blob)
-              .then(function (image) {
-                mapIconImageCache.set(canonicalId, image);
-                void writeIconCache(canonicalId, blob);
-                return installMapImage(canonicalId, image);
-              })
+            writeIconCache(canonicalId, blob)
               .then(function () {
-                hideCirclesForMapImage(canonicalId);
+                return decodeIconBlob(blob);
+              })
+              .then(function (image) {
+                if (gen !== iconLoadGen) {
+                  releaseDecodedIcon(image);
+                  return false;
+                }
+                return installMapImage(canonicalId, image).then(function (ok) {
+                  return settleIconInstall(canonicalId, ok === true, image, gen);
+                });
               })
           );
         }
+        const missing = Array.isArray(data.missing) ? data.missing : [];
+        for (let i = 0; i < ids.length; i++) {
+          if (installedIds.has(ids[i])) continue;
+          if (gen !== iconLoadGen) continue;
+          iconAttempt.set(ids[i], { state: "failed", at: Date.now() });
+        }
+        for (let m = 0; m < missing.length; m++) {
+          const missingId = normalizeMapImageId(missing[m]);
+          if (!missingId || installedIds.has(missingId) || gen !== iconLoadGen) continue;
+          iconAttempt.set(missingId, { state: "failed", at: Date.now() });
+        }
         return Promise.all(installs);
-      })
-      .then(function () {
-        triggerMarkerRepaint();
-        scheduleMissingIconSweep();
       })
       .catch(function (err) {
         console.warn("Batch icon preload failed", err);
-        for (let i = 0; i < needed.length; i++) {
-          const failedId = normalizeMapImageId(needed[i].mapImageId || "");
-          if (failedId && !map.hasImage(failedId)) notifyOverlayIcon(failedId, false);
+        if (gen !== iconLoadGen) return false;
+        for (let i = 0; i < ids.length; i++) {
+          iconAttempt.set(ids[i], { state: "failed", at: Date.now() });
         }
-        scheduleMissingIconSweep();
+        return false;
       })
       .finally(function () {
         iconLoadPending.delete(batchKey);
+        for (let i = 0; i < ids.length; i++) {
+          if (iconLoadPending.get(ids[i]) === chunkPromise) iconLoadPending.delete(ids[i]);
+        }
       });
 
-    iconLoadPending.set(batchKey, promise);
-    return promise;
+    iconLoadPending.set(batchKey, chunkPromise);
+    for (let i = 0; i < ids.length; i++) iconLoadPending.set(ids[i], chunkPromise);
+    return chunkPromise.then(function () {
+      return preloadIconChunks(entries, offset + ICON_BATCH_LIMIT);
+    });
   }
 
   let missingIconSweepTimer = null;
@@ -2542,7 +2651,7 @@
       const canonicalId = normalizeMapImageId(mapImageId);
       if (!canonicalId || !isRenderedMapImageId(canonicalId) || seen.has(canonicalId)) return;
       seen.add(canonicalId);
-      if (map.hasImage(canonicalId) || iconLoadPending.has(canonicalId)) return;
+      if (!iconFetchAllowed(canonicalId) || iconLoadPending.has(canonicalId)) return;
       const info =
         meta ||
         resolveIconMetaForImageId(canonicalId) ||
@@ -2588,6 +2697,7 @@
       if (!m || !markerShouldPaintMapIcon(m)) continue;
       const mapImageId = normalizeMapImageId(m.mapImageId || "");
       if (!mapImageId || !isRenderedMapImageId(mapImageId) || seen.has(mapImageId)) continue;
+      if (!iconFetchAllowed(mapImageId) || iconLoadPending.has(mapImageId)) continue;
       seen.add(mapImageId);
       registerServerMapImageMeta(mapImageId, String(m.iconId || ""), m);
       out.push({
@@ -2683,7 +2793,7 @@
   }
 
   function installMapImage(imageName, source) {
-    if (!map.isStyleLoaded() || !source) {
+    if (!styleReadyForMarkerLayers() || !source) {
       return Promise.resolve(false);
     }
     const addOpts = { pixelRatio: 1 };
@@ -2794,6 +2904,15 @@
     attributionControl: true,
     transformRequest: transformMapRequest || undefined,
   });
+
+  if (typeof map.setMissingStyleImageResolver === "function") {
+    map.setMissingStyleImageResolver(function (imageId) {
+      const mapImageId = normalizeMapImageId(imageId);
+      if (!isRenderedMapImageId(mapImageId)) return;
+      const info = resolveIconMetaForImageId(mapImageId);
+      return loadRenderedMapIcon(mapImageId, info && info.apiIconId, info || {});
+    });
+  }
 
   if (typeof ResizeObserver !== "undefined") {
     const mapEl = document.getElementById("map");
@@ -4811,7 +4930,7 @@
   }
 
   function addMarkerLayers() {
-    if (!map.isStyleLoaded()) return false;
+    if (!styleReadyForMarkerLayers()) return false;
     if (markerLayersComplete()) return true;
     try {
       if (map.getSource(SOURCE_ID)) removeMarkerLayers();
@@ -4866,7 +4985,7 @@
   }
 
   function ensureMarkerLayers() {
-    if (!map.isStyleLoaded()) return false;
+    if (!styleReadyForMarkerLayers()) return false;
     if (markerLayersComplete()) {
       markerLayersReady = true;
       bindMarkerLayerHandlers();
@@ -7101,15 +7220,16 @@
   }
 
   let styleRestoreTimer = null;
-  let styleRestoreFallbackTimer = null;
   let styleRestoreGen = 0;
 
   function restoreMapAfterStyleChange() {
+    mapStyleParsed = true;
+    iconLoadGen++;
+    iconAttempt.clear();
     const gen = styleRestoreGen;
     liveMarkersLoadGen++;
     lastGeoJsonFetchOk = false;
     if (styleRestoreTimer) clearTimeout(styleRestoreTimer);
-    if (styleRestoreFallbackTimer) clearTimeout(styleRestoreFallbackTimer);
 
     styleRestoreTimer = setTimeout(function () {
       styleRestoreTimer = null;
@@ -7159,33 +7279,14 @@
 
       function tryRestore(attempt) {
         if (gen !== styleRestoreGen) return;
-        if (!map.isStyleLoaded()) {
-          if (attempt < 400) {
+        if (!styleReadyForMarkerLayers() || !ensureMarkerLayers()) {
+          if (attempt < 5) {
             setTimeout(function () {
               tryRestore(attempt + 1);
             }, 50);
           }
           return;
         }
-
-        if (!markerLayersComplete()) {
-          try {
-            removeMarkerLayers();
-          } catch (err) {
-            console.warn("[map] removeMarkerLayers failed during style restore", err);
-          }
-          if (!ensureMarkerLayers()) {
-            if (attempt < 400) {
-              setTimeout(function () {
-                tryRestore(attempt + 1);
-              }, 50);
-            }
-            return;
-          }
-        } else {
-          bindMarkerLayerHandlers();
-        }
-
         finalizeRestore();
       }
 
@@ -7193,18 +7294,6 @@
       mapRefreshPending = true;
       closeMapPopup();
       tryRestore(0);
-
-      map.once("idle", function () {
-        if (gen !== styleRestoreGen || markerLayersReady) return;
-        tryRestore(0);
-      });
-
-      styleRestoreFallbackTimer = setTimeout(function () {
-        styleRestoreFallbackTimer = null;
-        if (gen !== styleRestoreGen || markerLayersReady) return;
-        console.warn("[map] style restore fallback — forcing marker layer rebuild");
-        tryRestore(0);
-      }, 3000);
     }, 0);
   }
 
@@ -7295,10 +7384,6 @@
   map.on("styleimagemissing", onStyleImageMissing);
 
   map.on("style.load", restoreMapAfterStyleChange);
-
-  map.on("load", function () {
-    restoreMapAfterStyleChange();
-  });
 
   map.on("movestart", function (e) {
     closeStackPicker();

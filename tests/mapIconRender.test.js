@@ -61,6 +61,28 @@ async function runTests() {
   assert.ok(batch.icons[mapImageId], "batch should include base64 PNG");
   assert.strictEqual(batch.missing.length, 0);
 
+  const capped = await mapIconRender.renderIconBatch(
+    [
+      {
+        mapImageId: "mimg-aaaaaaaaaaaaaaaa",
+        apiIconId: marker.iconId,
+        color,
+        teamColor: marker.teamColor,
+        iconSource: marker.iconSource,
+        origin: marker.origin,
+        type: marker.type,
+        affiliation: marker.affiliation,
+      },
+    ],
+    { maxItems: 0 }
+  );
+  assert.strictEqual(capped.rendered, 0);
+  assert.strictEqual(capped.requested, 1);
+  assert.ok(
+    capped.missing.includes("mimg-aaaaaaaaaaaaaaaa"),
+    "icons past the batch cap must be reported missing"
+  );
+
   const missingBatch = await mapIconRender.renderIconBatch([
     {
       mapImageId: "mimg-deadbeef00000001",

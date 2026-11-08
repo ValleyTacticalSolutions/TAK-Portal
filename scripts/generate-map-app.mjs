@@ -72,6 +72,7 @@ function generateMapApp() {
 
   const finalOut = `/* Auto-generated from ${path.relative(root, src)} — re-run: node scripts/generate-map-app.mjs */
 import { CotStoreClient } from "../engine/CotStoreClient";
+import { styleReadyForMarkerLayers as __styleReadyForMarkerLayers, iconFetchAllowed as __iconFetchAllowed } from "../styleGate";
 import {
   OVERVIEW_MODE_ZOOM as _WORKER_OVERVIEW_ZOOM,
   VIEWPORT_PAD_RATIO as _WORKER_PAD,
@@ -153,6 +154,27 @@ function __syncGeoJsonCacheFromWorkerFeatures(features) {
   }
 }
 
+function __markersFromWorkerFeatures(features) {
+  const out = [];
+  const list = Array.isArray(features) ? features : [];
+  for (let i = 0; i < list.length; i++) {
+    const props = list[i] && list[i].properties;
+    if (!props) continue;
+    out.push({
+      mapImageId: props.iconId || "",
+      iconId: props.apiIconId || "",
+      iconSource: props.iconSource || "",
+      origin: props.origin || "",
+      type: props.type || "",
+      affiliation: props.affiliation || "",
+      color: props.color || "",
+      teamColor: props.teamColor,
+      usesMapIcon: props.usesMapIcon,
+    });
+  }
+  return out;
+}
+
 function __applyWorkerDiff(diff) {
   if (!map || !markerLayersReady) return;
   const src = map.getSource(SOURCE_ID);
@@ -161,13 +183,7 @@ function __applyWorkerDiff(diff) {
     !(diff.add && diff.add.length) &&
     !(diff.update && diff.update.length) &&
     !(diff.remove && diff.remove.length);
-  if (empty) {
-    // Still ensure icons for current marker set (e.g. after channel toggle).
-    if (typeof preloadIconsForMarkers === "function") {
-      preloadIconsForMarkers(Array.from(markersByUid.values()));
-    }
-    return;
-  }
+  if (empty) return;
   if (typeof src.updateData === "function") {
     try {
       src.updateData(diff);
@@ -212,10 +228,8 @@ function __applyWorkerDiff(diff) {
       rebuildIconUidIndex(lastServerGeoJson.features);
     }
   }
-  if (typeof preloadIconsForMarkers === "function") {
-    preloadIconsForMarkers(Array.from(markersByUid.values()));
-  } else if (typeof scheduleMissingIconSweep === "function") {
-    scheduleMissingIconSweep();
+  if (diff.add && diff.add.length && typeof preloadIconsForMarkers === "function") {
+    preloadIconsForMarkers(__markersFromWorkerFeatures(diff.add));
   }
 }
 
