@@ -183,10 +183,9 @@ export function buildPaintFeature(
   const overview = !!options.overviewMode;
   const hasMapImage = !!mapImageId;
   const iconReady = !!options.iconReady && hasMapImage && !overview;
-  // MapLibre 6 logs "Image could not be loaded" and skips the symbol when
-  // icon-image names an id addImage has not finished. Keep the team circle
-  // until the bitmap is in the style, then swap. Referencing it early flashes
-  // on a desktop full of icons; a phone often has few enough that it is missed.
+  // Keep the image id on the feature so MapLibre awaits the missing-image
+  // resolver and addImage runs before the tile is laid out. The team circle
+  // stays up until that install actually succeeds.
   const showCircle = overview || !hasMapImage || !iconReady ? 1 : 0;
   const drawTier = marker.drawTier != null ? Number(marker.drawTier) : markerDrawTier(marker);
   const renderSort =
@@ -210,7 +209,7 @@ export function buildPaintFeature(
     affiliation: String(marker.affiliation || "other"),
     color,
     teamColor: marker.teamColor != null ? marker.teamColor : null,
-    iconId: iconReady ? mapImageId : "",
+    iconId: overview || !hasMapImage ? "" : mapImageId,
     apiIconId: apiIconId || "",
     iconSource: String(marker.iconSource || ""),
     origin: String(marker.origin || ""),

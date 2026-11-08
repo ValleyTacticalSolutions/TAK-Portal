@@ -26,7 +26,7 @@ async function loadStyleGate() {
 }
 
 async function run() {
-  const { styleReadyForMarkerLayers } = await loadStyleGate();
+  const { styleReadyForMarkerLayers, iconFetchAllowed } = await loadStyleGate();
 
   const desktopTilesStillLoading = {
     isStyleLoaded() {
@@ -63,6 +63,32 @@ async function run() {
         throw new Error("style swap");
       },
     }),
+    false,
+    "tile-idle is not a reason to call addImage during a style swap"
+  );
+  assert.strictEqual(
+    styleReadyForMarkerLayers(null, true),
+    true,
+    "style.load sets the parsed flag before tiles finish"
+  );
+
+  const now = 1_000_000;
+  assert.strictEqual(iconFetchAllowed(undefined, now, 30000, false), true);
+  assert.strictEqual(iconFetchAllowed(undefined, now, 30000, true), false);
+  assert.strictEqual(
+    iconFetchAllowed({ state: "pending", at: now }, now, 30000, false),
+    false
+  );
+  assert.strictEqual(
+    iconFetchAllowed({ state: "installed", at: now }, now, 30000, false),
+    false
+  );
+  assert.strictEqual(
+    iconFetchAllowed({ state: "failed", at: now - 1000 }, now, 30000, false),
+    false
+  );
+  assert.strictEqual(
+    iconFetchAllowed({ state: "failed", at: now - 30000 }, now, 30000, false),
     true
   );
   assert.strictEqual(
@@ -81,24 +107,20 @@ async function run() {
     path.join(__dirname, "..", "client", "map", "legacy", "map.js"),
     "utf8"
   );
-  const restoreAt = mapJs.indexOf("function tryRestore(attempt)");
-  assert.ok(restoreAt > 0, "tryRestore must exist");
-  const restoreBody = mapJs.slice(restoreAt, restoreAt + 1200);
+  assert.ok(!mapJs.includes("style restore fallback"), "the 3s layer rebuild is gone");
   assert.ok(
-    restoreBody.includes("styleReadyForMarkerLayers()"),
-    "style restore must use the style-document gate"
+    !mapJs.includes('map.on("load", function () {\n    restoreMapAfterStyleChange();'),
+    "startup must not restore the style twice"
   );
-  assert.ok(
-    !restoreBody.includes("map.isStyleLoaded()"),
-    "style restore must not wait on isStyleLoaded()"
-  );
-  assert.ok(
-    !restoreBody.includes("removeMarkerLayers()"),
-    "a failed restore retry must not wipe marker layers first"
-  );
+  assert.ok(mapJs.includes("ICON_DB_VERSION = 2"), "icon cache must drop stale v1 rows");
+  assert.ok(mapJs.includes("ICON_FAIL_BACKOFF_MS"), "failed icon fetches must cool down");
   assert.ok(
     mapJs.includes("map.setMissingStyleImageResolver"),
     "missing mimg icons must resolve before MapLibre logs them"
+  );
+  assert.ok(
+    mapJs.includes("ok === true"),
+    "circles hide only after addImage succeeds"
   );
 
   const generator = fs.readFileSync(
@@ -108,6 +130,16 @@ async function run() {
   assert.ok(
     generator.includes('from "../styleGate"'),
     "map bundle must import the style gate"
+  );
+  const diffFn = generator.slice(generator.indexOf("function __applyWorkerDiff"));
+  const diffBody = diffFn.slice(0, diffFn.indexOf("function __applyWorkerResync"));
+  assert.ok(
+    !diffBody.includes("markersByUid.values()"),
+    "a worker diff must not preload every marker"
+  );
+  assert.ok(
+    diffBody.includes("__markersFromWorkerFeatures(diff.add)"),
+    "a worker diff preloads only icons on new features"
   );
 
   console.log("ok - map style gate");

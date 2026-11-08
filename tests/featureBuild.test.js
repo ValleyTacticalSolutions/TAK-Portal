@@ -86,8 +86,8 @@ async function run() {
   );
   assert.strictEqual(
     customPending.properties.iconId,
-    "",
-    "icon id must stay blank until the bitmap is in the style"
+    "mimg-0123456789abcdef",
+    "icon id stays on the feature so the missing-image resolver can install it"
   );
   assert.strictEqual(customPending.properties.showCircle, 1);
   assert.strictEqual(customPending.properties.usesMapIcon, 1);
@@ -143,7 +143,7 @@ async function run() {
     usesMapIcon: 1,
     color: "#00ff00",
   });
-  assert.strictEqual(air.properties.iconId, "", "air icon waits until its bitmap is installed");
+  assert.strictEqual(air.properties.iconId, "mimg-abcdef0123456789");
   assert.strictEqual(air.properties.showCircle, 1);
   const airReady = buildPaintFeature(
     {

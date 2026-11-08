@@ -245,9 +245,15 @@ async function renderIconBatch(entries, options = {}) {
     if (!byId.has(mapImageId)) byId.set(mapImageId, entry);
   }
 
-  const unique = Array.from(byId.values()).slice(0, maxItems);
+  const allUnique = Array.from(byId.values());
+  const limit = Math.max(0, Number(maxItems) || 0);
+  const unique = allUnique.slice(0, limit);
   const icons = {};
   const missing = [];
+  for (let i = unique.length; i < allUnique.length; i++) {
+    const overflowId = String(allUnique[i]?.mapImageId || "").trim();
+    if (overflowId) missing.push(overflowId);
+  }
 
   const rendered = await runPool(unique, concurrency, async function (entry) {
     const mapImageId = String(entry.mapImageId || "").trim();
@@ -275,7 +281,7 @@ async function renderIconBatch(entries, options = {}) {
   return {
     icons,
     missing,
-    requested: unique.length,
+    requested: allUnique.length,
     rendered: Object.keys(icons).length,
     elapsedMs: elapsed,
   };
