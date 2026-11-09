@@ -2295,7 +2295,10 @@ function lineIsDockerHubRateLimit(text) {
 function lineIsTransientDockerPull(text) {
   const s = String(text || "");
   if (lineIsDockerHubRateLimit(s)) return false;
-  const pullish = /docker|registry|failed to copy|failed to fetch|error pulling|blob|manifest/i.test(s);
+  const pullish =
+    /docker|registry|failed to copy|failed to fetch|error pulling|blob|manifest|received unexpected HTTP status/i.test(
+      s
+    );
   if (!pullish) return false;
   return /unexpected EOF|(?:^|[^A-Za-z0-9])EOF(?:[^A-Za-z0-9]|$)|connection reset by peer|broken pipe|i\/o timeout|TLS handshake timeout|Client\.Timeout exceeded|use of closed network connection|short read|http2: server sent GOAWAY|:\s*5\d\d(?:[^0-9]|$)|status(?: code)?:\s*5\d\d(?:[^0-9]|$)|(?:^|[^0-9])5\d\d (?:Bad Gateway|Service Unavailable|Internal Server Error|Gateway Timeout)/i.test(
     s

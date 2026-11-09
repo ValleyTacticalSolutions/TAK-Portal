@@ -165,7 +165,7 @@ docker_pull_failure_kind() {
       printf '%s\n' ratelimit
       return 0
     fi
-    if grep -qiE 'docker|registry|failed to copy|failed to fetch|error pulling|blob|manifest' <<<"$window" \
+    if grep -qiE 'docker|registry|failed to copy|failed to fetch|error pulling|blob|manifest|received unexpected HTTP status' <<<"$window" \
       && grep -qiE 'unexpected EOF|(^|[^A-Za-z0-9])EOF([^A-Za-z0-9]|$)|connection reset by peer|broken pipe|i/o timeout|TLS handshake timeout|Client\.Timeout exceeded|use of closed network connection|short read|http2: server sent GOAWAY|:[[:space:]]*5[0-9][0-9]([^0-9]|$)|status( code)?:?[[:space:]]*5[0-9][0-9]([^0-9]|$)|(^|[^0-9])5[0-9][0-9] (Bad Gateway|Service Unavailable|Internal Server Error|Gateway Timeout)' <<<"$window"; then
       transient=1
     fi

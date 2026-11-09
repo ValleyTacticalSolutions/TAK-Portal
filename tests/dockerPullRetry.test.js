@@ -45,6 +45,12 @@ assert.strictEqual(
 );
 assert.strictEqual(
   marketplace.classifyDockerPullFailure(
+    "Error response from daemon: received unexpected HTTP status: 503 Service Unavailable"
+  ),
+  "transient"
+);
+assert.strictEqual(
+  marketplace.classifyDockerPullFailure(
     "unexpected status from HEAD request to https://registry-1.docker.io/v2/postgis/postgis/manifests/16-3.4: 404 Not Found"
   ),
   "other"
@@ -101,6 +107,14 @@ fi
 if [ "$mode" = always502 ]; then
   echo 'failed to copy: unexpected status from HEAD request to https://registry-1.docker.io/v2/postgis/postgis/manifests/16-3.4: 502 Bad Gateway'
   exit 1
+fi
+if [ "$mode" = daemon503 ]; then
+  if [ "$n" -lt 3 ]; then
+    echo 'Error response from daemon: received unexpected HTTP status: 503 Service Unavailable'
+    exit 1
+  fi
+  echo pulled
+  exit 0
 fi
 echo 'service "postgis" depends on undefined service "missing": invalid compose project'
 exit 1
@@ -159,6 +173,14 @@ assert.match(gateway.stdout, /FAIL/);
 assert.match(gateway.stdout, /502 Bad Gateway/);
 assert.doesNotMatch(gateway.stderr, /limiting pulls/);
 assert.strictEqual(gateway.count, 3, "a Hub 5xx is retried twice");
+
+const daemon503 = runRetry("daemon503");
+assert.strictEqual(daemon503.status, 0, daemon503.stderr);
+assert.match(daemon503.stdout, /OK/);
+assert.match(daemon503.stdout, /pulled/);
+assert.match(daemon503.stderr, /retrying \(attempt 1 of 3\)/);
+assert.match(daemon503.stderr, /retrying \(attempt 2 of 3\)/);
+assert.strictEqual(daemon503.count, 3, "daemon HTTP 503 wording is retried twice");
 
 const compose = runRetry("other");
 assert.strictEqual(compose.status, 0, compose.stderr);
