@@ -322,7 +322,14 @@ async function handleOutboxRow(row) {
 
   if (kind === "delete_user") {
     const pk = row.authentik_pk || payload.authentikPk;
-    if (pk) await api.delete(`/core/users/${pk}/`);
+    if (pk) {
+      try {
+        await api.delete(`/core/users/${pk}/`);
+      } catch (err) {
+        // Already gone in Authentik (e.g. deleted outside the portal).
+        if (Number(err?.response?.status || 0) !== 404) throw err;
+      }
+    }
     if (row.entity_id) await repo.deleteLocalUser(row.entity_id);
     return;
   }
@@ -374,7 +381,14 @@ async function handleOutboxRow(row) {
 
   if (kind === "delete_group") {
     const pk = row.authentik_pk || payload.authentikPk;
-    if (pk) await api.delete(`/core/groups/${pk}/`);
+    if (pk) {
+      try {
+        await api.delete(`/core/groups/${pk}/`);
+      } catch (err) {
+        // Already gone in Authentik (e.g. deleted outside the portal).
+        if (Number(err?.response?.status || 0) !== 404) throw err;
+      }
+    }
     if (row.entity_id) await repo.deleteLocalGroup(row.entity_id);
     return;
   }
@@ -664,6 +678,26 @@ async function inboundSnapshot() {
       seenGroupPks.add(String(g.pk));
       await upsertAuthentikGroup(g, pending);
     }
+
+    // Remove local groups Authentik no longer has (including orphans left by
+    // earlier syncs that only soft-handled users). Skipped when the group list
+    // is empty so a failed/empty Authentik response cannot wipe the directory.
+    if (groups.length > 0) {
+      const pendingGroupIds = pending.rows
+        .filter((r) => String(r.entity_type || "") === "group")
+        .map((r) => r.entity_id)
+        .filter(Boolean);
+      await db.query(
+        `DELETE FROM groups
+         WHERE authentik_pk IS NOT NULL
+           AND pending_delete = false
+           AND NOT (authentik_pk = ANY($1::text[]))
+           AND id <> ALL($2::uuid[])
+           AND NOT (authentik_pk = ANY($3::text[]))`,
+        [Array.from(seenGroupPks), pendingGroupIds, Array.from(pending.byPk || [])]
+      );
+    }
+
     const localGroups = await db.query(
       `SELECT id, authentik_pk FROM groups WHERE pending_delete = false`
     );
@@ -677,18 +711,26 @@ async function inboundSnapshot() {
       await upsertAuthentikUser(u, pending, groupUuidByPk);
     }
 
+    // Hard-delete local users missing from Authentik (same empty-list guard).
+    // Previously only set is_active=false, which left zombie rows forever.
     if (users.length > 0) {
       const pendingCreate = new Set(
         pending.rows.filter((r) => r.kind === "create_user").map((r) => String(r.username || "").toLowerCase())
       );
+      const pendingUserIds = pending.rows
+        .filter((r) => String(r.entity_type || "") === "user")
+        .map((r) => r.entity_id)
+        .filter(Boolean);
       const seenArr = Array.from(seenUserPks);
       await db.query(
-        `UPDATE users SET is_active = false, updated_at = now()
+        `DELETE FROM users
          WHERE authentik_pk IS NOT NULL
            AND pending_delete = false
            AND NOT (authentik_pk = ANY($1::text[]))
-           AND lower(username) <> ALL($2::text[])`,
-        [seenArr, Array.from(pendingCreate)]
+           AND lower(username) <> ALL($2::text[])
+           AND id <> ALL($3::uuid[])
+           AND NOT (authentik_pk = ANY($4::text[]))`,
+        [seenArr, Array.from(pendingCreate), pendingUserIds, Array.from(pending.byPk || [])]
       );
     }
 

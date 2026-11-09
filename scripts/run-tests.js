@@ -55,6 +55,9 @@ const TEST_FILES = [
   "outbox.secrets.test.js",
   "directorySync.deadLetter.test.js",
   "directorySync.inboundAbort.test.js",
+  "directorySync.inboundCleanup.test.js",
+  "integrations.authDefault.test.js",
+
   "health.migration.test.js",
   "auditLog.distinct.test.js",
   "auditLog.query.test.js",

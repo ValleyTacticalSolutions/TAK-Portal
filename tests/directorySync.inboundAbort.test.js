@@ -33,7 +33,16 @@ const { inboundSnapshot } = require("../services/directorySync.service");
     0,
     "aborted inbound snapshot must not disable missing users"
   );
+  const deletes = sqlCalls.filter(
+    (c) => /DELETE FROM users/i.test(c.sql) || /DELETE FROM groups/i.test(c.sql)
+  );
+  assert.strictEqual(
+    deletes.length,
+    0,
+    "aborted inbound snapshot must not delete missing users or groups"
+  );
   console.log("directorySync.inboundAbort.test.js: ok");
+
 })().catch((err) => {
   console.error(err);
   process.exit(1);

@@ -173,8 +173,8 @@
             </label>
             <label style="flex: 1; min-width: 140px;">*Authentication Type
               <select name="authType" style="width: 100%;" required>
-                <option value="X_509" selected>X.509</option>
-                <option value="ANONYMOUS">Anonymous</option>
+                <option value="ANONYMOUS" selected>Anonymous</option>
+                <option value="X_509">X.509</option>
                 <option value="BEARER">Bearer</option>
               </select>
             </label>
@@ -830,7 +830,7 @@
                  dataFeedForm.dataFeedName.value = f.name || "";
                  dataFeedForm.tags.value = (f.tag || []).join("\n");
                  dataFeedForm.protocol.value = f.protocol || "tls";
-                 dataFeedForm.authType.value = f.auth || "X_509";
+                 dataFeedForm.authType.value = f.auth || "ANONYMOUS";
                  dataFeedForm.port.value = f.port != null && f.port !== "" ? f.port : "";
                  dataFeedForm.coreVersion.value = f.coreVersion || "2";
 
