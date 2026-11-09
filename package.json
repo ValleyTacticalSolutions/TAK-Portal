@@ -38,7 +38,7 @@
     "@tmcw/togeojson": "^7.1.2",
     "@xmldom/xmldom": "^0.9.12",
     "archiver": "^7.0.1",
-    "axios": "^1.20.0",
+    "axios": "^1.21.0",
     "dotenv": "^18.0.9",
     "ejs": "^3.1.10",
     "express": "^5.2.1",
