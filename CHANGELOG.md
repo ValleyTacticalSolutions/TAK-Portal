@@ -11,8 +11,10 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
-### v2.0.33 - 11/8/26
-✨ `Enhancement` - Improves handling for icon matching
+### v2.0.33 - IN PROGRESS
+✨ `Enhancement` - Improves handling for icon matching<br>
+🐛 `Bug Fix` - Directory sync deletes local users and groups removed from Authentik (including previously orphaned rows), and treats Authentik 404 on delete as already gone (#99)<br>
+✨ `Enhancement` - New integration data feeds default Authentication Type to Anonymous instead of X.509 (#98)
 
 ### v2.0.32 - 11/6/26
 🐛 `Bug Fix` - Fixes further issues with channel patching to resolve duplicates
