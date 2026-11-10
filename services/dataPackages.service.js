@@ -479,6 +479,43 @@ async function uploadDataPackage(buffer, originalName, metadata = {}) {
   return fallbackRes.data;
 }
 
+function normalizeGroupsList(raw) {
+  if (Array.isArray(raw)) {
+    return raw.map((g) => String(g || "").trim()).filter(Boolean);
+  }
+  if (raw == null || raw === "") return [];
+  const s = String(raw).trim();
+  if (!s) return [];
+  if (s.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(s);
+      if (Array.isArray(parsed)) return normalizeGroupsList(parsed);
+    } catch (_) {
+      /* fall through */
+    }
+  }
+  return s
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function groupsMetadataValue(groups) {
+  return normalizeGroupsList(groups).join(",");
+}
+
+function extractUploadHash(out, fallbackHash) {
+  if (out && typeof out === "object") {
+    const h = String(out.hash || out.Hash || out.uid || out.id || "").trim();
+    if (h) return h;
+  }
+  if (typeof out === "string") {
+    const m = out.match(/[a-fA-F0-9]{64}/);
+    if (m) return m[0];
+  }
+  return String(fallbackHash || "").trim();
+}
+
 async function getDataPackageMetadata(hash) {
   await assertTakAvailable();
   const h = String(hash || "").trim();
@@ -492,6 +529,7 @@ async function getDataPackageMetadata(hash) {
     hash: h,
     tool: "",
     keywords: [],
+    groups: [],
   };
   dbg("metadata start", { hash: h });
 
@@ -511,7 +549,15 @@ async function getDataPackageMetadata(hash) {
       const item = list[0] || {};
       if (!out.tool) out.tool = String(item.tool || "").trim();
       if (!out.keywords || !out.keywords.length) out.keywords = parseKeywords(item.keywords);
-      if (item.filename) out.filename = String(item.filename).trim();
+      const title = String(
+        item.filename || item.name || item.title || item.original_filename || ""
+      ).trim();
+      if (title) {
+        out.filename = title;
+        out.name = title;
+        out.title = title;
+      }
+      out.groups = normalizeGroupsList(item.groups);
     }
   } catch (_) {
     // optional metadata source
@@ -522,6 +568,7 @@ async function getDataPackageMetadata(hash) {
     hash: h,
     tool: out.tool,
     keywordsCount: Array.isArray(out.keywords) ? out.keywords.length : 0,
+    groupsCount: Array.isArray(out.groups) ? out.groups.length : 0,
     installOnEnrollment: out.installOnEnrollment,
     installOnConnection: out.installOnConnection,
   });
@@ -561,6 +608,33 @@ async function updateDataPackageMetadata(hash, patch = {}) {
     out.keywords = keywords;
   }
 
+  if (patch.groups != null) {
+    const groups = normalizeGroupsList(patch.groups);
+    const groupsValue = groupsMetadataValue(groups);
+    await client.put(`/Marti/api/sync/metadata/${encodeURIComponent(h)}/groups`, groupsValue, {
+      headers: { "Content-Type": "text/plain; charset=utf-8", Accept: "application/json" },
+    });
+    out.groups = groups;
+  }
+
+  const title = String(patch.title || patch.name || patch.filename || "").trim();
+  if (title) {
+    // Resource exposes both name and filename; set both for TAK UI consistency.
+    await client.put(`/Marti/api/sync/metadata/${encodeURIComponent(h)}/name`, title, {
+      headers: { "Content-Type": "text/plain; charset=utf-8", Accept: "application/json" },
+    });
+    try {
+      await client.put(`/Marti/api/sync/metadata/${encodeURIComponent(h)}/filename`, title, {
+        headers: { "Content-Type": "text/plain; charset=utf-8", Accept: "application/json" },
+      });
+    } catch (_) {
+      /* some TAK builds only accept name */
+    }
+    out.title = title;
+    out.name = title;
+    out.filename = title;
+  }
+
   // OTS-specific flags; if endpoint/build does not support it we continue.
   if (
     patch.installOnEnrollment != null ||
@@ -596,6 +670,9 @@ module.exports = {
   uploadDataPackage,
   getDataPackageMetadata,
   updateDataPackageMetadata,
+  normalizeGroupsList,
+  groupsMetadataValue,
+  extractUploadHash,
   zipDownloadFilename,
   safeFilename,
 };

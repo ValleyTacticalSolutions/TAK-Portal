@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.  Minor qual
 ### v2.0.34 - IN PROGRESS
 ✨ `Enhancement` - Agencies - Modifying an agency's prefix/suffix is now allowed via the edit modal<br>
 ✨ `Enhancement` - Data Sync - Allows for multiple groups/channels to be selected for a DS Mission<br>
+✨ `Enhancement` - Data Package - Allows for groups/channels to be selected for Data Packages
+
 ⬆️ `Dependency Update` - Security overrides for glob, minimatch, and brace-expansion; node-forge 1.4.3; within-range refreshes for @tak-ps/node-cot, @tak-ps/node-tak, axios, dotenv, marked, nodemailer, and sanitize-html
 
 ### v2.0.33 - 11/10/26
