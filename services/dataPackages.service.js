@@ -425,60 +425,6 @@ function zipDownloadFilename(name, hash) {
   return base;
 }
 
-async function uploadDataPackage(buffer, originalName, metadata = {}) {
-  await assertTakAvailable();
-  if (!buffer || !Buffer.isBuffer(buffer) || !buffer.length) {
-    const e = new Error("File content is required.");
-    e.code = "INVALID_UPLOAD";
-    throw e;
-  }
-  const filename = safeFilename(originalName || "data-package.zip", "data-package.zip");
-  const mimeType = String(metadata.mimeType || "application/zip");
-  const client = buildTakOriginAxios({ timeout: 180000 });
-  const BlobCtor = global.Blob || require("node:buffer").Blob;
-
-  // Preferred: OpenTAKServer REST endpoint.
-  try {
-    const form = new FormData();
-    const blob = new BlobCtor([buffer], { type: mimeType });
-    form.append("file", blob, filename);
-
-    Object.keys(metadata || {}).forEach((k) => {
-      const v = metadata[k];
-      if (v != null && v !== "" && k !== "mimeType") form.append(k, String(v));
-    });
-
-    const res = await client.post("/api/data_packages", form, {
-      maxBodyLength: Infinity,
-      maxContentLength: Infinity,
-    });
-    return res.data;
-  } catch (err) {
-    const status = err?.response?.status;
-    if (status && status !== 404 && status !== 405) throw err;
-  }
-
-  // Fallback: Marti endpoint for package/file upload.
-  const hash = crypto.createHash("sha256").update(buffer).digest("hex");
-  const creatorUid = String(metadata.creator_uid || metadata.creatorUid || "tak-portal").trim();
-
-  const fallbackForm = new FormData();
-  const fallbackBlob = new BlobCtor([buffer], { type: mimeType });
-  fallbackForm.append("assetfile", fallbackBlob, filename);
-  fallbackForm.append("filename", filename);
-
-  const fallbackRes = await client.post("/Marti/sync/missionupload", fallbackForm, {
-    params: {
-      hash,
-      filename,
-      creatorUid,
-    },
-    maxBodyLength: Infinity,
-    maxContentLength: Infinity,
-  });
-  return fallbackRes.data;
-}
-
 function normalizeGroupsList(raw) {
   if (Array.isArray(raw)) {
     return raw.map((g) => String(g || "").trim()).filter(Boolean);
@@ -502,6 +448,128 @@ function normalizeGroupsList(raw) {
 
 function groupsMetadataValue(groups) {
   return normalizeGroupsList(groups).join(",");
+}
+
+function normalizeKeywordList(raw) {
+  if (Array.isArray(raw)) {
+    return raw.map((k) => String(k || "").trim()).filter(Boolean);
+  }
+  if (raw == null || raw === "") return [];
+  return String(raw)
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Build Marti missionupload query params.
+ * Groups MUST be set here — without `Groups`, TAK assigns every group on the
+ * uploading certificate. Param name is intentionally case-sensitive (`Groups`).
+ */
+function buildMissionUploadParams({
+  hash,
+  filename,
+  creatorUid,
+  groups,
+  keywords,
+  mimetype,
+} = {}) {
+  const params = new URLSearchParams();
+  const h = String(hash || "").trim();
+  const name = String(filename || "").trim();
+  const uid = String(creatorUid || "").trim() || "tak-portal";
+  if (h) params.append("hash", h);
+  if (name) params.append("filename", name);
+  params.append("creatorUid", uid);
+  if (mimetype) params.append("mimetype", String(mimetype));
+
+  const kw = normalizeKeywordList(keywords);
+  if (!kw.some((k) => k.toLowerCase() === "missionpackage")) {
+    params.append("keyword", "missionpackage");
+  }
+  for (const keyword of kw) {
+    if (!keyword) continue;
+    params.append("keyword", keyword);
+  }
+
+  for (const group of normalizeGroupsList(groups)) {
+    // Intentionally "Groups" (capital G) — TAK Server is case-sensitive here.
+    params.append("Groups", group);
+  }
+  return params;
+}
+
+/** PUT string metadata fields as JSON strings (Marti MetadataApi). */
+function metadataStringPutConfig() {
+  return {
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    transformRequest: [(data) => (typeof data === "string" ? JSON.stringify(data) : data)],
+  };
+}
+
+async function uploadDataPackage(buffer, originalName, metadata = {}) {
+  await assertTakAvailable();
+  if (!buffer || !Buffer.isBuffer(buffer) || !buffer.length) {
+    const e = new Error("File content is required.");
+    e.code = "INVALID_UPLOAD";
+    throw e;
+  }
+  const filename = safeFilename(originalName || "data-package.zip", "data-package.zip");
+  const mimeType = String(metadata.mimeType || "application/zip");
+  const groups = normalizeGroupsList(metadata.groups);
+  const keywords = normalizeKeywordList(metadata.keywords);
+  const client = buildTakOriginAxios({ timeout: 180000 });
+  const BlobCtor = global.Blob || require("node:buffer").Blob;
+
+  // When groups are selected, skip OpenTAK and use Marti missionupload so we
+  // can pass the case-sensitive `Groups` query params TAK expects.
+  if (!groups.length) {
+    try {
+      const form = new FormData();
+      const blob = new BlobCtor([buffer], { type: mimeType });
+      form.append("file", blob, filename);
+
+      Object.keys(metadata || {}).forEach((k) => {
+        const v = metadata[k];
+        if (v == null || v === "" || k === "mimeType" || k === "groups") return;
+        if (Array.isArray(v)) form.append(k, v.join(","));
+        else form.append(k, String(v));
+      });
+
+      const res = await client.post("/api/data_packages", form, {
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      });
+      return res.data;
+    } catch (err) {
+      const status = err?.response?.status;
+      if (status && status !== 404 && status !== 405) throw err;
+    }
+  }
+
+  // Marti endpoint for package/file upload (supports Groups query params).
+  const hash = crypto.createHash("sha256").update(buffer).digest("hex");
+  const creatorUid = String(metadata.creator_uid || metadata.creatorUid || "tak-portal").trim();
+  const params = buildMissionUploadParams({
+    hash,
+    filename,
+    creatorUid,
+    groups,
+    keywords,
+    mimetype: mimeType,
+  });
+
+  const fallbackForm = new FormData();
+  const fallbackBlob = new BlobCtor([buffer], { type: mimeType });
+  fallbackForm.append("assetfile", fallbackBlob, filename);
+  fallbackForm.append("filename", filename);
+
+  const fallbackRes = await client.post("/Marti/sync/missionupload", fallbackForm, {
+    params,
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity,
+  });
+  return fallbackRes.data;
 }
 
 function extractUploadHash(out, fallbackHash) {
@@ -589,19 +657,16 @@ async function updateDataPackageMetadata(hash, patch = {}) {
 
   if (patch.tool != null) {
     const tool = String(patch.tool || "").trim();
-    await client.put(`/Marti/api/sync/metadata/${encodeURIComponent(h)}/tool`, tool, {
-      headers: { "Content-Type": "text/plain; charset=utf-8", Accept: "application/json" },
-    });
+    await client.put(
+      `/Marti/api/sync/metadata/${encodeURIComponent(h)}/tool`,
+      tool,
+      metadataStringPutConfig()
+    );
     out.tool = tool;
   }
 
   if (patch.keywords != null) {
-    const keywords = Array.isArray(patch.keywords)
-      ? patch.keywords
-      : String(patch.keywords || "")
-          .split(",")
-          .map((x) => x.trim())
-          .filter(Boolean);
+    const keywords = normalizeKeywordList(patch.keywords);
     await client.put(`/Marti/api/sync/metadata/${encodeURIComponent(h)}/keywords`, keywords, {
       headers: { "Content-Type": "application/json", Accept: "application/json" },
     });
@@ -610,23 +675,31 @@ async function updateDataPackageMetadata(hash, patch = {}) {
 
   if (patch.groups != null) {
     const groups = normalizeGroupsList(patch.groups);
-    const groupsValue = groupsMetadataValue(groups);
-    await client.put(`/Marti/api/sync/metadata/${encodeURIComponent(h)}/groups`, groupsValue, {
-      headers: { "Content-Type": "text/plain; charset=utf-8", Accept: "application/json" },
-    });
+    // MetadataApi expects a JSON string body (same as name/tool). Groups are
+    // preferably set at upload via missionupload `Groups` query params; this
+    // path is for edit/retry.
+    await client.put(
+      `/Marti/api/sync/metadata/${encodeURIComponent(h)}/groups`,
+      groupsMetadataValue(groups),
+      metadataStringPutConfig()
+    );
     out.groups = groups;
   }
 
   const title = String(patch.title || patch.name || patch.filename || "").trim();
   if (title) {
     // Resource exposes both name and filename; set both for TAK UI consistency.
-    await client.put(`/Marti/api/sync/metadata/${encodeURIComponent(h)}/name`, title, {
-      headers: { "Content-Type": "text/plain; charset=utf-8", Accept: "application/json" },
-    });
+    await client.put(
+      `/Marti/api/sync/metadata/${encodeURIComponent(h)}/name`,
+      title,
+      metadataStringPutConfig()
+    );
     try {
-      await client.put(`/Marti/api/sync/metadata/${encodeURIComponent(h)}/filename`, title, {
-        headers: { "Content-Type": "text/plain; charset=utf-8", Accept: "application/json" },
-      });
+      await client.put(
+        `/Marti/api/sync/metadata/${encodeURIComponent(h)}/filename`,
+        title,
+        metadataStringPutConfig()
+      );
     } catch (_) {
       /* some TAK builds only accept name */
     }
@@ -671,7 +744,10 @@ module.exports = {
   getDataPackageMetadata,
   updateDataPackageMetadata,
   normalizeGroupsList,
+  normalizeKeywordList,
   groupsMetadataValue,
+  buildMissionUploadParams,
+  metadataStringPutConfig,
   extractUploadHash,
   zipDownloadFilename,
   safeFilename,

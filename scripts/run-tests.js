@@ -25,6 +25,7 @@ const TEST_FILES = [
   "dataSyncAccess.test.js",
   "dataSync.missionWrite.test.js",
   "dataSync.missionCreateGate.test.js",
+  "dataPackages.uploadGroups.test.js",
   "directoryOutbox.createUser.test.js",
   "channelPatch.access.test.js",
   "channelPatch.engine.test.js",

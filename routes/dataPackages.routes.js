@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const express = require("express");
 const multer = require("multer");
 const { isTakConfigured } = require("../services/tak.service");
@@ -186,38 +187,27 @@ router.post("/packages/upload", upload.single("file"), async (req, res) => {
         ""
     ).trim();
     const uploadName = title || String(file.originalname || "data-package.zip");
+    // Groups must be applied on Marti missionupload (`Groups` query params).
+    // Post-upload metadata PUT cannot reliably replace the cert's full group vector.
     const out = await dataPackagesSvc.uploadDataPackage(file.buffer, uploadName, {
       mimeType: file.mimetype || "application/octet-stream",
       keywords: "missionpackage",
       tool: "public",
+      groups,
       creator_uid: req.body && req.body.creator_uid ? String(req.body.creator_uid) : "",
     });
 
-    const hash = dataPackagesSvc.extractUploadHash(out);
-    const metaPatch = {};
-    if (groups.length) metaPatch.groups = groups;
-    if (title) metaPatch.title = title;
+    const computedHash = crypto.createHash("sha256").update(file.buffer).digest("hex");
+    const hash = dataPackagesSvc.extractUploadHash(out, computedHash);
+    // Filename/Groups are applied on missionupload. Name metadata is best-effort.
     let metadataApplied = false;
-    if (hash && Object.keys(metaPatch).length) {
+    let metadataApplyError;
+    if (hash && title) {
       try {
-        await dataPackagesSvc.updateDataPackageMetadata(hash, metaPatch);
+        await dataPackagesSvc.updateDataPackageMetadata(hash, { title });
         metadataApplied = true;
       } catch (metaErr) {
-        auditDataPackage(req, "DATA_PACKAGE_UPLOADED", hash, {
-          fileName: uploadName,
-          sizeBytes: file.size,
-          hash,
-          groups: groups.length ? groups : undefined,
-          title: title || undefined,
-          metadataApplyError: metaErr?.message || String(metaErr),
-        });
-        return res.status(502).json({
-          error:
-            "Package uploaded, but title/groups could not be saved: " +
-            (metaErr?.message || "metadata update failed"),
-          hash,
-          upload: out,
-        });
+        metadataApplyError = metaErr?.message || String(metaErr);
       }
     }
 
@@ -227,13 +217,16 @@ router.post("/packages/upload", upload.single("file"), async (req, res) => {
       hash,
       title: title || undefined,
       groups: groups.length ? groups : undefined,
-      metadataApplied: Object.keys(metaPatch).length ? metadataApplied : undefined,
+      metadataApplied: title ? metadataApplied : undefined,
+      metadataApplyError,
     });
     return res.json({
       ...(out && typeof out === "object" ? out : { raw: out }),
       hash,
       title: title || uploadName,
       groups,
+      metadataApplied: title ? metadataApplied : undefined,
+      metadataApplyError,
     });
   } catch (err) {
     return sendTakError(res, err);

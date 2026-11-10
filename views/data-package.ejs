@@ -15,18 +15,20 @@
   <div class="card createFormCard">
     <h2>Upload Data Package</h2>
     <div class="createForm">
-      <label style="grid-column: 1 / -1;">Title
-        <input type="text" id="createPackageTitle" autocomplete="off" placeholder="e.g. County Map Pack.zip" style="width: 100%; box-sizing: border-box;" />
-      </label>
-      <div class="data-packages-upload-block" style="grid-column: 1 / -1;">
-        <label class="data-packages-upload-label" for="uploadFile">Choose File</label>
-        <div class="data-packages-upload-inline">
-          <input
-            type="file"
-            id="uploadFile"
-            class="data-packages-upload-input"
-            accept=".zip,application/zip,application/x-zip-compressed"
-          />
+      <div class="grid2 data-packages-create-top" style="grid-column: 1 / -1;">
+        <label>Title
+          <input type="text" id="createPackageTitle" autocomplete="off" placeholder="e.g. County Map Pack" style="width: 100%; box-sizing: border-box;" />
+        </label>
+        <div class="data-packages-upload-block">
+          <label class="data-packages-upload-label" for="uploadFile">Choose File</label>
+          <div class="data-packages-upload-inline">
+            <input
+              type="file"
+              id="uploadFile"
+              class="data-packages-upload-input"
+              accept=".zip,application/zip,application/x-zip-compressed"
+            />
+          </div>
         </div>
       </div>
       <div style="grid-column: 1 / -1;">
@@ -163,6 +165,13 @@
   .data-packages-page .card, .data-packages-page .data-packages-table-scroll { min-width: 0; max-width: 100%; box-sizing: border-box; }
   .data-packages-status.msg { margin-left: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); }
   .data-packages-status.bad { border-color: rgba(255,80,80,.45); background: rgba(255,80,80,.08); }
+  .data-packages-page .data-packages-create-top {
+    align-items: end;
+  }
+  .data-packages-page .data-packages-create-top > label,
+  .data-packages-page .data-packages-create-top > .data-packages-upload-block {
+    min-width: 0;
+  }
   .data-packages-page .data-packages-upload-block {
     display: flex;
     flex-direction: column;
@@ -498,7 +507,8 @@
   function maybeAutofillTitleFromZip() {
     if (!createPackageTitle || !uploadFile || !uploadFile.files || !uploadFile.files[0]) return;
     if (String(createPackageTitle.value || "").trim()) return;
-    createPackageTitle.value = String(uploadFile.files[0].name || "").trim();
+    var name = String(uploadFile.files[0].name || "").trim();
+    createPackageTitle.value = name.replace(/\.[^.\\/]+$/, "");
   }
 
   function formatChannelsCellHtml(channelNames) {
