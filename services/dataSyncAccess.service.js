@@ -505,15 +505,6 @@ function filterMissionsPayload(payload, allowedKeySet) {
   return payload;
 }
 
-function assertSingleGroupBody(body) {
-  const groups = Array.isArray(body?.groups) ? body.groups : [];
-  if (groups.length > 1) {
-    const err = new Error("Only one group is allowed per Data Sync mission.");
-    err.code = "MULTIPLE_GROUPS";
-    throw err;
-  }
-}
-
 function assertGroupAllowed(body, allowedKeySet) {
   if (allowedKeySet === null) return;
   const groups = Array.isArray(body?.groups) ? body.groups : [];
@@ -939,7 +930,6 @@ module.exports = {
   permanentlyDeleteMissionForUser,
   detachMissionFromGeofences,
   extractPackageGroupNames,
-  assertSingleGroupBody,
   assertGroupAllowed,
   assertMissionReadable,
   unwrapMission,

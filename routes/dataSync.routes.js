@@ -1,6 +1,6 @@
 /**
  * Data Sync / Marti mission manager — proxies to TAK Server using portal mTLS credentials.
- * Global admins: all single-group missions. Agency admins: agency-specific groups only.
+ * Global admins: all missions. Agency admins: agency-specific groups only.
  */
 
 const express = require("express");
@@ -212,9 +212,6 @@ function sendAccessError(res, err) {
       code: "MISSION_EXISTS",
     });
   }
-  if (code === "MULTIPLE_GROUPS") {
-    return res.status(400).json({ error: err.message });
-  }
   return null;
 }
 
@@ -228,7 +225,6 @@ async function prepareMissionWrite(req, res) {
   const authUser = req.authentikUser || null;
   const allowedKeySet = await dataSyncAccess.getAllowedCanonicalKeySet(authUser);
   try {
-    if (req.method === "PUT") dataSyncAccess.assertSingleGroupBody(req.body);
     dataSyncAccess.assertGroupAllowed(req.body, allowedKeySet);
   } catch (err) {
     const handled = sendAccessError(res, err);

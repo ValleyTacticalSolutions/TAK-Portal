@@ -15,7 +15,7 @@
   <div class="card createFormCard">
     <h2>Create Data Sync Mission</h2>
     <div class="grid2 createForm">
-      <div class="grid3 data-sync-create-top" style="grid-column: 1 / -1;">
+      <div class="grid2 data-sync-create-top" style="grid-column: 1 / -1;">
         <label>Data Sync Name
           <input type="text" id="createMissionName" autocomplete="off" placeholder="e.g. Incident Alpha" style="width: 100%; box-sizing: border-box;" />
         </label>
@@ -26,10 +26,19 @@
             <option value="MISSION_READONLY_SUBSCRIBER">Read-only (MISSION_READONLY_SUBSCRIBER)</option>
           </select>
         </label>
-        <label>Assigned Group
-          <select id="createMissionGroup" style="width: 100%; box-sizing: border-box;">
-            <option value="">Select a group…</option>
-          </select>
+      </div>
+      <div style="grid-column: 1 / -1;">
+        <label>Assigned Groups / Channels
+          <div class="groupFilterRow">
+            <input id="createGroupFilter" placeholder="Search groups..." autocomplete="off" />
+            <div class="groupFilterActions">
+              <button class="btn" id="createSelectAllGroupsBtn" type="button">Select All</button>
+              <button class="btn" id="createClearAllGroupsBtn" type="button">Clear All</button>
+            </div>
+          </div>
+          <div id="createGroupsBox" class="groupsBox">
+            <div id="createGroupsInner" class="groupsInner"></div>
+          </div>
         </label>
       </div>
       <label style="grid-column: 1 / -1;">Description
@@ -147,13 +156,25 @@
         </select>
       </label>
 
-      <label style="display: block; margin-top: 14px;">
-        Assigned Channels
-        <select id="mGroup" style="width: 100%; box-sizing: border-box;">
-          <option value="">Select a group…</option>
-        </select>
-        <p id="mGroupList" class="muted" style="display: none; margin: 6px 0 0;"></p>
-      </label>
+      <div style="margin-top: 14px;">
+        <label class="ma-multiselect-label" for="editGroupsToggle" style="font-weight: 600;">Assigned Groups / Channels</label>
+        <div id="editGroupsPickerRoot" class="ma-multiselect-wrap" style="max-width: none; margin-top: 6px;">
+          <div class="ma-multiselect filter-multiselect" id="editGroupsMultiselect">
+            <button type="button" class="btn filter-toggle ma-multiselect-toggle" id="editGroupsToggle">Select groups ▾</button>
+            <div class="filter-menu ma-multiselect-menu" id="editGroupsMenu">
+              <div class="filter-menu-inner">
+                <input type="text" class="ma-multiselect-search" id="editGroupsSearch" placeholder="Search groups…" autocomplete="off" />
+                <div class="ma-multiselect-list" id="editGroupsList"></div>
+                <div class="ma-multiselect-actions">
+                  <button type="button" class="btn link-btn" id="editGroupsSelectAll">Select all</button>
+                  <button type="button" class="btn link-btn" id="editGroupsClear">Clear</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="ma-multiselect-summary muted" id="editGroupsSummary"></div>
+        </div>
+      </div>
 
       <div class="card" style="margin-top: 16px; background: var(--card);">
         <h3 style="margin: 0 0 8px 0; font-size: 1rem;">Password (optional)</h3>
@@ -227,6 +248,25 @@
   .data-sync-page .data-sync-create-top select {
     width: 100%;
     box-sizing: border-box;
+  }
+  .data-sync-page .groupsInner {
+    column-width: 280px;
+    column-gap: 14px;
+    column-count: 4;
+  }
+  .data-sync-page #editGroupsPickerRoot .ma-multiselect.filter-multiselect {
+    max-width: none;
+  }
+  @media (max-width: 990px) {
+    .data-sync-page .groupsInner {
+      column-count: 2;
+      column-width: 160px;
+    }
+  }
+  @media (max-width: 640px) {
+    .data-sync-page .groupsInner {
+      column-count: 1;
+    }
   }
 
   @media (max-width: 990px) {
@@ -361,10 +401,15 @@
   var createMissionName = document.getElementById("createMissionName");
   var createMissionDescription = document.getElementById("createMissionDescription");
   var createMissionDefaultRole = document.getElementById("createMissionDefaultRole");
-  var createMissionGroup = document.getElementById("createMissionGroup");
+  var createGroupFilter = document.getElementById("createGroupFilter");
+  var createGroupsBox = document.getElementById("createGroupsBox");
+  var createGroupsInner = document.getElementById("createGroupsInner");
+  var createSelectAllGroupsBtn = document.getElementById("createSelectAllGroupsBtn");
+  var createClearAllGroupsBtn = document.getElementById("createClearAllGroupsBtn");
   var createMissionPw = document.getElementById("createMissionPw");
   var btnCreateMissionSubmit = document.getElementById("btnCreateMissionSubmit");
   var createMissionMsg = document.getElementById("createMissionMsg");
+  var createPickedGroups = {};
 
   var missionModal = document.getElementById("missionModal");
   var missionModalClose = document.getElementById("missionModalClose");
@@ -373,9 +418,15 @@
   var mName = document.getElementById("mName");
   var mDescription = document.getElementById("mDescription");
   var mDefaultRole = document.getElementById("mDefaultRole");
-  var mGroup = document.getElementById("mGroup");
-  var mGroupList = document.getElementById("mGroupList");
-  var editingGroupNames = [];
+  var editGroupsMultiselect = document.getElementById("editGroupsMultiselect");
+  var editGroupsToggle = document.getElementById("editGroupsToggle");
+  var editGroupsMenu = document.getElementById("editGroupsMenu");
+  var editGroupsSearch = document.getElementById("editGroupsSearch");
+  var editGroupsList = document.getElementById("editGroupsList");
+  var editGroupsSelectAll = document.getElementById("editGroupsSelectAll");
+  var editGroupsClear = document.getElementById("editGroupsClear");
+  var editGroupsSummary = document.getElementById("editGroupsSummary");
+  var editPickedGroups = {};
   var mNewPw = document.getElementById("mNewPw");
   var mBtnSetPw = document.getElementById("mBtnSetPw");
   var mBtnClearPw = document.getElementById("mBtnClearPw");
@@ -684,33 +735,121 @@
     return names[0];
   }
 
-  function fillGroupSelect(selectEl, selectedValue) {
-    if (!selectEl) return;
-    var prev = selectedValue !== undefined ? selectedValue : selectEl.value;
-    selectEl.innerHTML = "";
-    var opt0 = document.createElement("option");
-    opt0.value = "";
-    opt0.textContent = "Select a group…";
-    selectEl.appendChild(opt0);
-    for (var i = 0; i < groupsCache.length; i++) {
-      var g = groupsCache[i];
-      var opt = document.createElement("option");
-      opt.value = g;
-      opt.textContent = g;
-      selectEl.appendChild(opt);
+  function pickedGroupsList(pickedMap) {
+    return Object.keys(pickedMap || {}).filter(function (k) { return !!pickedMap[k]; }).sort(function (a, b) {
+      return a.localeCompare(b);
+    });
+  }
+
+  function clearPickedGroups(pickedMap) {
+    Object.keys(pickedMap || {}).forEach(function (k) { delete pickedMap[k]; });
+  }
+
+  function setPickedGroups(pickedMap, names) {
+    clearPickedGroups(pickedMap);
+    (names || []).forEach(function (raw) {
+      var n = String(raw || "").trim();
+      if (!n) return;
+      var canon = resolveToGroupsCache(n) || n;
+      pickedMap[canon] = true;
+    });
+  }
+
+  function groupNamesForPicker(pickedMap) {
+    var names = groupsCache.slice();
+    var seen = {};
+    for (var i = 0; i < names.length; i++) seen[canonicalGroupKey(names[i])] = true;
+    pickedGroupsList(pickedMap).forEach(function (n) {
+      var key = canonicalGroupKey(n);
+      if (!key || seen[key]) return;
+      seen[key] = true;
+      names.push(n);
+    });
+    names.sort(function (a, b) { return a.localeCompare(b); });
+    return names;
+  }
+
+  function filterGroupNames(names, filterText) {
+    var q = String(filterText || "").trim().toLowerCase();
+    if (!q) return names;
+    return names.filter(function (n) {
+      return String(n || "").toLowerCase().indexOf(q) >= 0;
+    });
+  }
+
+  function renderCreateGroupsList() {
+    if (!createGroupsInner) return;
+    var names = filterGroupNames(groupNamesForPicker(createPickedGroups), createGroupFilter && createGroupFilter.value);
+    if (!names.length) {
+      createGroupsInner.innerHTML =
+        '<p class="muted" style="margin:0;padding:8px;">' +
+        (groupsCache.length ? "No matching groups." : "No groups found.") +
+        "</p>";
+      return;
     }
-    if (prev) {
-      var canon = resolveToGroupsCache(prev);
-      selectEl.value = canon || prev;
+    createGroupsInner.innerHTML = names.map(function (name) {
+      var checked = createPickedGroups[name] ? " checked" : "";
+      return (
+        '<label class="groupItem">' +
+          '<input type="checkbox" value="' + esc(name) + '"' + checked + " />" +
+          "<span>" + esc(name) + "</span>" +
+        "</label>"
+      );
+    }).join("");
+  }
+
+  function updateEditGroupsSummary() {
+    var selected = pickedGroupsList(editPickedGroups);
+    var count = selected.length;
+    if (editGroupsToggle) {
+      if (!count) editGroupsToggle.textContent = "Select groups ▾";
+      else if (count === 1) editGroupsToggle.textContent = selected[0] + " ▾";
+      else editGroupsToggle.textContent = count + " groups selected ▾";
+    }
+    if (editGroupsSummary) {
+      editGroupsSummary.textContent = count
+        ? (count === 1 ? "1 group selected" : count + " groups selected")
+        : "No groups selected";
     }
   }
 
-  function renderCreateGroupSelect() {
-    fillGroupSelect(createMissionGroup);
+  function renderEditGroupsList() {
+    if (!editGroupsList) return;
+    var names = filterGroupNames(groupNamesForPicker(editPickedGroups), editGroupsSearch && editGroupsSearch.value);
+    if (!names.length) {
+      editGroupsList.innerHTML =
+        '<div style="padding:10px; color: var(--muted);">' +
+        (groupsCache.length ? "No matching groups." : "No groups found.") +
+        "</div>";
+      updateEditGroupsSummary();
+      return;
+    }
+    editGroupsList.innerHTML = names.map(function (name) {
+      var checked = editPickedGroups[name] ? " checked" : "";
+      return (
+        '<label class="filter-option">' +
+          '<input type="checkbox" value="' + esc(name) + '"' + checked + " />" +
+          "<span>" + esc(name) + "</span>" +
+        "</label>"
+      );
+    }).join("");
+    updateEditGroupsSummary();
   }
 
-  function renderEditGroupSelect(selectedName) {
-    fillGroupSelect(mGroup, selectedName || "");
+  function setEditGroupsMenuOpen(open) {
+    if (!editGroupsMultiselect || !editGroupsMenu) return;
+    if (open) {
+      editGroupsMultiselect.classList.add("open");
+      editGroupsMenu.classList.add("is-open");
+    } else {
+      editGroupsMultiselect.classList.remove("open");
+      editGroupsMenu.classList.remove("is-open");
+    }
+  }
+
+  function renderGroupPickers() {
+    renderCreateGroupsList();
+    renderEditGroupsList();
   }
 
   async function loadStatus() {
@@ -763,7 +902,7 @@
     if (!res.ok) throw new Error((j && j.error) || "Failed to load groups");
     logDataSyncDebug("groups", j);
     groupsCache = normalizeGroupNames(j);
-    renderCreateGroupSelect();
+    renderGroupPickers();
     return groupsCache;
   }
 
@@ -1294,8 +1433,8 @@
     }, 2500);
   }
 
-  function getSelectedGroupName() {
-    return mGroup ? String(mGroup.value || "").trim() : "";
+  function getSelectedEditGroups() {
+    return pickedGroupsList(editPickedGroups);
   }
 
   function clearCreateMissionForm() {
@@ -1303,19 +1442,20 @@
     if (createMissionDescription) createMissionDescription.value = "";
     if (createMissionDefaultRole) createMissionDefaultRole.value = "MISSION_SUBSCRIBER";
     if (createMissionPw) createMissionPw.value = "";
-    if (createMissionGroup) createMissionGroup.value = "";
-    renderCreateGroupSelect();
+    if (createGroupFilter) createGroupFilter.value = "";
+    clearPickedGroups(createPickedGroups);
+    renderCreateGroupsList();
   }
 
   async function submitCreateMission() {
     var name = (createMissionName && createMissionName.value || "").trim();
-    var groupName = createMissionGroup ? String(createMissionGroup.value || "").trim() : "";
+    var groups = pickedGroupsList(createPickedGroups);
     if (!name) {
       setCreateMissionMsg("Mission name is required.", false);
       return;
     }
-    if (!groupName) {
-      setCreateMissionMsg("Select a group.", false);
+    if (!groups.length) {
+      setCreateMissionMsg("Select at least one assigned group / channel.", false);
       return;
     }
     setCreateMissionMsg("Creating…", undefined);
@@ -1325,7 +1465,7 @@
         tool: "public",
         description: createMissionDescription ? String(createMissionDescription.value || "") : "",
         defaultRole: buildDefaultRoleObject(createMissionDefaultRole && createMissionDefaultRole.value),
-        groups: [groupName],
+        groups: groups,
         keywords: [],
         inviteOnly: false,
       };
@@ -1382,12 +1522,10 @@
     document.body.classList.remove("noScroll");
     missionDetail = null;
     editingOriginalName = "";
-    editingGroupNames = [];
-    if (mGroup) mGroup.style.display = "";
-    if (mGroupList) {
-      mGroupList.style.display = "none";
-      mGroupList.textContent = "";
-    }
+    clearPickedGroups(editPickedGroups);
+    setEditGroupsMenuOpen(false);
+    if (editGroupsSearch) editGroupsSearch.value = "";
+    renderEditGroupsList();
   }
 
   async function openEditMission(name) {
@@ -1396,6 +1534,8 @@
     setMissionModalMsg("Loading…", undefined);
     mSaveHint.textContent = "";
     mNewPw.value = "";
+    setEditGroupsMenuOpen(false);
+    if (editGroupsSearch) editGroupsSearch.value = "";
     openModal();
     try {
       if (!groupsCache.length) await loadGroups();
@@ -1417,22 +1557,8 @@
         var row = missionRowFromCache(name);
         if (row) editGroups = missionGroupNames(row);
       }
-      if (editGroups.length > 1) {
-        editingGroupNames = editGroups.slice();
-        if (mGroup) mGroup.style.display = "none";
-        if (mGroupList) {
-          mGroupList.style.display = "block";
-          mGroupList.textContent = editGroups.join(", ");
-        }
-      } else {
-        editingGroupNames = [];
-        if (mGroup) mGroup.style.display = "";
-        if (mGroupList) {
-          mGroupList.style.display = "none";
-          mGroupList.textContent = "";
-        }
-        renderEditGroupSelect(editGroups[0] || "");
-      }
+      setPickedGroups(editPickedGroups, editGroups);
+      renderEditGroupsList();
 
       mContentsTbody.innerHTML = "";
       var contents = Array.isArray(missionDetail.contents) ? missionDetail.contents : [];
@@ -1469,10 +1595,7 @@
 
   function buildSavePayload() {
     var name = (mName.value || "").trim();
-    var groupName = getSelectedGroupName();
-    var groups = editingGroupNames.length > 1
-      ? editingGroupNames.slice()
-      : (groupName ? [groupName] : []);
+    var groups = getSelectedEditGroups();
     var kw = missionDetail && Array.isArray(missionDetail.keywords) ? missionDetail.keywords.slice() : [];
     return {
       name: name,
@@ -1490,7 +1613,7 @@
     try {
       var payload = buildSavePayload();
       if (!payload.name) throw new Error("Mission name is required.");
-      if (!payload.groups.length) throw new Error("Select a group.");
+      if (!payload.groups.length) throw new Error("Select at least one assigned group / channel.");
 
       var url = API + "/missions/" + encodeURIComponent(payload.name);
       /* TAK Marti: POST is used for changing an existing mission; fat GET payloads on PUT caused
@@ -1719,6 +1842,78 @@
   if (mBtnSave) mBtnSave.addEventListener("click", saveMission);
   if (mBtnSetPw) mBtnSetPw.addEventListener("click", setMissionPassword);
   if (mBtnClearPw) mBtnClearPw.addEventListener("click", clearMissionPassword);
+
+  if (createGroupsBox) {
+    createGroupsBox.addEventListener("change", function (e) {
+      var cb = e.target;
+      if (!cb || cb.tagName !== "INPUT" || cb.type !== "checkbox") return;
+      var value = String(cb.value || "").trim();
+      if (!value) return;
+      if (cb.checked) createPickedGroups[value] = true;
+      else delete createPickedGroups[value];
+    });
+  }
+  if (createGroupFilter) {
+    createGroupFilter.addEventListener("input", function () {
+      renderCreateGroupsList();
+    });
+  }
+  if (createSelectAllGroupsBtn) {
+    createSelectAllGroupsBtn.addEventListener("click", function () {
+      filterGroupNames(groupNamesForPicker(createPickedGroups), createGroupFilter && createGroupFilter.value)
+        .forEach(function (name) { createPickedGroups[name] = true; });
+      renderCreateGroupsList();
+    });
+  }
+  if (createClearAllGroupsBtn) {
+    createClearAllGroupsBtn.addEventListener("click", function () {
+      clearPickedGroups(createPickedGroups);
+      renderCreateGroupsList();
+    });
+  }
+
+  if (editGroupsToggle) {
+    editGroupsToggle.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var open = !(editGroupsMultiselect && editGroupsMultiselect.classList.contains("open"));
+      setEditGroupsMenuOpen(open);
+    });
+  }
+  if (editGroupsList) {
+    editGroupsList.addEventListener("change", function (e) {
+      var cb = e.target;
+      if (!cb || cb.tagName !== "INPUT" || cb.type !== "checkbox") return;
+      var value = String(cb.value || "").trim();
+      if (!value) return;
+      if (cb.checked) editPickedGroups[value] = true;
+      else delete editPickedGroups[value];
+      updateEditGroupsSummary();
+    });
+  }
+  if (editGroupsSearch) {
+    editGroupsSearch.addEventListener("input", function () {
+      renderEditGroupsList();
+    });
+  }
+  if (editGroupsSelectAll) {
+    editGroupsSelectAll.addEventListener("click", function () {
+      filterGroupNames(groupNamesForPicker(editPickedGroups), editGroupsSearch && editGroupsSearch.value)
+        .forEach(function (name) { editPickedGroups[name] = true; });
+      renderEditGroupsList();
+    });
+  }
+  if (editGroupsClear) {
+    editGroupsClear.addEventListener("click", function () {
+      clearPickedGroups(editPickedGroups);
+      renderEditGroupsList();
+    });
+  }
+  document.addEventListener("click", function (e) {
+    if (!editGroupsMultiselect || !editGroupsMultiselect.classList.contains("open")) return;
+    if (editGroupsMultiselect.contains(e.target)) return;
+    setEditGroupsMenuOpen(false);
+  });
 
   if (missionTableFilter) {
     missionTableFilter.addEventListener("input", function () {
