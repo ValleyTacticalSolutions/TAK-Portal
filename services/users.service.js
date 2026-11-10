@@ -919,9 +919,12 @@ async function emailUserReenabled(user) {
  * Sent when an agency username token/placement change rebuilds a user's username
  * and revokes their TAK certificates.
  */
+/**
+ * @returns {Promise<boolean>} true when a message was sent; false when skipped (no email)
+ */
 async function emailAgencyUsernameChanged({ user, oldUsername, newUsername }) {
   const built = await buildUserAccountWelcomeEmailVars(user, undefined);
-  if (!built) return;
+  if (!built) return false;
 
   const takPortalPublicUrl = built.vars.takPortalPublicUrl;
   const takPortalBlock = buildTakPortalBlock({
@@ -949,6 +952,7 @@ async function emailAgencyUsernameChanged({ user, oldUsername, newUsername }) {
     text,
     html,
   });
+  return true;
 }
 
 async function emailPasswordChanged(user) {

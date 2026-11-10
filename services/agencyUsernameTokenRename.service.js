@@ -258,12 +258,12 @@ async function applyExistingUserRenames(plans, newAgency) {
             username: plan.newUsername,
             attributes: attrs,
           };
-          await usersService.emailAgencyUsernameChanged({
+          const sent = await usersService.emailAgencyUsernameChanged({
             user: updatedUser,
             oldUsername: plan.oldUsername,
             newUsername: plan.newUsername,
           });
-          emailsSent += 1;
+          if (sent) emailsSent += 1;
         } catch (mailErr) {
           emailFailures.push({
             userId: plan.userId,

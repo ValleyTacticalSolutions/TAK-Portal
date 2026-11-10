@@ -231,8 +231,9 @@ try {
   );
   assert.ok(fs.existsSync(emailTpl), "agency_username_changed.html must exist");
   const emailHtml = fs.readFileSync(emailTpl, "utf8");
-  assert.ok(emailHtml.includes("{{oldUsername}}"));
   assert.ok(emailHtml.includes("{{newUsername}}"));
+  assert.ok(!emailHtml.includes("{{oldUsername}}"));
+  assert.ok(emailHtml.includes("USERNAME"));
 
   const settingsSrc = fs.readFileSync(
     path.join(__dirname, "..", "views", "settings.ejs"),
