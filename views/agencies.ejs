@@ -101,40 +101,6 @@
 </main>
 
 <!-- Username token change confirm -->
-<div class="modalOverlay" id="usernameTokenConfirmOverlay" style="display:none;">
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="usernameTokenConfirmTitle" style="max-width:520px;">
-    <div class="modalHeader">
-      <div class="modalHeaderLeft">
-        <h2 id="usernameTokenConfirmTitle" style="margin:0;">Confirm Username Identifier Change</h2>
-      </div>
-      <button class="btn" id="usernameTokenConfirmCancelBtn" type="button">Cancel</button>
-    </div>
-    <div class="modalBody">
-      <p id="usernameTokenConfirmSummary" class="muted" style="margin-top:0;"></p>
-      <p style="margin:12px 0 8px; font-weight:600;">How should this change apply?</p>
-      <label style="display:flex; gap:8px; align-items:flex-start; margin:8px 0;">
-        <input type="radio" name="usernameTokenScope" value="future" checked style="margin-top:3px;" />
-        <span>
-          <strong>New users only</strong><br />
-          <span class="muted">Keep existing usernames and certificates. Only accounts created after this change use the new identifier.</span>
-        </span>
-      </label>
-      <label style="display:flex; gap:8px; align-items:flex-start; margin:8px 0;">
-        <input type="radio" name="usernameTokenScope" value="existing" style="margin-top:3px;" />
-        <span>
-          <strong>Replace all existing users</strong><br />
-          <span class="muted">Revoke TAK certificates for current agency users, rebuild their usernames, and email them about the change.</span>
-        </span>
-      </label>
-      <p id="usernameTokenConfirmMsg" class="msg" style="display:none; margin-top:12px;"></p>
-      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
-        <button class="btn" type="button" id="usernameTokenConfirmAbortBtn">Cancel</button>
-        <button class="btn success" type="button" id="usernameTokenConfirmProceedBtn">Proceed</button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- Edit Agency Modal -->
 <div class="modalOverlay" id="editAgencyOverlay" style="display:none;">
   <div class="modal editAgencyModal" role="dialog" aria-modal="true" aria-labelledby="editAgencyTitle">
@@ -282,6 +248,62 @@
           <button class="btn success" id="editAgencySaveBtn" type="submit">Save Changes</button>
         </div>
       </form>
+    </div>
+  </div>
+</div>
+
+<!-- Username token change confirm (edit modal is hidden while this is open) -->
+<div class="modalOverlay" id="usernameTokenConfirmOverlay" style="display:none;">
+  <div class="modal usernameTokenConfirmModal" role="dialog" aria-modal="true" aria-labelledby="usernameTokenConfirmTitle">
+    <div class="modalHeader">
+      <div class="modalHeaderLeft">
+        <h2 id="usernameTokenConfirmTitle" style="margin:0;">Confirm Username Change</h2>
+      </div>
+      <button class="btn" id="usernameTokenConfirmCancelBtn" type="button" aria-label="Cancel">Close</button>
+    </div>
+    <div class="modalBody usernameTokenConfirmBody">
+      <div class="usernameTokenChangeCard" aria-live="polite">
+        <div class="usernameTokenChangeAgency" id="usernameTokenConfirmAgency"></div>
+        <div class="usernameTokenChangeDiff">
+          <div class="usernameTokenChangeSide">
+            <span class="usernameTokenChangeLabel">Current</span>
+            <span class="usernameTokenChangeValue" id="usernameTokenConfirmFrom"></span>
+          </div>
+          <div class="usernameTokenChangeArrow" aria-hidden="true">→</div>
+          <div class="usernameTokenChangeSide">
+            <span class="usernameTokenChangeLabel">New</span>
+            <span class="usernameTokenChangeValue is-new" id="usernameTokenConfirmTo"></span>
+          </div>
+        </div>
+      </div>
+
+      <p class="usernameTokenConfirmLead muted">
+        Choose how this identifier change should apply.
+      </p>
+
+      <div class="usernameTokenScopeList" role="radiogroup" aria-label="Username change scope">
+        <label class="usernameTokenScopeOption">
+          <input type="radio" name="usernameTokenScope" value="future" checked />
+          <span class="usernameTokenScopeCard">
+            <span class="usernameTokenScopeTitle">New users only</span>
+            <span class="usernameTokenScopeDesc muted">Keep existing usernames and certificates. Only accounts created after this change use the new identifier.</span>
+          </span>
+        </label>
+        <label class="usernameTokenScopeOption">
+          <input type="radio" name="usernameTokenScope" value="existing" />
+          <span class="usernameTokenScopeCard">
+            <span class="usernameTokenScopeTitle">Replace all existing users</span>
+            <span class="usernameTokenScopeDesc muted">Revoke TAK certificates, rebuild usernames for current agency users, and email them about the change.</span>
+          </span>
+        </label>
+      </div>
+
+      <p id="usernameTokenConfirmMsg" class="msg" style="display:none;"></p>
+
+      <div class="usernameTokenConfirmActions">
+        <button class="btn" type="button" id="usernameTokenConfirmAbortBtn">Cancel</button>
+        <button class="btn success" type="button" id="usernameTokenConfirmProceedBtn">Proceed</button>
+      </div>
     </div>
   </div>
 </div>
@@ -3027,7 +3049,9 @@ window.addEventListener("keydown", (e) => {
 });
 
 const usernameTokenConfirmOverlay = document.getElementById("usernameTokenConfirmOverlay");
-const usernameTokenConfirmSummary = document.getElementById("usernameTokenConfirmSummary");
+const usernameTokenConfirmAgency = document.getElementById("usernameTokenConfirmAgency");
+const usernameTokenConfirmFrom = document.getElementById("usernameTokenConfirmFrom");
+const usernameTokenConfirmTo = document.getElementById("usernameTokenConfirmTo");
 const usernameTokenConfirmMsg = document.getElementById("usernameTokenConfirmMsg");
 const usernameTokenConfirmProceedBtn = document.getElementById("usernameTokenConfirmProceedBtn");
 const usernameTokenConfirmCancelBtn = document.getElementById("usernameTokenConfirmCancelBtn");
@@ -3052,6 +3076,14 @@ function closeUsernameTokenConfirmModal() {
   if (usernameTokenConfirmProceedBtn) usernameTokenConfirmProceedBtn.disabled = false;
 }
 
+function hideEditAgencyModalVisually() {
+  if (editAgencyOverlay) editAgencyOverlay.style.display = "none";
+}
+
+function showEditAgencyModalVisually() {
+  if (editAgencyOverlay) editAgencyOverlay.style.display = "flex";
+}
+
 function promptUsernameTokenChange(change) {
   return new Promise((resolve) => {
     if (!usernameTokenConfirmOverlay || !change) {
@@ -3059,19 +3091,34 @@ function promptUsernameTokenChange(change) {
       return;
     }
     const placementLabel = (p) => (p === "prefix" ? "Prefix" : "Suffix");
-    const lines = [
-      `Agency: ${String(change.agency?.name || change.oldSuffix || "Agency")}`,
-      `Identifier: ${change.oldSuffix} (${placementLabel(change.oldPlacement)}) → ${change.newSuffix} (${placementLabel(change.newPlacement)})`,
-      "",
-      "Choose whether this applies only to new users, or rebuilds usernames for all existing users in this agency.",
-    ];
-    if (usernameTokenConfirmSummary) {
-      usernameTokenConfirmSummary.textContent = lines.join("\n");
-      usernameTokenConfirmSummary.style.whiteSpace = "pre-wrap";
+    const formatToken = (token, placement) =>
+      `${String(token || "").trim()} (${placementLabel(placement)})`;
+
+    if (usernameTokenConfirmAgency) {
+      usernameTokenConfirmAgency.textContent = String(
+        change.agency?.name || change.oldSuffix || "Agency"
+      ).trim();
     }
-    const futureRadio = document.querySelector('input[name="usernameTokenScope"][value="future"]');
+    if (usernameTokenConfirmFrom) {
+      usernameTokenConfirmFrom.textContent = formatToken(
+        change.oldSuffix,
+        change.oldPlacement
+      );
+    }
+    if (usernameTokenConfirmTo) {
+      usernameTokenConfirmTo.textContent = formatToken(
+        change.newSuffix,
+        change.newPlacement
+      );
+    }
+
+    const futureRadio = document.querySelector(
+      '#usernameTokenConfirmOverlay input[name="usernameTokenScope"][value="future"]'
+    );
     if (futureRadio) futureRadio.checked = true;
     setUsernameTokenConfirmMsg("");
+    // Edit modal stays under this confirm in the stack; hide it so only the prompt is visible.
+    hideEditAgencyModalVisually();
     usernameTokenConfirmOverlay.style.display = "flex";
 
     const cleanup = () => {
@@ -3089,6 +3136,7 @@ function promptUsernameTokenChange(change) {
 
     const cancel = () => {
       cleanup();
+      showEditAgencyModalVisually();
       resolve(null);
     };
 
@@ -3096,9 +3144,12 @@ function promptUsernameTokenChange(change) {
     if (usernameTokenConfirmAbortBtn) usernameTokenConfirmAbortBtn.onclick = cancel;
     if (usernameTokenConfirmProceedBtn) {
       usernameTokenConfirmProceedBtn.onclick = () => {
-        const selected = document.querySelector('input[name="usernameTokenScope"]:checked');
+        const selected = document.querySelector(
+          '#usernameTokenConfirmOverlay input[name="usernameTokenScope"]:checked'
+        );
         const scope = selected ? String(selected.value || "") : "future";
         cleanup();
+        // Keep edit modal closed after Proceed; save continues in the background.
         resolve(scope === "existing" ? "existing" : "future");
       };
     }
@@ -3191,11 +3242,11 @@ if (editAgencyForm) {
         return;
       }
       if (editAgencySaveBtn) editAgencySaveBtn.disabled = true;
-      setEditMsg(
+      setListMsg(
         scope === "existing"
           ? "Updating username identifier and existing users…"
           : "Updating username identifier…",
-        true
+        "progress"
       );
       try {
         const tokenResult = await applyUsernameTokenRename(tokenChange, scope);
@@ -3206,13 +3257,19 @@ if (editAgencyForm) {
         fillEditAgencyForm(
           agencies.find((x) => String(x._id ?? x.id) === String(editingAgencyId))
         );
+        showEditAgencyModalVisually();
         setEditMsg(err?.message || "Username identifier update failed", false);
+        setListMsg(err?.message || "Username identifier update failed", false);
         return;
       }
     }
 
     const result = await finishAgencyAttributesEditing();
-    if (!result || result.ok !== true) return;
+    if (!result || result.ok !== true) {
+      // Attribute save failed after token rename — reopen edit so the admin can see the error.
+      if (tokenSummary) showEditAgencyModalVisually();
+      return;
+    }
     closeEditAgencyModal();
     const combined = [tokenSummary, result.summary].filter(Boolean).join(" ");
     setListMsg(combined || result.summary, true);
@@ -3795,6 +3852,181 @@ input.readonly {
 .agenciesExportCardActions {
   display: flex;
   justify-content: flex-end;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenConfirmModal {
+  width: min(480px, 96vw);
+  max-height: none;
+  overflow: hidden;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenConfirmBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenChangeCard {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 85%, transparent);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenChangeAgency {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenChangeDiff {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenChangeSide {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenChangeLabel {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+#usernameTokenConfirmOverlay .usernameTokenChangeValue {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--text);
+  word-break: break-word;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenChangeValue.is-new {
+  color: var(--ok-text);
+}
+
+#usernameTokenConfirmOverlay .usernameTokenChangeArrow {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  padding-top: 14px;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenConfirmLead {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenScopeList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenScopeOption {
+  display: block;
+  margin: 0;
+  cursor: pointer;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenScopeOption input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenScopeCard {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  column-gap: 12px;
+  row-gap: 4px;
+  align-items: start;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenScopeCard::before {
+  content: "";
+  grid-row: 1 / span 2;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--muted) 70%, transparent);
+  box-sizing: border-box;
+  background: transparent;
+  box-shadow: inset 0 0 0 0 var(--accent);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenScopeTitle {
+  grid-column: 2;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenScopeDesc {
+  grid-column: 2;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenScopeOption:hover .usernameTokenScopeCard {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+#usernameTokenConfirmOverlay .usernameTokenScopeOption input:checked + .usernameTokenScopeCard {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--line));
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+#usernameTokenConfirmOverlay .usernameTokenScopeOption input:checked + .usernameTokenScopeCard::before {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 4px var(--accent);
+}
+
+#usernameTokenConfirmOverlay .usernameTokenScopeOption input:focus-visible + .usernameTokenScopeCard {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenConfirmActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+  margin-top: 2px;
+}
+
+#usernameTokenConfirmOverlay #usernameTokenConfirmMsg:empty {
+  display: none;
+}
+
+@media (max-width: 520px) {
+  #usernameTokenConfirmOverlay .usernameTokenChangeDiff {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  #usernameTokenConfirmOverlay .usernameTokenChangeArrow {
+    display: none;
+  }
 }
 
 #editAgencyOverlay {
