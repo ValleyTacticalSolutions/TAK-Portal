@@ -24,17 +24,21 @@ function actorLabel(authUser) {
 }
 
 /**
- * Global admins: all map channels plus mutual-aid-created groups.
- * Agency admins: Groups-page access only (agency-owned + allowedAdminGroupIds),
- * not personal map membership. MA-created groups stay hidden from agency admins.
+ * Authentik is the source of truth for picker labels/scope (same as Data Sync).
+ * Live-map catalog is optional and used only to enrich channel counts.
  */
 async function loadScopedChannels(authUser) {
   cotStream.ensureBridgeStarted();
-  const catalog = await mapMeta.getTakGroupCatalog(cotStream.getMarkerList(), {
-    scopeMemberGroups: false,
-    userGroupNames: [],
-  });
-  const groups = Array.isArray(catalog.groups) ? catalog.groups : [];
+  let groups = [];
+  try {
+    const catalog = await mapMeta.getTakGroupCatalog(cotStream.getMarkerList(), {
+      scopeMemberGroups: false,
+      userGroupNames: [],
+    });
+    groups = Array.isArray(catalog.groups) ? catalog.groups : [];
+  } catch (_) {
+    groups = [];
+  }
   return channelPatchAccess.buildScopedChannelPicker(authUser, groups);
 }
 

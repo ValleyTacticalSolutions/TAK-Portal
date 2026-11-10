@@ -1,16 +1,20 @@
 /**
  * Agency-scoped access for channel patches.
  *
- * Agency admins may create/edit patches using the same groups they can manage
- * on the Groups page (agency-owned + allowedAdminGroupIds). A patch is visible
- * only when every channel in it is in that allowlist; mixed/out-of-scope
- * patches are hidden entirely.
+ * Channel picker lists follow the same Authentik source-of-truth logic as
+ * Data Sync (services/dataSyncAccess.service.js → resolveGroupsForUser).
+ * Optional live-map catalog data may enrich counts only — never spelling.
+ *
+ * Agency admins may create/edit patches using groups in that allowlist.
+ * A patch is visible only when every channel in it is in that allowlist;
+ * mixed/out-of-scope patches are hidden entirely.
  */
 
 const accessSvc = require("./access.service");
 const groupsSvc = require("./groups.service");
 const mapMeta = require("./mapMeta.service");
 const mutualAidStore = require("./mutualAid.store");
+const dataSyncAccess = require("./dataSyncAccess.service");
 const { isGroupHidden } = require("./portalHidden.util");
 
 function isAuthentikAgencyAdminGroupName(name) {
@@ -31,7 +35,7 @@ function isHiddenGroupName(groupOrName, { includeMutualAid = false } = {}) {
 
 /**
  * Add MA-workflow-created channels to a picker list (global admins only).
- * Existing/reused MA groups are already visible as normal channels.
+ * Kept for callers/tests; the Channel Patch picker now merges MA via Data Sync.
  * @param {Array<{ name: string, displayName: string, baseKey: string, count?: number }>} channels
  * @param {string[]|null} [groupNames] - defaults to created groups from the MA store
  */
@@ -126,44 +130,60 @@ function toPickerChannel(entry) {
   };
 }
 
-/**
- * Authentik groups this user may patch (Groups-page access).
- * @returns {Array<{ name: string, displayName: string, baseKey: string }>}
- */
-async function listAgencyScopedGroups(authUser) {
-  const access = accessSvc.getAgencyAccess(authUser);
-  if (access.isGlobalAdmin) return [];
-
-  let authentikGroups = [];
-  try {
-    authentikGroups = await groupsSvc.getGroupsForAuthUser(authUser);
-  } catch (_) {
-    return [];
+function catalogCountByKey(catalogGroups) {
+  const catalogByKey = new Map();
+  for (const g of Array.isArray(catalogGroups) ? catalogGroups : []) {
+    if (!g?.baseKey || g.baseKey === mapMeta.UNASSIGNED_CHANNEL_KEY) continue;
+    catalogByKey.set(g.baseKey, g);
   }
+  return catalogByKey;
+}
 
-  const visible = accessSvc.filterGroupsForUser(authUser, authentikGroups);
-  const out = [];
+/**
+ * Build picker rows from Data Sync's Authentik-backed group list.
+ * Catalog may supply live counts only.
+ */
+function channelsFromAuthentikNames(displayNames, catalogByKey) {
+  const channels = [];
   const seen = new Set();
-
-  for (const g of visible) {
-    const name = String(g?.name || "").trim();
-    if (!name || isAuthentikAgencyAdminGroupName(name) || isHiddenGroupName(g)) {
-      continue;
-    }
+  for (const raw of Array.isArray(displayNames) ? displayNames : []) {
+    const displayName = String(raw || "").trim();
+    if (!displayName || isAuthentikAgencyAdminGroupName(displayName)) continue;
+    const name = groupsSvc.ensureTakPrefix(displayName);
     const baseKey = mapMeta.channelBaseKey(name);
     if (!baseKey || baseKey === mapMeta.UNASSIGNED_CHANNEL_KEY || seen.has(baseKey)) {
       continue;
     }
     seen.add(baseKey);
-    const displayName = groupsSvc.stripTakPrefix(name);
-    out.push({
-      name: groupsSvc.ensureTakPrefix(displayName || name),
-      displayName: displayName || name,
-      baseKey,
-    });
+    const cat = catalogByKey.get(baseKey);
+    channels.push(
+      toPickerChannel({
+        name,
+        displayName,
+        baseKey,
+        count: cat?.count || 0,
+      })
+    );
   }
+  channels.sort((a, b) =>
+    String(a.displayName || "").localeCompare(String(b.displayName || ""))
+  );
+  return channels;
+}
 
-  return out;
+/**
+ * Authentik groups this user may patch (same allowlist as Data Sync).
+ * @returns {Array<{ name: string, displayName: string, baseKey: string }>}
+ */
+async function listAgencyScopedGroups(authUser) {
+  const access = accessSvc.getAgencyAccess(authUser);
+  if (access.isGlobalAdmin) return [];
+  const scoped = await buildScopedChannelPicker(authUser, []);
+  return scoped.channels.map((c) => ({
+    name: c.name,
+    displayName: c.displayName,
+    baseKey: c.baseKey,
+  }));
 }
 
 /**
@@ -178,39 +198,23 @@ async function resolveAllowedChannelKeySet(authUser) {
 
 /**
  * Channel picker + allowlist for the Channel Patch page/API.
- * Global admins: live map catalog plus mutual-aid-created groups.
- * Agency admins: Groups-page access, enriched with catalog display names /
- * live counts when present (MA-created groups stay hidden).
+ * Same Authentik source of truth as Data Sync group pickers.
+ * Optional catalogGroups enrich live counts only (never spelling).
  */
 async function buildScopedChannelPicker(authUser, catalogGroups) {
   const access = accessSvc.getAgencyAccess(authUser);
-  const catalogByKey = new Map();
-  for (const g of Array.isArray(catalogGroups) ? catalogGroups : []) {
-    if (!g?.baseKey || g.baseKey === mapMeta.UNASSIGNED_CHANNEL_KEY) continue;
-    catalogByKey.set(g.baseKey, g);
-  }
+  const catalogByKey = catalogCountByKey(catalogGroups);
+  const resolved = await dataSyncAccess.resolveGroupsForUser(authUser, []);
+  const channels = channelsFromAuthentikNames(resolved.groups, catalogByKey);
 
   if (access.isGlobalAdmin) {
     return {
       access,
-      channels: mergeCreatedMutualAidPickerChannels(
-        [...catalogByKey.values()].map(toPickerChannel)
-      ),
+      channels,
       channelScope: "all",
       allowedChannelKeys: null,
     };
   }
-
-  const scoped = await listAgencyScopedGroups(authUser);
-  const channels = scoped.map((g) => {
-    const cat = catalogByKey.get(g.baseKey);
-    return toPickerChannel({
-      name: cat?.name || g.name,
-      displayName: cat?.displayName || g.displayName,
-      baseKey: g.baseKey,
-      count: cat?.count || 0,
-    });
-  });
 
   return {
     access,

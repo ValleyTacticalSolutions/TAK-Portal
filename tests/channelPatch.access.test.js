@@ -118,4 +118,40 @@ const annotated = store.annotateGroupsWithPatchPeers(
 assert.deepStrictEqual(annotated[0].patchedWith, ["HCSO Tac"]);
 assert.strictEqual(annotated[1].patchedWith, undefined);
 
-console.log("channelPatch.access.test.js: ok");
+(async () => {
+  const dataSyncAccess = require("../services/dataSyncAccess.service");
+  const originalResolve = dataSyncAccess.resolveGroupsForUser;
+  dataSyncAccess.resolveGroupsForUser = async () => ({
+    groups: ["Davis Main", "HCSO Ops"],
+    debug: { sourceOfTruth: "authentik" },
+  });
+  try {
+    const picker = await access.buildScopedChannelPicker(
+      { isGlobalAdmin: true },
+      [
+        {
+          baseKey: "davis main",
+          name: "tak_DAVIS Main",
+          displayName: "DAVIS Main",
+          count: 3,
+        },
+      ]
+    );
+    const davis = picker.channels.find((c) => c.baseKey === "davis main");
+    assert.ok(davis, "Authentik channel must appear in picker");
+    assert.strictEqual(davis.displayName, "Davis Main", "Authentik spelling must win over catalog");
+    assert.strictEqual(davis.name, "tak_Davis Main");
+    assert.strictEqual(davis.count, 3, "catalog may still enrich live counts");
+    assert.ok(
+      !picker.channels.some((c) => c.displayName === "DAVIS Main"),
+      "stale TAK/catalog spelling must not override Authentik"
+    );
+  } finally {
+    dataSyncAccess.resolveGroupsForUser = originalResolve;
+  }
+
+  console.log("channelPatch.access.test.js: ok");
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
