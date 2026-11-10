@@ -2284,8 +2284,14 @@ function dockerPullRetryBash() {
   return src.slice(start, end + DOCKER_PULL_RETRY_END.length);
 }
 
+function lineMentionsNpmRegistry(text) {
+  // npm registry noise during an image build is not a Docker Hub pull failure.
+  return /registry\.npmjs\.org|npmjs\.org/i.test(String(text || ""));
+}
+
 function lineIsDockerHubRateLimit(text) {
   const s = String(text || "");
+  if (lineMentionsNpmRegistry(s)) return false;
   if (/toomanyrequests|too many requests|pull rate limit|rate limit exceeded|429 Too Many Requests/i.test(s)) {
     return true;
   }
@@ -2294,6 +2300,7 @@ function lineIsDockerHubRateLimit(text) {
 
 function lineIsTransientDockerPull(text) {
   const s = String(text || "");
+  if (lineMentionsNpmRegistry(s)) return false;
   if (lineIsDockerHubRateLimit(s)) return false;
   const pullish =
     /docker|registry|failed to copy|failed to fetch|error pulling|blob|manifest|received unexpected HTTP status/i.test(

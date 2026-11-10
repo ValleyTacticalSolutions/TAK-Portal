@@ -51,6 +51,12 @@ assert.strictEqual(
 );
 assert.strictEqual(
   marketplace.classifyDockerPullFailure(
+    "npm ERR! 503 Service Unavailable - GET https://registry.npmjs.org/@scope/pkg/-/pkg-1.0.0.tgz"
+  ),
+  "other"
+);
+assert.strictEqual(
+  marketplace.classifyDockerPullFailure(
     "unexpected status from HEAD request to https://registry-1.docker.io/v2/postgis/postgis/manifests/16-3.4: 404 Not Found"
   ),
   "other"
@@ -115,6 +121,10 @@ if [ "$mode" = daemon503 ]; then
   fi
   echo pulled
   exit 0
+fi
+if [ "$mode" = npm503 ]; then
+  echo 'npm ERR! 503 Service Unavailable - GET https://registry.npmjs.org/@scope/pkg/-/pkg-1.0.0.tgz'
+  exit 1
 fi
 echo 'service "postgis" depends on undefined service "missing": invalid compose project'
 exit 1
@@ -181,6 +191,13 @@ assert.match(daemon503.stdout, /pulled/);
 assert.match(daemon503.stderr, /retrying \(attempt 1 of 3\)/);
 assert.match(daemon503.stderr, /retrying \(attempt 2 of 3\)/);
 assert.strictEqual(daemon503.count, 3, "daemon HTTP 503 wording is retried twice");
+
+const npm503 = runRetry("npm503");
+assert.strictEqual(npm503.status, 0, npm503.stderr);
+assert.match(npm503.stdout, /FAIL/);
+assert.match(npm503.stdout, /registry\.npmjs\.org/);
+assert.doesNotMatch(npm503.stderr, /retrying/);
+assert.strictEqual(npm503.count, 1, "an npm registry 503 is not a Docker pull retry");
 
 const compose = runRetry("other");
 assert.strictEqual(compose.status, 0, compose.stderr);

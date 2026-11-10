@@ -157,6 +157,11 @@ docker_pull_failure_kind() {
   prev=""
   while IFS= read -r line || [ -n "$line" ]; do
     window="$prev $line"
+    # npm registry noise during an image build is not a Docker Hub pull failure.
+    if grep -qiE 'registry\.npmjs\.org|npmjs\.org' <<<"$window"; then
+      prev="$line"
+      continue
+    fi
     if grep -qiE 'toomanyrequests|too many requests|pull rate limit|rate limit exceeded|429 Too Many Requests' <<<"$window"; then
       printf '%s\n' ratelimit
       return 0
