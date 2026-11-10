@@ -12,7 +12,8 @@ All notable changes to this project will be documented in this file.  Minor qual
 ## Version History
 
 ### v2.0.34 - IN PROGRESS
-✨ `Enhancement` - Agencies - Modifying an agency's prefix/suffix is now allowed via the edit modal
+✨ `Enhancement` - Agencies - Modifying an agency's prefix/suffix is now allowed via the edit modal<br>
+✨ `Enhancement` - Data Sync - Allows for multiple groups/channels to be selected for a DS Mission
 
 ### v2.0.33 - 11/10/26
 ✨ `Enhancement` - Improves handling for icon matching<br>
