@@ -1,0 +1,11 @@
+---
+description: Cursor sessions leave git ship steps to Justin; Slack owns yes-merge
+alwaysApply: true
+---
+
+# Cursor vs Slack git process
+
+- In Cursor (this IDE), **do not** commit, push, create PRs, merge PRs, or bump/release versions unless Justin **explicitly** asks for that exact git action in the current message.
+- Implementing code/UI changes here is fine; leave a dirty working tree for Justin to review and ship.
+- The AGENTS.md / ops **`yes merge`** (and release) approval flow applies to **Slack** (and similar ops channels), not to Cursor chat. Do not treat “yes merge” typed in Cursor as merge authorization unless Justin clearly means merge this PR **from this chat**.
+- When unsure whether a Cursor message is asking to ship: ask, or stop after code changes.
