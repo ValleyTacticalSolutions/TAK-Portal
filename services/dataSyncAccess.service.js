@@ -663,24 +663,12 @@ function isPermanentDeleteFileSyncRecord(record) {
   );
 }
 
+/** Exact name match only (case-insensitive, optional .zip). No prefix/includes. */
 function fileSyncNameMatchesMission(missionName, filename) {
   const want = normalizeArchiveName(missionName);
   const fileKey = normalizeArchiveName(filename);
   if (!want || !fileKey) return false;
-  if (fileKey === want) return true;
-  if (fileKey.startsWith(want) || want.startsWith(fileKey)) return true;
-  const rawWant = String(missionName || "")
-    .trim()
-    .replace(/\.zip$/i, "")
-    .toLowerCase();
-  const rawFile = String(filename || "")
-    .trim()
-    .replace(/\.zip$/i, "")
-    .toLowerCase();
-  if (rawWant && rawFile && (rawFile.includes(rawWant) || rawWant.includes(rawFile))) {
-    return true;
-  }
-  return false;
+  return fileKey === want;
 }
 
 function findMatchingFileSyncPackagesForMission(missionName, mission, packages, allowedKeySet, opts) {
@@ -944,4 +932,7 @@ module.exports = {
   buildAccessDebug,
   isHiddenGlobalAdminGroupName,
   filterGlobalAdminGroupNames,
+  normalizeArchiveName,
+  fileSyncNameMatchesMission,
+  findMatchingFileSyncPackagesForMission,
 };

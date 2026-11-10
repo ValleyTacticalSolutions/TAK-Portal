@@ -5,8 +5,11 @@ const {
   filterMissionsForAccess,
   canonicalGroupKey,
   resolveGroupsForUser,
+  fileSyncNameMatchesMission,
+  findMatchingFileSyncPackagesForMission,
 } = require("../services/dataSyncAccess.service");
 const groupsSvc = require("../services/groups.service");
+const packageKind = require("../services/packageKind.service");
 
 const maRecords = [
   {
@@ -93,6 +96,59 @@ const visible = filterMissionsForAccess(missions, allowedKeySet);
 assert.deepStrictEqual(
   visible.map((m) => m.name),
   ["Agency Mission", "MA Mission"]
+);
+
+// Permanent delete file-sync name matching must be exact (not prefix/includes).
+assert.strictEqual(fileSyncNameMatchesMission("HCSO Ops", "HCSO Ops"), true);
+assert.strictEqual(fileSyncNameMatchesMission("HCSO Ops", "HCSO Ops.zip"), true);
+assert.strictEqual(fileSyncNameMatchesMission("HCSO Ops", "hcso ops"), true);
+assert.strictEqual(
+  fileSyncNameMatchesMission("HCSO Ops", "HCSO Ops Extended"),
+  false,
+  "prefix/startsWith must not match"
+);
+assert.strictEqual(
+  fileSyncNameMatchesMission("Ops", "HCSO Ops"),
+  false,
+  "substring includes must not match"
+);
+assert.strictEqual(
+  fileSyncNameMatchesMission("TDOT Cameras - Chattanooga", "TDOT Cameras - Chattanooga(1)"),
+  false,
+  "near-duplicate titles must not match"
+);
+
+const deletePkgs = [
+  {
+    hash: "aaa111",
+    filename: "HCSO Ops",
+    keywords: [packageKind.ARCHIVED_KEYWORD || "ARCHIVED_MISSION"],
+    groups: ["HCSO Main"],
+  },
+  {
+    hash: "bbb222",
+    filename: "HCSO Ops Extended",
+    keywords: [packageKind.ARCHIVED_KEYWORD || "ARCHIVED_MISSION"],
+    groups: ["HCSO Main"],
+  },
+  {
+    hash: "ccc333",
+    filename: "Other Mission",
+    keywords: [packageKind.ARCHIVED_KEYWORD || "ARCHIVED_MISSION"],
+    groups: ["HCSO Main"],
+  },
+];
+const matched = findMatchingFileSyncPackagesForMission(
+  "HCSO Ops",
+  { contents: [] },
+  deletePkgs,
+  allowedKeySet,
+  {}
+);
+assert.deepStrictEqual(
+  matched.map((p) => p.hash),
+  ["aaa111"],
+  "delete must only target exact mission name matches"
 );
 
 (async () => {
