@@ -46,6 +46,26 @@ function sendTakError(res, err, fallbackStatus) {
   });
 }
 
+function sendAccessError(res, err) {
+  const code = err?.code;
+  if (code === "FORBIDDEN" || code === "MISSION_ACCESS_DENIED") {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  return null;
+}
+
+function handleRouteError(res, err) {
+  const handled = sendAccessError(res, err);
+  if (handled) return handled;
+  return sendTakError(res, err);
+}
+
+async function assertWriteGroups(req, groups) {
+  const authUser = req.authentikUser || null;
+  const allowedKeySet = await dataSyncAccess.getAllowedCanonicalKeySet(authUser);
+  dataSyncAccess.assertGroupAllowed({ groups }, allowedKeySet);
+}
+
 function firstVal(obj, keys) {
   if (!obj || typeof obj !== "object") return "";
   for (let i = 0; i < keys.length; i++) {
@@ -141,7 +161,7 @@ router.get("/status", (req, res) => {
   });
 });
 
-/** Authentik-backed group list (same source of truth as Data Sync). */
+/** Authentik-backed group list (same source of truth / agency scope as Data Sync). */
 router.get("/groups", async (req, res) => {
   try {
     const authUser = req.authentikUser || null;
@@ -151,25 +171,28 @@ router.get("/groups", async (req, res) => {
     }
     return res.json(resolved.groups);
   } catch (err) {
-    return sendTakError(res, err);
+    return handleRouteError(res, err);
   }
 });
 
 router.get("/packages", async (req, res) => {
   try {
-    const data = await dataPackagesSvc.listDataPackages(req.query || {});
+    const authUser = req.authentikUser || null;
+    const data = await dataSyncAccess.listDataPackagesForUser(authUser);
     return res.json(data);
   } catch (err) {
-    return sendTakError(res, err);
+    return handleRouteError(res, err);
   }
 });
 
 router.get("/packages/:hash/metadata", async (req, res) => {
   try {
+    const authUser = req.authentikUser || null;
+    await dataSyncAccess.assertDataPackageAllowed(authUser, req.params.hash);
     const out = await dataPackagesSvc.getDataPackageMetadata(req.params.hash);
     return res.json(out);
   } catch (err) {
-    return sendTakError(res, err);
+    return handleRouteError(res, err);
   }
 });
 
@@ -181,6 +204,11 @@ router.post("/packages/upload", upload.single("file"), async (req, res) => {
     }
 
     const groups = groupsFromRequest(req.body || {});
+    if (!groups.length) {
+      return res.status(400).json({ error: "Select at least one assigned group / channel." });
+    }
+    await assertWriteGroups(req, groups);
+
     const title = String(
       (req.body && (req.body.title || req.body.name || req.body.filename)) ||
         file.originalname ||
@@ -229,13 +257,15 @@ router.post("/packages/upload", upload.single("file"), async (req, res) => {
       metadataApplyError,
     });
   } catch (err) {
-    return sendTakError(res, err);
+    return handleRouteError(res, err);
   }
 });
 
 router.get("/packages/download", async (req, res) => {
   try {
+    const authUser = req.authentikUser || null;
     const hash = req.query && req.query.hash ? String(req.query.hash) : "";
+    await dataSyncAccess.assertDataPackageAllowed(authUser, hash);
     const fileNameHint =
       req.query && (req.query.fileName || req.query.filename)
         ? String(req.query.fileName || req.query.filename)
@@ -264,13 +294,15 @@ router.get("/packages/download", async (req, res) => {
     auditDataPackage(req, "DATA_PACKAGE_DOWNLOADED", hash, { fileName: label });
     r.data.pipe(res);
   } catch (err) {
-    return sendTakError(res, err);
+    return handleRouteError(res, err);
   }
 });
 
 router.delete("/packages/:hash", async (req, res) => {
   try {
+    const authUser = req.authentikUser || null;
     const hash = req.params.hash;
+    await dataSyncAccess.assertDataPackageAllowed(authUser, hash);
     const fileNameHint =
       req.query && (req.query.fileName || req.query.filename)
         ? String(req.query.fileName || req.query.filename)
@@ -282,14 +314,16 @@ router.delete("/packages/:hash", async (req, res) => {
     auditDataPackage(req, "DATA_PACKAGE_DELETED", hash, { fileName: label });
     return res.json(out || { ok: true });
   } catch (err) {
-    return sendTakError(res, err);
+    return handleRouteError(res, err);
   }
 });
 
 router.put("/packages/:hash/metadata", async (req, res) => {
   try {
+    const authUser = req.authentikUser || null;
     const body = req.body && typeof req.body === "object" ? req.body : {};
     const hash = req.params.hash;
+    await dataSyncAccess.assertDataPackageAllowed(authUser, hash);
     const fileNameHint =
       body.fileName || body.filename || req.query?.fileName || req.query?.filename || "";
     const label = await resolveDataPackageLabel(hash, fileNameHint);
@@ -297,6 +331,12 @@ router.put("/packages/:hash/metadata", async (req, res) => {
     const groups = Object.prototype.hasOwnProperty.call(body, "groups")
       ? groupsFromRequest(body)
       : undefined;
+    if (groups) {
+      if (!groups.length) {
+        return res.status(400).json({ error: "Select at least one assigned group / channel." });
+      }
+      await assertWriteGroups(req, groups);
+    }
     const title = String(body.title || body.name || body.filename || "").trim();
     const action = resolveDataPackageMetadataAction(keywords);
     const out = await dataPackagesSvc.updateDataPackageMetadata(hash, {
@@ -318,7 +358,7 @@ router.put("/packages/:hash/metadata", async (req, res) => {
     });
     return res.json(out);
   } catch (err) {
-    return sendTakError(res, err);
+    return handleRouteError(res, err);
   }
 });
 

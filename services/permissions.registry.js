@@ -37,13 +37,15 @@ const PERMISSIONS = {
     data_package: {
       id: "page.data_package",
       label: "Data Package",
-      description: "Export and package data (global).",
+      description:
+        "Upload and manage TAK data packages. Agency admins are limited to in-scope channels (same as Data Sync).",
       section: "operations",
     },
     data_sync: {
       id: "page.data_sync",
       label: "Data Sync",
-      description: "Data sync mission manager.",
+      description:
+        "Data sync mission manager. Agency admins are limited to in-scope channels.",
       section: "operations",
     },
     email: {
@@ -145,6 +147,7 @@ const AGENCY_DEFAULT = new Set([
   "page.templates",
   "page.email",
   "page.mou",
+  "page.data_package",
   "page.data_sync",
   "page.channel_patch",
   "page.mutual_aid",

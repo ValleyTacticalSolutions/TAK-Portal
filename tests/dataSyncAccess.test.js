@@ -7,9 +7,25 @@ const {
   resolveGroupsForUser,
   fileSyncNameMatchesMission,
   findMatchingFileSyncPackagesForMission,
+  filterDataPackagesForAccess,
+  filterFileSyncPackagesForAccess,
 } = require("../services/dataSyncAccess.service");
 const groupsSvc = require("../services/groups.service");
 const packageKind = require("../services/packageKind.service");
+const registry = require("../services/permissions.registry");
+
+assert.ok(
+  registry.getDefaultSetForRole("agency_admin").has("page.data_package"),
+  "agency admins default to page.data_package"
+);
+assert.ok(
+  registry.getDefaultSetForRole("agency_admin").has("page.data_sync"),
+  "agency admins default to page.data_sync"
+);
+assert.strictEqual(
+  registry.getPermissionMeta("page.data_package")?.section,
+  "operations"
+);
 
 const maRecords = [
   {
@@ -149,6 +165,50 @@ assert.deepStrictEqual(
   matched.map((p) => p.hash),
   ["aaa111"],
   "delete must only target exact mission name matches"
+);
+
+const mixedPackages = [
+  {
+    hash: "dp-in",
+    filename: "Agency Map Pack.zip",
+    keywords: [packageKind.PACKAGE_ACTIVE_KEYWORD || "missionpackage"],
+    groups: "HCSO Main",
+    size: "2MB",
+    tool: "public",
+  },
+  {
+    hash: "dp-out",
+    filename: "Other Agency Pack.zip",
+    keywords: [packageKind.PACKAGE_ACTIVE_KEYWORD || "missionpackage"],
+    groups: "Other Group",
+    size: "2MB",
+    tool: "public",
+  },
+  {
+    hash: "ds-arch",
+    filename: "HCSO Ops",
+    keywords: [packageKind.ARCHIVED_KEYWORD || "ARCHIVED_MISSION", packageKind.DATA_SYNC_KEYWORD],
+    groups: "HCSO Main",
+    size: "12kB",
+  },
+];
+const agencyDataPackages = filterDataPackagesForAccess(mixedPackages, allowedKeySet);
+assert.deepStrictEqual(
+  agencyDataPackages.map((p) => p.hash),
+  ["dp-in"],
+  "agency data packages must be scoped to allowed groups and exclude data sync rows"
+);
+const globalDataPackages = filterDataPackagesForAccess(mixedPackages, null);
+assert.deepStrictEqual(
+  globalDataPackages.map((p) => p.hash).sort(),
+  ["dp-in", "dp-out"],
+  "global admin sees all data packages but not data sync file-sync rows"
+);
+const agencyFileSync = filterFileSyncPackagesForAccess(mixedPackages, allowedKeySet);
+assert.deepStrictEqual(
+  agencyFileSync.map((p) => p.hash),
+  ["ds-arch"],
+  "data sync file-sync filter remains separate from data packages"
 );
 
 (async () => {

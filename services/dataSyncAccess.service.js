@@ -578,10 +578,29 @@ function filterFileSyncPackagesForAccess(packages, allowedKeySet) {
   });
 }
 
+/** Data Package Manager rows (excludes Data Sync archive/mission file-sync). */
+function filterDataPackagesForAccess(packages, allowedKeySet) {
+  const list = Array.isArray(packages) ? packages : [];
+  return list.filter((pkg) => {
+    if (!packageKind.isDataPackageRecord(pkg)) return false;
+    return packageAllowedForAccess(pkg, allowedKeySet);
+  });
+}
+
 async function listFileSyncPackagesForUser(authUser) {
   const allowedKeySet = await getAllowedCanonicalKeySet(authUser);
   const data = await dataPackagesSvc.listDataPackages({});
   const items = filterFileSyncPackagesForAccess(data.items || [], allowedKeySet);
+  return {
+    items,
+    source: data.source || "marti_files_metadata",
+  };
+}
+
+async function listDataPackagesForUser(authUser) {
+  const allowedKeySet = await getAllowedCanonicalKeySet(authUser);
+  const data = await dataPackagesSvc.listDataPackages({});
+  const items = filterDataPackagesForAccess(data.items || [], allowedKeySet);
   return {
     items,
     source: data.source || "marti_files_metadata",
@@ -596,6 +615,25 @@ async function assertFileSyncPackageAllowed(authUser, hash) {
     throw err;
   }
   const data = await listFileSyncPackagesForUser(authUser);
+  const record = (data.items || []).find(
+    (x) => String(x.hash || "").trim().toLowerCase() === h.toLowerCase()
+  );
+  if (!record) {
+    const err = new Error("Forbidden");
+    err.code = "FORBIDDEN";
+    throw err;
+  }
+  return record;
+}
+
+async function assertDataPackageAllowed(authUser, hash) {
+  const h = String(hash || "").trim();
+  if (!h) {
+    const err = new Error("Forbidden");
+    err.code = "FORBIDDEN";
+    throw err;
+  }
+  const data = await listDataPackagesForUser(authUser);
   const record = (data.items || []).find(
     (x) => String(x.hash || "").trim().toLowerCase() === h.toLowerCase()
   );
@@ -919,8 +957,11 @@ module.exports = {
   filterGroupsPayload,
   filterMissionsPayload,
   filterFileSyncPackagesForAccess,
+  filterDataPackagesForAccess,
   listFileSyncPackagesForUser,
+  listDataPackagesForUser,
   assertFileSyncPackageAllowed,
+  assertDataPackageAllowed,
   permanentlyDeleteMission,
   permanentlyDeleteMissionForUser,
   detachMissionFromGeofences,
