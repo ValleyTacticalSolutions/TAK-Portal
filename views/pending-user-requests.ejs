@@ -489,7 +489,9 @@ th.sortable:hover{
 <%- include("partials/sidebar") %>
 
 <main class="main">
-  <h1>Pending User Requests</h1>
+  <div class="pageHeader">
+    <h1 class="pageHeader__title">Pending User Requests</h1>
+  </div>
   <%
     const usernamePrefixLabel = String((settings && settings.USERNAME_PREFIX_LABEL) || "").trim() || "Badge Number / Username";
     const userPhoneFieldEnabled =
