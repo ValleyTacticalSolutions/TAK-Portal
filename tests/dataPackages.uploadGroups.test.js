@@ -10,6 +10,9 @@ const {
   normalizeGroupsList,
   groupsMetadataValue,
   metadataStringPutConfig,
+  parseExpirationMillis,
+  pickPackageRecord,
+  packageNamesEqual,
 } = dataPackagesSvc;
 
 assert.deepStrictEqual(normalizeGroupsList([" FL Interop ", "", "DAVIS Main"]), [
@@ -97,6 +100,50 @@ assert.ok(
 assert.ok(
   !/metaPatch\.groups\s*=/.test(routeSrc),
   "upload route must not rely on post-upload groups metadata PATCH"
+);
+
+assert.strictEqual(parseExpirationMillis(""), null);
+assert.strictEqual(parseExpirationMillis("none"), null);
+assert.strictEqual(parseExpirationMillis("2027-09-10T19:08:00"), Date.parse("2027-09-10T19:08:00"));
+assert.strictEqual(parseExpirationMillis(1700000000), 1700000000000);
+assert.throws(() => parseExpirationMillis("not-a-date"), /invalid/i);
+
+assert.ok(
+  /expiration/.test(routeSrc) && /parseExpirationMillis/.test(routeSrc),
+  "upload route must accept optional expiration"
+);
+
+const twinHash = "2a4590d7141026b5b3cde9dffd097f27c40fe4d2247b7844c35371679d40a661";
+const twinRows = [
+  {
+    hash: twinHash,
+    filename: "TDOT Cameras - Test",
+    groups: "Hogwarts Co CAD_READ,MA - Test MA",
+  },
+  {
+    hash: twinHash,
+    filename: "TDOT Cameras - Chattanooga",
+    groups: "Davis Main",
+  },
+];
+assert.ok(packageNamesEqual("TDOT Cameras - Test", "TDOT Cameras - Test.zip"));
+assert.strictEqual(
+  pickPackageRecord(twinRows, { hash: twinHash, name: "TDOT Cameras - Chattanooga" }).filename,
+  "TDOT Cameras - Chattanooga"
+);
+assert.strictEqual(
+  pickPackageRecord(twinRows, { hash: twinHash, name: "TDOT Cameras - Test" }).groups,
+  "Hogwarts Co CAD_READ,MA - Test MA"
+);
+assert.strictEqual(
+  pickPackageRecord(twinRows, { hash: twinHash, name: "Missing Name" }),
+  null,
+  "named lookup must not fall back to a hash twin"
+);
+assert.strictEqual(
+  pickPackageRecord(twinRows, { hash: twinHash }).filename,
+  "TDOT Cameras - Test",
+  "hash-only lookup may use first row"
 );
 
 console.log("dataPackages.uploadGroups.test.js: ok");

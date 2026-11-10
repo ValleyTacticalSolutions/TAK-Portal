@@ -32,9 +32,13 @@ function sendTakError(res, err, fallbackStatus) {
     code === "TAK_BYPASS" ||
     code === "TAK_CA_MISSING" ||
     code === "INVALID_HASH" ||
-    code === "INVALID_UPLOAD"
+    code === "INVALID_UPLOAD" ||
+    code === "INVALID_EXPIRATION"
   ) {
     return res.status(400).json({ error: err.message, code });
+  }
+  if (code === "NOT_FOUND") {
+    return res.status(404).json({ error: err.message, code });
   }
   const status = err?.response?.status;
   const outStatus =
@@ -132,6 +136,22 @@ function auditDataPackage(req, action, hash, details = {}) {
   });
 }
 
+function fileNameFromRequest(req, body) {
+  const q = req && req.query ? req.query : {};
+  const b = body && typeof body === "object" ? body : {};
+  return String(
+    q.fileName ||
+      q.filename ||
+      q.name ||
+      q.title ||
+      b.fileName ||
+      b.filename ||
+      b.name ||
+      b.title ||
+      ""
+  ).trim();
+}
+
 async function resolveDataPackageLabel(hash, hint) {
   const fromHint = String(hint || "").trim();
   if (fromHint) return fromHint;
@@ -188,8 +208,13 @@ router.get("/packages", async (req, res) => {
 router.get("/packages/:hash/metadata", async (req, res) => {
   try {
     const authUser = req.authentikUser || null;
-    await dataSyncAccess.assertDataPackageAllowed(authUser, req.params.hash);
-    const out = await dataPackagesSvc.getDataPackageMetadata(req.params.hash);
+    const fileNameHint = fileNameFromRequest(req);
+    await dataSyncAccess.assertDataPackageAllowed(authUser, req.params.hash, {
+      fileName: fileNameHint,
+    });
+    const out = await dataPackagesSvc.getDataPackageMetadata(req.params.hash, {
+      fileName: fileNameHint,
+    });
     return res.json(out);
   } catch (err) {
     return handleRouteError(res, err);
@@ -215,6 +240,19 @@ router.post("/packages/upload", upload.single("file"), async (req, res) => {
         ""
     ).trim();
     const uploadName = title || String(file.originalname || "data-package.zip");
+    const expirationRaw =
+      req.body && (req.body.expiration != null || req.body.Expiration != null)
+        ? req.body.expiration != null
+          ? req.body.expiration
+          : req.body.Expiration
+        : "";
+    const expirationMs = dataPackagesSvc.parseExpirationMillis(expirationRaw);
+    if (expirationMs != null && expirationMs <= Date.now()) {
+      return res.status(400).json({
+        error: "Expiration date/time must be in the future.",
+        code: "INVALID_EXPIRATION",
+      });
+    }
     // Groups must be applied on Marti missionupload (`Groups` query params).
     // Post-upload metadata PUT cannot reliably replace the cert's full group vector.
     const out = await dataPackagesSvc.uploadDataPackage(file.buffer, uploadName, {
@@ -227,12 +265,15 @@ router.post("/packages/upload", upload.single("file"), async (req, res) => {
 
     const computedHash = crypto.createHash("sha256").update(file.buffer).digest("hex");
     const hash = dataPackagesSvc.extractUploadHash(out, computedHash);
-    // Filename/Groups are applied on missionupload. Name metadata is best-effort.
+    // Filename/Groups are applied on missionupload. Name/expiration metadata is best-effort.
+    const metaPatch = {};
+    if (title) metaPatch.title = title;
+    if (expirationMs != null) metaPatch.expiration = expirationMs;
     let metadataApplied = false;
     let metadataApplyError;
-    if (hash && title) {
+    if (hash && Object.keys(metaPatch).length) {
       try {
-        await dataPackagesSvc.updateDataPackageMetadata(hash, { title });
+        await dataPackagesSvc.updateDataPackageMetadata(hash, metaPatch);
         metadataApplied = true;
       } catch (metaErr) {
         metadataApplyError = metaErr?.message || String(metaErr);
@@ -245,7 +286,8 @@ router.post("/packages/upload", upload.single("file"), async (req, res) => {
       hash,
       title: title || undefined,
       groups: groups.length ? groups : undefined,
-      metadataApplied: title ? metadataApplied : undefined,
+      expiration: expirationMs || undefined,
+      metadataApplied: Object.keys(metaPatch).length ? metadataApplied : undefined,
       metadataApplyError,
     });
     return res.json({
@@ -253,7 +295,8 @@ router.post("/packages/upload", upload.single("file"), async (req, res) => {
       hash,
       title: title || uploadName,
       groups,
-      metadataApplied: title ? metadataApplied : undefined,
+      expiration: expirationMs || undefined,
+      metadataApplied: Object.keys(metaPatch).length ? metadataApplied : undefined,
       metadataApplyError,
     });
   } catch (err) {
@@ -265,11 +308,8 @@ router.get("/packages/download", async (req, res) => {
   try {
     const authUser = req.authentikUser || null;
     const hash = req.query && req.query.hash ? String(req.query.hash) : "";
-    await dataSyncAccess.assertDataPackageAllowed(authUser, hash);
-    const fileNameHint =
-      req.query && (req.query.fileName || req.query.filename)
-        ? String(req.query.fileName || req.query.filename)
-        : "";
+    const fileNameHint = fileNameFromRequest(req);
+    await dataSyncAccess.assertDataPackageAllowed(authUser, hash, { fileName: fileNameHint });
     const r = await dataPackagesSvc.downloadDataPackageStream(hash);
 
     if (r.status >= 400) {
@@ -302,13 +342,8 @@ router.delete("/packages/:hash", async (req, res) => {
   try {
     const authUser = req.authentikUser || null;
     const hash = req.params.hash;
-    await dataSyncAccess.assertDataPackageAllowed(authUser, hash);
-    const fileNameHint =
-      req.query && (req.query.fileName || req.query.filename)
-        ? String(req.query.fileName || req.query.filename)
-        : req.body && (req.body.fileName || req.body.filename)
-          ? String(req.body.fileName || req.body.filename)
-          : "";
+    const fileNameHint = fileNameFromRequest(req, req.body);
+    await dataSyncAccess.assertDataPackageAllowed(authUser, hash, { fileName: fileNameHint });
     const label = await resolveDataPackageLabel(hash, fileNameHint);
     const out = await dataPackagesSvc.deleteDataPackage(hash);
     auditDataPackage(req, "DATA_PACKAGE_DELETED", hash, { fileName: label });
@@ -323,9 +358,12 @@ router.put("/packages/:hash/metadata", async (req, res) => {
     const authUser = req.authentikUser || null;
     const body = req.body && typeof req.body === "object" ? req.body : {};
     const hash = req.params.hash;
-    await dataSyncAccess.assertDataPackageAllowed(authUser, hash);
-    const fileNameHint =
-      body.fileName || body.filename || req.query?.fileName || req.query?.filename || "";
+    // Prefer the pre-edit name so hash twins resolve to the clicked row.
+    const priorName = String(
+      body.priorFileName || body.priorFilename || body.originalFileName || body.originalFilename || ""
+    ).trim();
+    const fileNameHint = priorName || fileNameFromRequest(req, body);
+    await dataSyncAccess.assertDataPackageAllowed(authUser, hash, { fileName: fileNameHint });
     const label = await resolveDataPackageLabel(hash, fileNameHint);
     const keywords = body.keywords;
     const groups = Object.prototype.hasOwnProperty.call(body, "groups")

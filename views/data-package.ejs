@@ -15,9 +15,12 @@
   <div class="card createFormCard">
     <h2>Upload Data Package</h2>
     <div class="createForm">
-      <div class="grid2 data-packages-create-top" style="grid-column: 1 / -1;">
+      <div class="data-packages-create-top" style="grid-column: 1 / -1;">
         <label>Title
           <input type="text" id="createPackageTitle" autocomplete="off" placeholder="e.g. County Map Pack" style="width: 100%; box-sizing: border-box;" />
+        </label>
+        <label>Expiration Date (Optional)
+          <input type="datetime-local" id="createPackageExpiration" style="width: 100%; box-sizing: border-box;" />
         </label>
         <div class="data-packages-upload-block">
           <label class="data-packages-upload-label" for="uploadFile">Choose File</label>
@@ -166,11 +169,20 @@
   .data-packages-status.msg { margin-left: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); }
   .data-packages-status.bad { border-color: rgba(255,80,80,.45); background: rgba(255,80,80,.08); }
   .data-packages-page .data-packages-create-top {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: 12px;
     align-items: end;
   }
   .data-packages-page .data-packages-create-top > label,
   .data-packages-page .data-packages-create-top > .data-packages-upload-block {
     min-width: 0;
+  }
+  @media (max-width: 900px) {
+    .data-packages-page .data-packages-create-top {
+      grid-template-columns: 1fr;
+      align-items: stretch;
+    }
   }
   .data-packages-page .data-packages-upload-block {
     display: flex;
@@ -352,6 +364,7 @@
 
   var statusBanner = document.getElementById("statusBanner");
   var createPackageTitle = document.getElementById("createPackageTitle");
+  var createPackageExpiration = document.getElementById("createPackageExpiration");
   var uploadFile = document.getElementById("uploadFile");
   var btnUploadPackage = document.getElementById("btnUploadPackage");
   var uploadMsg = document.getElementById("uploadMsg");
@@ -696,7 +709,11 @@
     var hash = firstVal(pkg, ["hash", "sha256", "uid", "id"]);
     var size = firstVal(pkg, ["size", "content_length", "contentLength"]);
     var creator = firstVal(pkg, ["creator_uid", "creatorUid", "creator", "owner"]);
-    var expiration = firstVal(pkg, ["expiration", "Expiration", "expires", "expiresAt"]);
+    var expirationRaw = firstVal(pkg, ["expiration", "Expiration", "expires", "expiresAt"]);
+    var expiration =
+      !expirationRaw || /^none$/i.test(String(expirationRaw).trim())
+        ? "—"
+        : String(expirationRaw).trim();
     var created = firstVal(pkg, ["created_at", "createTime", "created", "timestamp"]);
     var channelNames = packageGroupNames(pkg);
 
@@ -856,6 +873,12 @@
       if (!title) throw new Error("Title is required.");
       var groups = pickedGroupsList(createPickedGroups);
       if (!groups.length) throw new Error("Select at least one assigned group / channel.");
+      var expiration = createPackageExpiration ? String(createPackageExpiration.value || "").trim() : "";
+      if (expiration) {
+        var expMs = Date.parse(expiration);
+        if (!Number.isFinite(expMs)) throw new Error("Expiration date/time is invalid.");
+        if (expMs <= Date.now()) throw new Error("Expiration date/time must be in the future.");
+      }
 
       var fd = new FormData();
       fd.append("file", file, file.name || "data-package.zip");
@@ -863,6 +886,7 @@
       fd.append("keywords", ACTIVE_KEYWORD);
       fd.append("tool", "public");
       fd.append("groups", JSON.stringify(groups));
+      if (expiration) fd.append("expiration", expiration);
 
       var res = await fetch(API + "/packages/upload", { method: "POST", body: fd });
       var text = await res.text();
@@ -872,6 +896,7 @@
       setMsg(uploadMsg, "Data package uploaded.", true);
       uploadFile.value = "";
       if (createPackageTitle) createPackageTitle.value = "";
+      if (createPackageExpiration) createPackageExpiration.value = "";
       clearPickedGroups(createPickedGroups);
       if (createGroupFilter) createGroupFilter.value = "";
       renderCreateGroupsList();
@@ -903,6 +928,32 @@
     setMsg(packageModalMsg, text, ok);
   }
 
+  function findCachedPackage(hash, filename) {
+    var wantHash = String(hash || "").trim().toLowerCase();
+    var wantName = String(filename || "").trim();
+    if (!wantHash) return null;
+    var hashMatches = [];
+    for (var i = 0; i < packagesCache.length; i++) {
+      var p = packagesCache[i];
+      var h = String(firstVal(p, ["hash", "sha256", "uid", "id"]) || "").trim().toLowerCase();
+      if (h !== wantHash) continue;
+      hashMatches.push(p);
+      if (wantName) {
+        var title = packageTitle(p);
+        if (
+          String(title || "").trim().toLowerCase() === wantName.toLowerCase() ||
+          String(title || "").trim().replace(/\.zip$/i, "").toLowerCase() ===
+            wantName.replace(/\.zip$/i, "").toLowerCase()
+        ) {
+          return p;
+        }
+      }
+    }
+    // Name was provided: do not return a hash twin with a different title.
+    if (wantName) return null;
+    return hashMatches[0] || null;
+  }
+
   async function openEditPackage(hash, filename) {
     editingHash = String(hash || "").trim();
     editingFilename = String(filename || "").trim();
@@ -915,25 +966,45 @@
     openModal();
     try {
       if (!groupsCache.length) await loadGroups();
-      var res = await fetch(API + "/packages/" + encodeURIComponent(editingHash) + "/metadata");
+      // Seed from the clicked list row first — Marti often has multiple rows per hash.
+      var cached = findCachedPackage(editingHash, editingFilename);
+      var groups = cached ? packageGroupNames(cached) : [];
+      if (cached && pkgTitle) {
+        var cachedTitle = packageTitle(cached);
+        if (cachedTitle) pkgTitle.value = cachedTitle;
+      }
+      var metaUrl =
+        API +
+        "/packages/" +
+        encodeURIComponent(editingHash) +
+        "/metadata" +
+        (editingFilename
+          ? "?fileName=" + encodeURIComponent(editingFilename)
+          : "");
+      var res = await fetch(metaUrl);
       var text = await res.text();
       var j = {};
       try { j = JSON.parse(text); } catch (_) {}
-      if (!res.ok) throw new Error((j && j.error) || "Failed to load package");
-      var loadedTitle = firstVal(j, ["name", "title", "filename", "original_filename"]);
-      if (pkgTitle && loadedTitle) pkgTitle.value = loadedTitle;
-      else if (pkgTitle && !String(pkgTitle.value || "").trim()) pkgTitle.value = editingFilename || "";
-      var groups = parsePackageGroupsField(j.groups);
-      if (!groups.length) {
-        for (var i = 0; i < packagesCache.length; i++) {
-          var p = packagesCache[i];
-          var h = firstVal(p, ["hash", "sha256", "uid", "id"]);
-          if (String(h) === editingHash) {
-            groups = packageGroupNames(p);
-            if (!loadedTitle && pkgTitle) pkgTitle.value = packageTitle(p);
-            break;
+      if (res.ok) {
+        var loadedTitle = firstVal(j, ["name", "title", "filename", "original_filename"]);
+        // Only accept metadata title when it matches the selected package (or no name hint).
+        if (pkgTitle && loadedTitle) {
+          if (
+            !editingFilename ||
+            String(loadedTitle).trim().toLowerCase() === editingFilename.toLowerCase() ||
+            String(loadedTitle).trim().replace(/\.zip$/i, "").toLowerCase() ===
+              editingFilename.replace(/\.zip$/i, "").toLowerCase()
+          ) {
+            pkgTitle.value = loadedTitle;
           }
         }
+        var metaGroups = parsePackageGroupsField(j.groups);
+        if (metaGroups.length) groups = metaGroups;
+      } else if (!cached) {
+        throw new Error((j && j.error) || "Failed to load package");
+      }
+      if (pkgTitle && !String(pkgTitle.value || "").trim()) {
+        pkgTitle.value = editingFilename || "";
       }
       setPickedGroups(editPickedGroups, groups);
       renderEditGroupsList();
@@ -960,6 +1031,7 @@
           filename: title,
           groups: groups,
           fileName: title,
+          priorFileName: editingFilename || undefined,
         }),
       });
       var text = await res.text();

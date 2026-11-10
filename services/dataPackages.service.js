@@ -507,6 +507,30 @@ function metadataStringPutConfig() {
   };
 }
 
+/**
+ * Parse UI / API expiration into Marti epoch millis.
+ * Accepts datetime-local (`YYYY-MM-DDTHH:mm`), ISO strings, or numeric millis/seconds.
+ * Returns null when empty / "none".
+ */
+function parseExpirationMillis(raw) {
+  if (raw == null || raw === "") return null;
+  if (typeof raw === "number") {
+    if (!Number.isFinite(raw) || raw <= 0) return null;
+    // Heuristic: values below year ~2001 in ms are likely seconds.
+    return raw < 1e12 ? Math.round(raw * 1000) : Math.round(raw);
+  }
+  const s = String(raw).trim();
+  if (!s || /^none$/i.test(s)) return null;
+  if (/^\d+$/.test(s)) return parseExpirationMillis(Number(s));
+  const ms = Date.parse(s);
+  if (!Number.isFinite(ms) || ms <= 0) {
+    const e = new Error("Expiration date/time is invalid.");
+    e.code = "INVALID_EXPIRATION";
+    throw e;
+  }
+  return ms;
+}
+
 async function uploadDataPackage(buffer, originalName, metadata = {}) {
   await assertTakAvailable();
   if (!buffer || !Buffer.isBuffer(buffer) || !buffer.length) {
@@ -584,7 +608,55 @@ function extractUploadHash(out, fallbackHash) {
   return String(fallbackHash || "").trim();
 }
 
-async function getDataPackageMetadata(hash) {
+/** Exact title/name match (case-insensitive, optional .zip). */
+function packageNamesEqual(a, b) {
+  const norm = (v) =>
+    String(v || "")
+      .trim()
+      .replace(/\.zip$/i, "")
+      .toLowerCase();
+  const left = norm(a);
+  const right = norm(b);
+  return !!left && !!right && left === right;
+}
+
+function packageRecordTitle(record) {
+  if (!record || typeof record !== "object") return "";
+  return String(
+    record.filename || record.name || record.title || record.Name || record.original_filename || ""
+  ).trim();
+}
+
+/**
+ * Marti can return multiple file-manager rows that share one content hash.
+ * Prefer an exact name match when provided so edit/load picks the clicked row.
+ */
+function pickPackageRecord(list, { hash, name } = {}) {
+  const items = Array.isArray(list) ? list : [];
+  const h = String(hash || "")
+    .trim()
+    .toLowerCase();
+  const wantName = String(name || "").trim();
+  const byHash = h
+    ? items.filter(
+        (item) =>
+          String(item?.hash || item?.Hash || "")
+            .trim()
+            .toLowerCase() === h
+      )
+    : items.slice();
+  if (wantName) {
+    const exact = (byHash.length ? byHash : items).find((item) =>
+      packageNamesEqual(packageRecordTitle(item), wantName)
+    );
+    if (exact) return exact;
+    // Name was provided but no row matched — do not fall back to another hash twin.
+    if (byHash.length || items.length) return null;
+  }
+  return byHash[0] || items[0] || null;
+}
+
+async function getDataPackageMetadata(hash, options = {}) {
   await assertTakAvailable();
   const h = String(hash || "").trim();
   if (!h) {
@@ -592,6 +664,9 @@ async function getDataPackageMetadata(hash) {
     e.code = "INVALID_HASH";
     throw e;
   }
+  const nameHint = String(
+    options.name || options.filename || options.fileName || options.title || ""
+  ).trim();
   const client = buildTakOriginAxios({ timeout: 60000 });
   const out = {
     hash: h,
@@ -599,7 +674,7 @@ async function getDataPackageMetadata(hash) {
     keywords: [],
     groups: [],
   };
-  dbg("metadata start", { hash: h });
+  dbg("metadata start", { hash: h, name: nameHint || undefined });
 
   try {
     const toolRes = await client.get(`/Marti/api/sync/metadata/${encodeURIComponent(h)}/tool`);
@@ -611,29 +686,36 @@ async function getDataPackageMetadata(hash) {
   }
 
   try {
-    const listRes = await client.get("/Marti/api/files/metadata", { params: { hash: h } });
+    const params = { hash: h };
+    if (nameHint) params.name = nameHint;
+    const listRes = await client.get("/Marti/api/files/metadata", { params });
     const list = normalizeDataPackageList(listRes.data).map(normalizePackageRecord);
-    if (list.length) {
-      const item = list[0] || {};
+    const item = pickPackageRecord(list, { hash: h, name: nameHint });
+    if (item) {
       if (!out.tool) out.tool = String(item.tool || "").trim();
       if (!out.keywords || !out.keywords.length) out.keywords = parseKeywords(item.keywords);
-      const title = String(
-        item.filename || item.name || item.title || item.original_filename || ""
-      ).trim();
+      const title = packageRecordTitle(item);
       if (title) {
         out.filename = title;
         out.name = title;
         out.title = title;
       }
       out.groups = normalizeGroupsList(item.groups);
+      if (item.expiration != null && item.expiration !== "") out.expiration = item.expiration;
+    } else if (nameHint) {
+      const e = new Error("Data package not found for that hash and name.");
+      e.code = "NOT_FOUND";
+      throw e;
     }
-  } catch (_) {
+  } catch (err) {
+    if (err?.code === "NOT_FOUND") throw err;
     // optional metadata source
   }
   dbgVerbose(`metadata resolved payload for ${h}`, out);
 
   dbg("metadata resolved", {
     hash: h,
+    name: out.name || out.filename || "",
     tool: out.tool,
     keywordsCount: Array.isArray(out.keywords) ? out.keywords.length : 0,
     groupsCount: Array.isArray(out.groups) ? out.groups.length : 0,
@@ -708,6 +790,17 @@ async function updateDataPackageMetadata(hash, patch = {}) {
     out.filename = title;
   }
 
+  if (Object.prototype.hasOwnProperty.call(patch, "expiration")) {
+    const expirationMs = parseExpirationMillis(patch.expiration);
+    if (expirationMs != null) {
+      await client.put(`/Marti/api/sync/metadata/${encodeURIComponent(h)}/expiration`, null, {
+        params: { expiration: expirationMs },
+        headers: { Accept: "application/json" },
+      });
+      out.expiration = expirationMs;
+    }
+  }
+
   // OTS-specific flags; if endpoint/build does not support it we continue.
   if (
     patch.installOnEnrollment != null ||
@@ -748,7 +841,11 @@ module.exports = {
   groupsMetadataValue,
   buildMissionUploadParams,
   metadataStringPutConfig,
+  parseExpirationMillis,
   extractUploadHash,
+  packageNamesEqual,
+  packageRecordTitle,
+  pickPackageRecord,
   zipDownloadFilename,
   safeFilename,
 };

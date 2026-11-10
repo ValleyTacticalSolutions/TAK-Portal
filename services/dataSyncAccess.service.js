@@ -626,17 +626,21 @@ async function assertFileSyncPackageAllowed(authUser, hash) {
   return record;
 }
 
-async function assertDataPackageAllowed(authUser, hash) {
+async function assertDataPackageAllowed(authUser, hash, options = {}) {
   const h = String(hash || "").trim();
   if (!h) {
     const err = new Error("Forbidden");
     err.code = "FORBIDDEN";
     throw err;
   }
+  const nameHint = String(
+    options.name || options.filename || options.fileName || options.title || ""
+  ).trim();
   const data = await listDataPackagesForUser(authUser);
-  const record = (data.items || []).find(
-    (x) => String(x.hash || "").trim().toLowerCase() === h.toLowerCase()
-  );
+  const record = dataPackagesSvc.pickPackageRecord(data.items || [], {
+    hash: h,
+    name: nameHint,
+  });
   if (!record) {
     const err = new Error("Forbidden");
     err.code = "FORBIDDEN";
