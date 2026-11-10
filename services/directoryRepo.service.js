@@ -1048,8 +1048,11 @@ async function updateLocalUser(id, patch, client) {
   }
   const nextAttrs = patch.attributes ? attrs : existing.attributes || {};
   const cols = extractUserColumns(nextAttrs, patch);
+  const nextUsername =
+    patch.username !== undefined ? String(patch.username || "").trim() || null : null;
   const r = await q.query(
     `UPDATE users SET
+      username = COALESCE($18, username),
       name = COALESCE($2, name),
       email = COALESCE($3, email),
       is_active = COALESCE($4, is_active),
@@ -1081,11 +1084,34 @@ async function updateLocalUser(id, patch, client) {
       patch.pending_delete !== undefined ? patch.pending_delete : null,
       patch.sync_status || "pending",
       patch.attributes ? !!cols.tak_portal_hidden : null,
+      nextUsername,
     ]
   );
   const user = rowToUser(r.rows[0]);
   await attachGroups([user]);
   return user;
+}
+
+/**
+ * Re-key users.agency (+ attributes.agency) when an agency username token changes.
+ * Does not change usernames.
+ */
+async function updateUsersAgencySuffixColumn(oldSuffix, newSuffix) {
+  const oldSfx = String(oldSuffix || "").trim().toLowerCase();
+  const newSfx = String(newSuffix || "").trim().toLowerCase();
+  if (!oldSfx || !newSfx || oldSfx === newSfx) return [];
+  const r = await db.query(
+    `UPDATE users SET
+       agency = $1,
+       attributes = jsonb_set(COALESCE(attributes, '{}'::jsonb), '{agency}', to_jsonb($1::text), true),
+       sync_status = 'pending',
+       updated_at = now()
+     WHERE pending_delete = false
+       AND lower(agency) = $2
+     RETURNING id, authentik_pk, username, attributes`,
+    [newSfx, oldSfx]
+  );
+  return r.rows;
 }
 
 async function deleteLocalUser(id, client) {
@@ -1364,4 +1390,5 @@ module.exports = {
   replaceUserMembershipsFromUuids,
   updateUsersAgencyNameColumn,
   updateUsersAgencyAbbreviationColumn,
+  updateUsersAgencySuffixColumn,
 };

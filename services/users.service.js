@@ -915,6 +915,42 @@ async function emailUserReenabled(user) {
   });
 }
 
+/**
+ * Sent when an agency username token/placement change rebuilds a user's username
+ * and revokes their TAK certificates.
+ */
+async function emailAgencyUsernameChanged({ user, oldUsername, newUsername }) {
+  const built = await buildUserAccountWelcomeEmailVars(user, undefined);
+  if (!built) return;
+
+  const takPortalPublicUrl = built.vars.takPortalPublicUrl;
+  const takPortalBlock = buildTakPortalBlock({
+    takPortalPublicUrl,
+    introHtml:
+      "Use the TAK Portal to access device setup instructions, reset your password, or generate a QR code for faster sign-in on your mobile device.",
+    buttonText: "Open TAK Portal",
+    elseHtml:
+      "If you forget your password or need help setting up TAK on your device, contact your TAK Portal Administrator.",
+  });
+
+  const html = renderTemplate("agency_username_changed.html", {
+    ...built.vars,
+    username: String(newUsername || built.vars.username || "").trim(),
+    oldUsername: String(oldUsername || "").trim(),
+    newUsername: String(newUsername || built.vars.username || "").trim(),
+    takPortalBlock,
+  });
+
+  const text = htmlToText(html);
+
+  await emailSvc.sendMail({
+    to: built.to,
+    subject: "Your TAK Username Has Changed",
+    text,
+    html,
+  });
+}
+
 async function emailPasswordChanged(user) {
   const to = safeMailTo(user);
   if (!to) return;
@@ -4814,6 +4850,7 @@ module.exports = {
   getTemplatesForAgency,
   buildTakPortalBlock,
   emailUserCreated,
+  emailAgencyUsernameChanged,
 
   // shared data
   getAllGroups,

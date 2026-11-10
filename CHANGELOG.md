@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.34 - IN PROGRESS
+✨ `Enhancement` - Agencies - Modifing an agency's prefix/suffix is now allowed
+
 ### v2.0.33 - 11/10/26
 ✨ `Enhancement` - Improves handling for icon matching<br>
 🐛 `Bug Fix` - Directory sync deletes local users and groups removed from Authentik (including previously orphaned rows), and treats Authentik 404 on delete as already gone (#99)<br>

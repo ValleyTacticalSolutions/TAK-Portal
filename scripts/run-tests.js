@@ -81,6 +81,7 @@ const TEST_FILES = [
   "hiddenPrefixMigration.test.js",
   "hiddenPrefixLike.test.js",
   "agencyAdminGroupEnsure.test.js",
+  "agencyUsernameTokenRename.test.js",
 ];
 
 const testsDir = path.join(__dirname, "..", "tests");

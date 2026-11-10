@@ -9,6 +9,7 @@ const groupsService = require("../services/groups.service");
 const directoryRepo = require("../services/directoryRepo.service");
 const auditSvc = require("../services/auditLog.service");
 const agencyAbbrevRenameSvc = require("../services/agencyAbbrevRename.service");
+const agencyUsernameTokenRenameSvc = require("../services/agencyUsernameTokenRename.service");
 const agencyNameRenameSvc = require("../services/agencyNameRename.service");
 const countyNameRenameSvc = require("../services/countyNameRename.service");
 const stateCodeRenameSvc = require("../services/stateCodeRename.service");
@@ -1267,6 +1268,93 @@ router.post("/:index/rename-group-prefix", async (req, res) => {
       err?.message ||
       "Failed to rename agency abbreviation";
     return res.status(500).json({ error: msg });
+  }
+});
+
+router.post("/:index/rename-username-token", async (req, res) => {
+  try {
+    const idx = Number(req.params.index);
+    const agencies = store.load();
+    if (!Number.isInteger(idx) || !agencies[idx]) {
+      return res.status(404).json({ error: "Not found" });
+    }
+
+    const agency = agencies[idx];
+    if (!accessSvc.isSuffixAllowed(req.authentikUser, agency.suffix)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const scope = String(req.body?.scope || "").trim().toLowerCase();
+    if (scope !== "future" && scope !== "existing") {
+      return res.status(400).json({ error: 'scope must be "future" or "existing"' });
+    }
+
+    const validationErr = agencyUsernameTokenRenameSvc.validateNewUsernameToken(
+      req.body?.suffix != null ? req.body.suffix : agency.suffix
+    );
+    if (validationErr) {
+      return res.status(400).json({ error: validationErr });
+    }
+
+    const result = await agencyUsernameTokenRenameSvc.renameAgencyUsernameToken(idx, {
+      suffix: req.body?.suffix,
+      usernameTokenPlacement: req.body?.usernameTokenPlacement,
+      scope,
+    });
+
+    auditSvc.logEvent({
+      actor: req.authentikUser || null,
+      request: { method: req.method, path: req.originalUrl || req.path, ip: req.ip },
+      action: "RENAME_AGENCY_USERNAME_TOKEN",
+      targetType: "agency",
+      targetId: String(result.newSuffix || agency.suffix || ""),
+      details: {
+        agencyName: result.agencyName || agency.name,
+        scope: result.scope,
+        before: {
+          suffix: result.oldSuffix,
+          usernameTokenPlacement: result.oldPlacement,
+        },
+        after: {
+          suffix: result.newSuffix,
+          usernameTokenPlacement: result.newPlacement,
+        },
+        usersMatched: result.usersMatched,
+        usersUpdated: result.usersUpdated,
+        usersRenamed: result.usersRenamed,
+        templatesUpdated: result.templatesUpdated,
+        requestsUpdated: result.requestsUpdated,
+        emailsSent: result.emailsSent,
+        skipped: !!result.skipped,
+      },
+    });
+
+    return res.json({
+      success: true,
+      skipped: !!result.skipped,
+      scope: result.scope,
+      oldSuffix: result.oldSuffix,
+      newSuffix: result.newSuffix,
+      oldPlacement: result.oldPlacement,
+      newPlacement: result.newPlacement,
+      usersMatched: result.usersMatched,
+      usersUpdated: result.usersUpdated,
+      usersRenamed: result.usersRenamed,
+      templatesUpdated: result.templatesUpdated,
+      requestsUpdated: result.requestsUpdated,
+      emailsSent: result.emailsSent,
+      emailFailures: result.emailFailures || [],
+    });
+  } catch (err) {
+    const msg =
+      err?.response?.data?.detail ||
+      err?.response?.data ||
+      err?.message ||
+      "Failed to rename agency username identifier";
+    const status = /already exists|required|must be|collision|locked|badge/i.test(String(msg))
+      ? 400
+      : 500;
+    return res.status(status).json({ error: msg });
   }
 });
 

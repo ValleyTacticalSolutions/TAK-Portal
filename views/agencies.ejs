@@ -100,6 +100,41 @@
   </div>
 </main>
 
+<!-- Username token change confirm -->
+<div class="modalOverlay" id="usernameTokenConfirmOverlay" style="display:none;">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="usernameTokenConfirmTitle" style="max-width:520px;">
+    <div class="modalHeader">
+      <div class="modalHeaderLeft">
+        <h2 id="usernameTokenConfirmTitle" style="margin:0;">Confirm Username Identifier Change</h2>
+      </div>
+      <button class="btn" id="usernameTokenConfirmCancelBtn" type="button">Cancel</button>
+    </div>
+    <div class="modalBody">
+      <p id="usernameTokenConfirmSummary" class="muted" style="margin-top:0;"></p>
+      <p style="margin:12px 0 8px; font-weight:600;">How should this change apply?</p>
+      <label style="display:flex; gap:8px; align-items:flex-start; margin:8px 0;">
+        <input type="radio" name="usernameTokenScope" value="future" checked style="margin-top:3px;" />
+        <span>
+          <strong>New users only</strong><br />
+          <span class="muted">Keep existing usernames and certificates. Only accounts created after this change use the new identifier.</span>
+        </span>
+      </label>
+      <label style="display:flex; gap:8px; align-items:flex-start; margin:8px 0;">
+        <input type="radio" name="usernameTokenScope" value="existing" style="margin-top:3px;" />
+        <span>
+          <strong>Replace all existing users</strong><br />
+          <span class="muted">Revoke TAK certificates for current agency users, rebuild their usernames, and email them about the change.</span>
+        </span>
+      </label>
+      <p id="usernameTokenConfirmMsg" class="msg" style="display:none; margin-top:12px;"></p>
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
+        <button class="btn" type="button" id="usernameTokenConfirmAbortBtn">Cancel</button>
+        <button class="btn success" type="button" id="usernameTokenConfirmProceedBtn">Proceed</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Edit Agency Modal -->
 <div class="modalOverlay" id="editAgencyOverlay" style="display:none;">
   <div class="modal editAgencyModal" role="dialog" aria-modal="true" aria-labelledby="editAgencyTitle">
@@ -120,7 +155,7 @@
             includeName: true,
             fieldsRequired: true,
             idPrefix: "edit",
-            usernameReadOnly: true,
+            usernameReadOnly: false,
             agencyFieldValues: {}
           }) %>
 
@@ -330,6 +365,8 @@ let agencies = [];
 /** Snapshots per agency id when opening the edit modal (Save Changes applies diffs). */
 let nameSnapshotById = {};
 let abbrevSnapshotById = {};
+let suffixSnapshotById = {};
+let placementSnapshotById = {};
 let stateSnapshotById = {};
 let countySnapshotById = {};
 let countyAbbrevSnapshotById = {};
@@ -2079,6 +2116,35 @@ function agencyAbbrevChanged(a) {
   return oldAbbr && newAbbr && oldAbbr !== newAbbr;
 }
 
+function normalizePlacementValue(raw) {
+  return String(raw || "suffix").trim().toLowerCase() === "prefix" ? "prefix" : "suffix";
+}
+
+function agencyUsernameTokenChanged(a) {
+  const id = String(a._id ?? a.id ?? "");
+  if (!id || !(id in suffixSnapshotById)) return false;
+  const oldSuffix = String(suffixSnapshotById[id] || "").trim().toLowerCase();
+  const newSuffix = String(a.suffix || "").trim().toLowerCase();
+  const oldPlacement = normalizePlacementValue(placementSnapshotById[id]);
+  const newPlacement = normalizePlacementValue(a.usernameTokenPlacement);
+  return oldSuffix !== newSuffix || oldPlacement !== newPlacement;
+}
+
+function getUsernameTokenChangeForEditingAgency() {
+  if (!editingAgencyId) return null;
+  const a = agencies.find((x) => String(x._id ?? x.id) === String(editingAgencyId));
+  if (!a || !agencyUsernameTokenChanged(a)) return null;
+  const id = String(editingAgencyId);
+  return {
+    agency: a,
+    idx: a._id ?? a.id,
+    oldSuffix: String(suffixSnapshotById[id] || "").trim().toLowerCase(),
+    newSuffix: String(a.suffix || "").trim().toLowerCase(),
+    oldPlacement: normalizePlacementValue(placementSnapshotById[id]),
+    newPlacement: normalizePlacementValue(a.usernameTokenPlacement),
+  };
+}
+
 function agencyCountyAbbrevChanged(a) {
   const id = String(a._id ?? a.id ?? "");
   if (!id || !(id in countyAbbrevSnapshotById)) return false;
@@ -2652,6 +2718,8 @@ function accessGroupsDirty() {
 function clearAgencyAttributeSnapshots() {
   nameSnapshotById = {};
   abbrevSnapshotById = {};
+  suffixSnapshotById = {};
+  placementSnapshotById = {};
   stateSnapshotById = {};
   countySnapshotById = {};
   countyAbbrevSnapshotById = {};
@@ -2665,6 +2733,8 @@ function clearAgencyAttributeSnapshots() {
 function snapshotAgenciesForEdit() {
   nameSnapshotById = {};
   abbrevSnapshotById = {};
+  suffixSnapshotById = {};
+  placementSnapshotById = {};
   stateSnapshotById = {};
   countySnapshotById = {};
   countyAbbrevSnapshotById = {};
@@ -2677,6 +2747,8 @@ function snapshotAgenciesForEdit() {
     if (!id) continue;
     nameSnapshotById[id] = String(a.name || "").trim();
     abbrevSnapshotById[id] = String(a.groupPrefix || "").trim();
+    suffixSnapshotById[id] = String(a.suffix || "").trim().toLowerCase();
+    placementSnapshotById[id] = normalizePlacementValue(a.usernameTokenPlacement);
     stateSnapshotById[id] = String(a.state || "").trim().toUpperCase();
     countySnapshotById[id] = String(a.county || "").trim();
     countyAbbrevSnapshotById[id] = String(a.countyAbbrev || "").trim().toUpperCase();
@@ -2693,6 +2765,8 @@ function restoreAgenciesFromSnapshots() {
     if (!id) continue;
     if (id in nameSnapshotById) a.name = nameSnapshotById[id];
     if (id in abbrevSnapshotById) a.groupPrefix = abbrevSnapshotById[id];
+    if (id in suffixSnapshotById) a.suffix = suffixSnapshotById[id];
+    if (id in placementSnapshotById) a.usernameTokenPlacement = placementSnapshotById[id];
     if (id in stateSnapshotById) a.state = stateSnapshotById[id];
     if (id in countySnapshotById) a.county = countySnapshotById[id];
     if (id in countyAbbrevSnapshotById) a.countyAbbrev = countyAbbrevSnapshotById[id];
@@ -2835,6 +2909,15 @@ function isEditAgencyModalOpen() {
   return !!(editAgencyOverlay && editAgencyOverlay.style.display !== "none");
 }
 
+function syncEditUsernameIdentifierFormLabels() {
+  if (!editAgencyForm) return;
+  const select = editAgencyForm.elements.usernameTokenPlacement;
+  const labelEl = document.getElementById("editusernameIdentifierLabelText");
+  if (!select || !labelEl) return;
+  const isPrefix = normalizePlacementValue(select.value) === "prefix";
+  labelEl.textContent = isPrefix ? "Username Prefix" : "Username Suffix";
+}
+
 function fillEditAgencyForm(a) {
   if (!editAgencyForm || !a) return;
   const set = (name, value) => {
@@ -2843,6 +2926,8 @@ function fillEditAgencyForm(a) {
   };
   set("name", a.name || "");
   set("groupPrefix", a.groupPrefix || "");
+  set("usernameTokenPlacement", normalizePlacementValue(a.usernameTokenPlacement));
+  set("suffix", String(a.suffix || "").trim().toLowerCase());
   set("state", String(a.state || "").trim().toUpperCase());
   set("stateFederalAgency", isAgencyStateFederal(a) ? "yes" : "no");
   set("county", a.county || "");
@@ -2850,6 +2935,7 @@ function fillEditAgencyForm(a) {
   set("type", a.type || "");
   set("color", a.color || "");
   set("regionId", a.regionId || "");
+  syncEditUsernameIdentifierFormLabels();
   const sf = document.getElementById("editstateFederalAgencySelect");
   if (typeof window.takSyncStateFederalAgencyFields === "function" && sf) {
     window.takSyncStateFederalAgencyFields(sf);
@@ -2870,6 +2956,8 @@ function applyEditFormToAgencies() {
   };
   a.name = val("name").trim();
   a.groupPrefix = val("groupPrefix").trim();
+  a.usernameTokenPlacement = normalizePlacementValue(val("usernameTokenPlacement"));
+  a.suffix = val("suffix").trim().toLowerCase();
   updateAgencyStateFederalLocal(idx, val("stateFederalAgency"));
   updateAgencyStateLocal(idx, val("state"));
   updateAgencyCountyNameLocal(idx, val("county"));
@@ -2938,7 +3026,142 @@ window.addEventListener("keydown", (e) => {
   closeEditAgencyModal();
 });
 
+const usernameTokenConfirmOverlay = document.getElementById("usernameTokenConfirmOverlay");
+const usernameTokenConfirmSummary = document.getElementById("usernameTokenConfirmSummary");
+const usernameTokenConfirmMsg = document.getElementById("usernameTokenConfirmMsg");
+const usernameTokenConfirmProceedBtn = document.getElementById("usernameTokenConfirmProceedBtn");
+const usernameTokenConfirmCancelBtn = document.getElementById("usernameTokenConfirmCancelBtn");
+const usernameTokenConfirmAbortBtn = document.getElementById("usernameTokenConfirmAbortBtn");
+
+function setUsernameTokenConfirmMsg(text, ok = true) {
+  if (!usernameTokenConfirmMsg) return;
+  if (!text) {
+    usernameTokenConfirmMsg.style.display = "none";
+    usernameTokenConfirmMsg.textContent = "";
+    return;
+  }
+  usernameTokenConfirmMsg.style.display = "";
+  usernameTokenConfirmMsg.className = "msg " + (ok ? "ok" : "bad");
+  usernameTokenConfirmMsg.textContent = text;
+}
+
+function closeUsernameTokenConfirmModal() {
+  if (!usernameTokenConfirmOverlay) return;
+  usernameTokenConfirmOverlay.style.display = "none";
+  setUsernameTokenConfirmMsg("");
+  if (usernameTokenConfirmProceedBtn) usernameTokenConfirmProceedBtn.disabled = false;
+}
+
+function promptUsernameTokenChange(change) {
+  return new Promise((resolve) => {
+    if (!usernameTokenConfirmOverlay || !change) {
+      resolve(null);
+      return;
+    }
+    const placementLabel = (p) => (p === "prefix" ? "Prefix" : "Suffix");
+    const lines = [
+      `Agency: ${String(change.agency?.name || change.oldSuffix || "Agency")}`,
+      `Identifier: ${change.oldSuffix} (${placementLabel(change.oldPlacement)}) → ${change.newSuffix} (${placementLabel(change.newPlacement)})`,
+      "",
+      "Choose whether this applies only to new users, or rebuilds usernames for all existing users in this agency.",
+    ];
+    if (usernameTokenConfirmSummary) {
+      usernameTokenConfirmSummary.textContent = lines.join("\n");
+      usernameTokenConfirmSummary.style.whiteSpace = "pre-wrap";
+    }
+    const futureRadio = document.querySelector('input[name="usernameTokenScope"][value="future"]');
+    if (futureRadio) futureRadio.checked = true;
+    setUsernameTokenConfirmMsg("");
+    usernameTokenConfirmOverlay.style.display = "flex";
+
+    const cleanup = () => {
+      if (usernameTokenConfirmProceedBtn) {
+        usernameTokenConfirmProceedBtn.onclick = null;
+      }
+      if (usernameTokenConfirmCancelBtn) {
+        usernameTokenConfirmCancelBtn.onclick = null;
+      }
+      if (usernameTokenConfirmAbortBtn) {
+        usernameTokenConfirmAbortBtn.onclick = null;
+      }
+      closeUsernameTokenConfirmModal();
+    };
+
+    const cancel = () => {
+      cleanup();
+      resolve(null);
+    };
+
+    if (usernameTokenConfirmCancelBtn) usernameTokenConfirmCancelBtn.onclick = cancel;
+    if (usernameTokenConfirmAbortBtn) usernameTokenConfirmAbortBtn.onclick = cancel;
+    if (usernameTokenConfirmProceedBtn) {
+      usernameTokenConfirmProceedBtn.onclick = () => {
+        const selected = document.querySelector('input[name="usernameTokenScope"]:checked');
+        const scope = selected ? String(selected.value || "") : "future";
+        cleanup();
+        resolve(scope === "existing" ? "existing" : "future");
+      };
+    }
+  });
+}
+
+async function applyUsernameTokenRename(change, scope) {
+  const res = await fetch(
+    `/api/agencies/${encodeURIComponent(change.idx)}/rename-username-token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        suffix: change.newSuffix,
+        usernameTokenPlacement: change.newPlacement,
+        scope,
+      }),
+    }
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(
+      typeof data.error === "string"
+        ? data.error
+        : data.error?.detail || data.error || "Username identifier update failed"
+    );
+  }
+
+  const id = String(change.idx);
+  const a = agencies.find((x) => String(x._id ?? x.id) === id);
+  if (a) {
+    a.suffix = String(data.newSuffix || change.newSuffix || "").trim().toLowerCase();
+    a.usernameTokenPlacement = normalizePlacementValue(
+      data.newPlacement || change.newPlacement
+    );
+  }
+  suffixSnapshotById[id] = String(data.newSuffix || change.newSuffix || "").trim().toLowerCase();
+  placementSnapshotById[id] = normalizePlacementValue(
+    data.newPlacement || change.newPlacement
+  );
+
+  const parts = [];
+  if (data.skipped) {
+    parts.push("Username identifier unchanged");
+  } else if (scope === "existing") {
+    parts.push(
+      `Username identifier updated for ${Number(data.usersRenamed) || 0} existing user(s)`
+    );
+    if (Number(data.emailsSent) > 0) {
+      parts.push(`${Number(data.emailsSent)} notification email(s) sent`);
+    }
+  } else {
+    parts.push("Username identifier updated for new users only");
+  }
+  return { ok: true, summary: parts.join("; "), data };
+}
+
 if (editAgencyForm) {
+  const editPlacementSelect = editAgencyForm.elements.usernameTokenPlacement;
+  if (editPlacementSelect) {
+    editPlacementSelect.addEventListener("change", syncEditUsernameIdentifierFormLabels);
+  }
+
   editAgencyForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     setEditMsg("");
@@ -2947,10 +3170,52 @@ if (editAgencyForm) {
       return;
     }
     applyEditFormToAgencies();
+
+    const tokenChange = getUsernameTokenChangeForEditingAgency();
+    let tokenSummary = "";
+    if (tokenChange) {
+      if (!tokenChange.newSuffix) {
+        setEditMsg("Username Agency Identifier is required.", false);
+        restoreAgenciesFromSnapshots();
+        fillEditAgencyForm(
+          agencies.find((x) => String(x._id ?? x.id) === String(editingAgencyId))
+        );
+        return;
+      }
+      const scope = await promptUsernameTokenChange(tokenChange);
+      if (!scope) {
+        restoreAgenciesFromSnapshots();
+        fillEditAgencyForm(
+          agencies.find((x) => String(x._id ?? x.id) === String(editingAgencyId))
+        );
+        return;
+      }
+      if (editAgencySaveBtn) editAgencySaveBtn.disabled = true;
+      setEditMsg(
+        scope === "existing"
+          ? "Updating username identifier and existing users…"
+          : "Updating username identifier…",
+        true
+      );
+      try {
+        const tokenResult = await applyUsernameTokenRename(tokenChange, scope);
+        tokenSummary = tokenResult.summary || "";
+      } catch (err) {
+        if (editAgencySaveBtn) editAgencySaveBtn.disabled = false;
+        restoreAgenciesFromSnapshots();
+        fillEditAgencyForm(
+          agencies.find((x) => String(x._id ?? x.id) === String(editingAgencyId))
+        );
+        setEditMsg(err?.message || "Username identifier update failed", false);
+        return;
+      }
+    }
+
     const result = await finishAgencyAttributesEditing();
     if (!result || result.ok !== true) return;
     closeEditAgencyModal();
-    setListMsg(result.summary, true);
+    const combined = [tokenSummary, result.summary].filter(Boolean).join(" ");
+    setListMsg(combined || result.summary, true);
   });
 }
 
