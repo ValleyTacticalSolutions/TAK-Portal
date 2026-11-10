@@ -9,6 +9,7 @@ const {
   missionSingleGroupName,
   filterMissionsForAccess,
   canonicalGroupKey,
+  enrichMissionAssignmentMeta,
 } = require("../services/dataSyncAccess.service");
 
 assert.strictEqual(defaultRoleQueryValue("MISSION_SUBSCRIBER"), "MISSION_SUBSCRIBER");
@@ -102,5 +103,29 @@ assert.deepStrictEqual(
   visibleAll.map((m) => m.name),
   ["Multi"]
 );
+
+const multiQuery = buildMissionWriteQuery({
+  groups: ["HCSO Ops", "HCSO Tac"],
+  defaultRole: "MISSION_SUBSCRIBER",
+});
+assert.deepStrictEqual(multiQuery.group, ["HCSO Ops", "HCSO Tac"]);
+assert.deepStrictEqual(toMissionSearchParams(multiQuery).getAll("group"), [
+  "HCSO Ops",
+  "HCSO Tac",
+]);
+
+const enrichedMulti = enrichMissionAssignmentMeta({
+  name: "Multi",
+  groups: ["tak_HCSO Ops", "HCSO Tac"],
+});
+assert.deepStrictEqual(enrichedMulti.assignedGroups, ["HCSO Ops", "HCSO Tac"]);
+assert.strictEqual(enrichedMulti.assignedGroup, null);
+
+const enrichedSingle = enrichMissionAssignmentMeta({
+  name: "Single",
+  groups: ["tak_HCSO Ops"],
+});
+assert.deepStrictEqual(enrichedSingle.assignedGroups, ["HCSO Ops"]);
+assert.strictEqual(enrichedSingle.assignedGroup, "HCSO Ops");
 
 console.log("dataSync.missionWrite.test.js: ok");

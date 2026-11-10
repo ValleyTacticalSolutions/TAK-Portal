@@ -25,12 +25,14 @@
   "overrides": {
     "whatwg-url": "^14.2.0",
     "undici": "$undici",
-    "node-forge": "^1.4.2",
+    "node-forge": "^1.4.3",
     "proxy-addr": "^2.0.8",
     "follow-redirects": "^1.16.1",
     "fast-uri": "^3.1.9",
-    "brace-expansion": "^2.1.7",
-    "source-map-js": "^1.2.2"
+    "brace-expansion": "^5.0.12",
+    "source-map-js": "^1.2.2",
+    "minimatch": "^11.0.1",
+    "glob": "^14.0.2"
   },
   "dependencies": {
     "@tak-ps/node-cot": "^14.51.0",
@@ -49,7 +51,7 @@
     "marked": "^18.0.9",
     "milsymbol": "^3.0.5",
     "multer": "^2.5.0",
-    "node-forge": "^1.4.2",
+    "node-forge": "^1.4.3",
     "nodemailer": "^10.1.4",
     "pdf-lib": "^1.17.1",
     "pdfkit": "^0.19.1",

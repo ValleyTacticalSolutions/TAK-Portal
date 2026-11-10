@@ -252,9 +252,17 @@ function resolveAssignmentMetaForGroup(rawGroupName) {
 
 function enrichMissionAssignmentMeta(mission) {
   if (!mission || typeof mission !== "object") return mission;
-  const groupName = missionSingleGroupName(mission);
-  if (!groupName) return mission;
-  return { ...mission, ...resolveAssignmentMetaForGroup(groupName) };
+  const groupNames = extractMissionGroupNames(mission);
+  if (!groupNames.length) return mission;
+
+  const assignedGroups = groupNames.map((n) => takDisplayName(n) || n).filter(Boolean);
+  const single = groupNames.length === 1 ? resolveAssignmentMetaForGroup(groupNames[0]) : null;
+  return {
+    ...mission,
+    assignedGroups,
+    assignedGroup: single ? single.assignedGroup : null,
+    assignedAgencyName: single ? single.assignedAgencyName : null,
+  };
 }
 
 function enrichMissionListAssignmentMeta(list) {

@@ -230,6 +230,12 @@
     color: var(--muted);
     font-weight: normal;
   }
+  .data-sync-channel-item {
+    line-height: 1.35;
+  }
+  .data-sync-channel-item + .data-sync-channel-item {
+    margin-top: 2px;
+  }
   .mission-action-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .muted { color: var(--muted); }
 
@@ -717,7 +723,17 @@
   }
 
   function missionGroupNames(mission) {
-    var names = extractGroupNames(Array.isArray(mission && mission.groups) ? mission.groups : []);
+    var rawGroups = mission && mission.groups;
+    if (typeof rawGroups === "string") {
+      rawGroups = parsePackageGroupsField(rawGroups);
+    }
+    var names = extractGroupNames(Array.isArray(rawGroups) ? rawGroups : []);
+    if (!names.length && Array.isArray(mission && mission.assignedGroups)) {
+      names = extractGroupNames(mission.assignedGroups);
+    }
+    if (!names.length && mission && mission.assignedGroup) {
+      names = [String(mission.assignedGroup)];
+    }
     var out = [];
     var seen = {};
     for (var i = 0; i < names.length; i++) {
@@ -727,6 +743,38 @@
       out.push(names[i]);
     }
     return out;
+  }
+
+  function missionChannelDisplayNames(mission) {
+    if (Array.isArray(mission && mission.assignedGroups) && mission.assignedGroups.length) {
+      var fromAssigned = [];
+      var seenAssigned = {};
+      for (var i = 0; i < mission.assignedGroups.length; i++) {
+        var label = String(mission.assignedGroups[i] || "").trim();
+        if (!label) continue;
+        var key = canonicalGroupKey(label);
+        if (!key || seenAssigned[key]) continue;
+        seenAssigned[key] = true;
+        fromAssigned.push(label);
+      }
+      if (fromAssigned.length) return fromAssigned;
+    }
+    var names = missionGroupNames(mission);
+    if (names.length === 1 && mission && mission.assignedGroup) {
+      return [String(mission.assignedGroup)];
+    }
+    return names;
+  }
+
+  function formatChannelsCellHtml(channelNames) {
+    var names = Array.isArray(channelNames) ? channelNames : [];
+    if (!names.length) return "";
+    if (names.length === 1) return esc(names[0]);
+    return names
+      .map(function (n) {
+        return '<div class="data-sync-channel-item">' + esc(n) + "</div>";
+      })
+      .join("");
   }
 
   function missionSingleGroupName(mission) {
@@ -984,7 +1032,7 @@
     var name = m && m.name != null ? String(m.name) : "";
     var groupNames = missionGroupNames(m);
     if (!groupNames.length) return false;
-    var groupName = groupNames.join(", ");
+    var channelNames = missionChannelDisplayNames(m);
 
     var pw = m.passwordProtected === true ? "Yes" : "No";
     var ct = m.createTime ? String(m.createTime) : "";
@@ -992,13 +1040,8 @@
     if (desc.length > 48) desc = desc.slice(0, 45) + "…";
     var dr = m && m.defaultRole;
     var defaultRoleLabel = defaultRoleTypeToLabel(dr && dr.type ? String(dr.type) : "MISSION_SUBSCRIBER");
-    var displayGroup = groupNames.length === 1 && m.assignedGroup ? String(m.assignedGroup) : groupName;
     var agencyName = m.assignedAgencyName ? String(m.assignedAgencyName) : "";
     var nameSubLines = "";
-    if (displayGroup) {
-      nameSubLines += "<div class=\"data-sync-mission-sub\">" +
-        (groupNames.length > 1 ? "Channels: " : "Group: ") + esc(displayGroup) + "</div>";
-    }
     if (agencyName) {
       nameSubLines += "<div class=\"data-sync-mission-sub\">Agency: " + esc(agencyName) + "</div>";
     }
@@ -1009,7 +1052,7 @@
       "<td class=\"cardTitleCell\"><div class=\"cardTitleText\">" + esc(name) + "</div>" + nameSubLines + "</td>" +
       "<td class=\"dsDescCell\" data-label=\"Description\" style=\"max-width:220px;font-size:13px;\">" + esc(desc) + "</td>" +
       "<td class=\"dsRoleCell\" data-label=\"Default Role\" style=\"font-size:13px;white-space:nowrap;\">" + esc(defaultRoleLabel) + "</td>" +
-      "<td class=\"dsGroupCell\" data-label=\"Channels\" style=\"font-size:13px;\">" + esc(groupName) + "</td>" +
+      "<td class=\"dsGroupCell\" data-label=\"Channels\" style=\"font-size:13px;\">" + formatChannelsCellHtml(channelNames) + "</td>" +
       "<td class=\"dsPasswordCell\" data-label=\"Password\">" + esc(pw) + "</td>" +
       "<td class=\"dsCreatedCell\" data-label=\"Created\" style=\"font-size:12px;white-space:nowrap;\">" + esc(ct) + "</td>" +
       "<td></td>";
