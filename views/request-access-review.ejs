@@ -157,7 +157,9 @@
   <body class="theme-<%= brandTheme || 'dark' %>" data-theme-default-only="true">
     <div class="app">
       <main class="main" style="max-width: 980px; margin: 0 auto;">
-        <h1>Review Access Request</h1>
+        <div class="pageHeader">
+          <h1 class="pageHeader__title">Review Access Request</h1>
+        </div>
         <%
           const usernamePrefixLabel = String((settings && settings.USERNAME_PREFIX_LABEL) || "").trim() || "Badge Number / Username";
           const userPhoneFieldEnabled =

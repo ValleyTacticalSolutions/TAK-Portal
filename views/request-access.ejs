@@ -104,7 +104,9 @@
     const userPhoneFieldEnabled =
       String((settings && settings.USER_PHONE_NUMBER_FIELD_ENABLED) || "").toLowerCase() === "true";
   %>
-  <h1>Request <%= brandedPortalTitle %> Access</h1>
+  <div class="pageHeader">
+    <h1 class="pageHeader__title">Request <%= brandedPortalTitle %> Access</h1>
+  </div>
 
   <div class="card">
     <p>

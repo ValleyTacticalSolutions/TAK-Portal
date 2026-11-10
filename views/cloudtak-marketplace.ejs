@@ -2,8 +2,8 @@
 <%- include("partials/sidebar") %>
 
 <main class="main">
-  <div class="mp-page-header">
-    <h1>CloudTAK Plugin Marketplace</h1>
+  <div class="pageHeader mp-page-header">
+    <h1 class="pageHeader__title">CloudTAK Plugin Marketplace</h1>
     <button type="button" class="btn" id="mpSubmitPluginOpen">Submit Plugin To Marketplace</button>
   </div>
 
@@ -103,9 +103,6 @@
     justify-content: space-between;
     gap: 12px;
     flex-wrap: wrap;
-  }
-  .mp-page-header h1 {
-    margin: 0;
   }
   .mp-submit-plugin-dialog {
     width: min(560px, 96vw);

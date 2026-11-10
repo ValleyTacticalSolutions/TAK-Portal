@@ -15,10 +15,12 @@
 
     <div class="app">
 
-<main class="main" style="max-width: 980px; margin: 0 auto;">
-  <h1><%= typeof autoApproved !== "undefined" && autoApproved ? "Account Created" : "Request Submitted" %></h1>
+<main class="publicShell">
+  <div class="publicPanel" style="width: min(61.25rem, 100%);">
+  <div class="pageHeader">
+    <h1 class="pageHeader__title"><%= typeof autoApproved !== "undefined" && autoApproved ? "Account Created" : "Request Submitted" %></h1>
+  </div>
 
-  <div class="card">
     <p>
       <% if (typeof autoApproved !== "undefined" && autoApproved) { %>
         Your TAK Portal account has been created. Check your email shortly for instructions on how to access your account.

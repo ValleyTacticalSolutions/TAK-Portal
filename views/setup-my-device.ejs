@@ -15,7 +15,9 @@
 </style>
 
 <main class="main">
-  <h1>Setup My Device</h1>
+  <div class="pageHeader">
+    <h1 class="pageHeader__title">Setup My Device</h1>
+  </div>
   <%
     function allowedClientBool(key, defaultOn) {
       const raw = String((settings && settings[key]) || "").trim().toLowerCase();
