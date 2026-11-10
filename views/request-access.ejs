@@ -141,7 +141,7 @@
             name="badgeNumber"
             required
             placeholder="Enter <%= usernamePrefixLabel %>"
-            pattern="[A-Za-z0-9._-]+"
+            pattern="[A-Za-z0-9._\-]+"
             title="Username is invalid. Username requirements: minimum of 4 characters and contains only letters, numbers, dots, underscores and hyphens."
             value="<%= (form && form.badgeNumber) ? form.badgeNumber : '' %>"
           />

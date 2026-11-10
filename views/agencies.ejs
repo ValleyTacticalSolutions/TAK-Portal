@@ -277,25 +277,36 @@
         </div>
       </div>
 
-      <p class="usernameTokenConfirmLead muted">
-        Choose how this identifier change should apply.
-      </p>
+      <div id="usernameTokenConfirmStepScope">
+        <p class="usernameTokenConfirmLead muted">
+          Choose how this identifier change should apply.
+        </p>
 
-      <div class="usernameTokenScopeList" role="radiogroup" aria-label="Username change scope">
-        <label class="usernameTokenScopeOption">
-          <input type="radio" name="usernameTokenScope" value="future" checked />
-          <span class="usernameTokenScopeCard">
-            <span class="usernameTokenScopeTitle">Future / New Users Only</span>
-            <span class="usernameTokenScopeDesc muted">Keep existing usernames and certificates. Only accounts created after this change willuse the new identifier.</span>
-          </span>
-        </label>
-        <label class="usernameTokenScopeOption">
-          <input type="radio" name="usernameTokenScope" value="existing" />
-          <span class="usernameTokenScopeCard">
-            <span class="usernameTokenScopeTitle">Replace All Existing Users</span>
-            <span class="usernameTokenScopeDesc muted">WARNING!!! THIS WILL REVOKE ALL EXISTING TAK CERTIFICATES, rebuild usernames for current agency users, and email them about the change.</span>
-          </span>
-        </label>
+        <div class="usernameTokenScopeList" role="radiogroup" aria-label="Username change scope">
+          <label class="usernameTokenScopeOption">
+            <input type="radio" name="usernameTokenScope" value="future" checked />
+            <span class="usernameTokenScopeCard">
+              <span class="usernameTokenScopeTitle">Future / New Users Only</span>
+              <span class="usernameTokenScopeDesc muted">Keep existing usernames and certificates. Only accounts created after this change will use the new identifier.</span>
+            </span>
+          </label>
+          <label class="usernameTokenScopeOption is-danger">
+            <input type="radio" name="usernameTokenScope" value="existing" />
+            <span class="usernameTokenScopeCard">
+              <span class="usernameTokenScopeTitle">Replace All Existing Users</span>
+              <span class="usernameTokenScopeDesc muted">WARNING!!! THIS WILL REVOKE ALL EXISTING TAK CERTIFICATES, rebuild usernames for current agency users, and email them about the change.</span>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div id="usernameTokenConfirmStepRevoke" class="usernameTokenRevokeStep" hidden>
+        <div class="usernameTokenRevokeCard" role="alert">
+          <div class="usernameTokenRevokeTitle">Revoke all existing TAK certificates?</div>
+          <p class="usernameTokenRevokeDesc muted">
+            This will revoke TAK certificates for every user in this agency, rebuild their usernames with the new identifier, and email them. Users must reconfigure TAK on their devices. This cannot be undone.
+          </p>
+        </div>
       </div>
 
       <p id="usernameTokenConfirmMsg" class="msg" style="display:none;"></p>
@@ -3056,6 +3067,9 @@ const usernameTokenConfirmMsg = document.getElementById("usernameTokenConfirmMsg
 const usernameTokenConfirmProceedBtn = document.getElementById("usernameTokenConfirmProceedBtn");
 const usernameTokenConfirmCancelBtn = document.getElementById("usernameTokenConfirmCancelBtn");
 const usernameTokenConfirmAbortBtn = document.getElementById("usernameTokenConfirmAbortBtn");
+const usernameTokenConfirmStepScope = document.getElementById("usernameTokenConfirmStepScope");
+const usernameTokenConfirmStepRevoke = document.getElementById("usernameTokenConfirmStepRevoke");
+const usernameTokenConfirmTitle = document.getElementById("usernameTokenConfirmTitle");
 
 function setUsernameTokenConfirmMsg(text, ok = true) {
   if (!usernameTokenConfirmMsg) return;
@@ -3069,11 +3083,44 @@ function setUsernameTokenConfirmMsg(text, ok = true) {
   usernameTokenConfirmMsg.textContent = text;
 }
 
+function resetUsernameTokenConfirmSteps() {
+  if (usernameTokenConfirmStepScope) usernameTokenConfirmStepScope.hidden = false;
+  if (usernameTokenConfirmStepRevoke) usernameTokenConfirmStepRevoke.hidden = true;
+  if (usernameTokenConfirmTitle) {
+    usernameTokenConfirmTitle.textContent = "Confirm Username Change";
+  }
+  if (usernameTokenConfirmProceedBtn) {
+    usernameTokenConfirmProceedBtn.textContent = "Proceed";
+    usernameTokenConfirmProceedBtn.classList.remove("danger");
+    usernameTokenConfirmProceedBtn.classList.add("success");
+    usernameTokenConfirmProceedBtn.disabled = false;
+  }
+  if (usernameTokenConfirmAbortBtn) {
+    usernameTokenConfirmAbortBtn.textContent = "Cancel";
+  }
+}
+
+function showUsernameTokenRevokeStep() {
+  if (usernameTokenConfirmStepScope) usernameTokenConfirmStepScope.hidden = true;
+  if (usernameTokenConfirmStepRevoke) usernameTokenConfirmStepRevoke.hidden = false;
+  if (usernameTokenConfirmTitle) {
+    usernameTokenConfirmTitle.textContent = "Confirm Certificate Revoke";
+  }
+  if (usernameTokenConfirmProceedBtn) {
+    usernameTokenConfirmProceedBtn.textContent = "Revoke & Continue";
+    usernameTokenConfirmProceedBtn.classList.remove("success");
+    usernameTokenConfirmProceedBtn.classList.add("danger");
+  }
+  if (usernameTokenConfirmAbortBtn) {
+    usernameTokenConfirmAbortBtn.textContent = "Go Back";
+  }
+}
+
 function closeUsernameTokenConfirmModal() {
   if (!usernameTokenConfirmOverlay) return;
   usernameTokenConfirmOverlay.style.display = "none";
   setUsernameTokenConfirmMsg("");
-  if (usernameTokenConfirmProceedBtn) usernameTokenConfirmProceedBtn.disabled = false;
+  resetUsernameTokenConfirmSteps();
 }
 
 function hideEditAgencyModalVisually() {
@@ -3117,9 +3164,12 @@ function promptUsernameTokenChange(change) {
     );
     if (futureRadio) futureRadio.checked = true;
     setUsernameTokenConfirmMsg("");
+    resetUsernameTokenConfirmSteps();
     // Edit modal stays under this confirm in the stack; hide it so only the prompt is visible.
     hideEditAgencyModalVisually();
     usernameTokenConfirmOverlay.style.display = "flex";
+
+    let revokeStepActive = false;
 
     const cleanup = () => {
       if (usernameTokenConfirmProceedBtn) {
@@ -3134,22 +3184,36 @@ function promptUsernameTokenChange(change) {
       closeUsernameTokenConfirmModal();
     };
 
-    const cancel = () => {
+    const cancelFully = () => {
       cleanup();
       showEditAgencyModalVisually();
       resolve(null);
     };
 
-    if (usernameTokenConfirmCancelBtn) usernameTokenConfirmCancelBtn.onclick = cancel;
-    if (usernameTokenConfirmAbortBtn) usernameTokenConfirmAbortBtn.onclick = cancel;
+    const backOrCancel = () => {
+      if (revokeStepActive) {
+        revokeStepActive = false;
+        resetUsernameTokenConfirmSteps();
+        return;
+      }
+      cancelFully();
+    };
+
+    if (usernameTokenConfirmCancelBtn) usernameTokenConfirmCancelBtn.onclick = cancelFully;
+    if (usernameTokenConfirmAbortBtn) usernameTokenConfirmAbortBtn.onclick = backOrCancel;
     if (usernameTokenConfirmProceedBtn) {
       usernameTokenConfirmProceedBtn.onclick = () => {
         const selected = document.querySelector(
           '#usernameTokenConfirmOverlay input[name="usernameTokenScope"]:checked'
         );
         const scope = selected ? String(selected.value || "") : "future";
+        if (scope === "existing" && !revokeStepActive) {
+          revokeStepActive = true;
+          showUsernameTokenRevokeStep();
+          return;
+        }
         cleanup();
-        // Keep edit modal closed after Proceed; save continues in the background.
+        // Keep edit modal closed after final confirm; save continues in the background.
         resolve(scope === "existing" ? "existing" : "future");
       };
     }
@@ -3989,6 +4053,10 @@ input.readonly {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 
+#usernameTokenConfirmOverlay .usernameTokenScopeOption.is-danger:hover .usernameTokenScopeCard {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+}
+
 #usernameTokenConfirmOverlay .usernameTokenScopeOption input:checked + .usernameTokenScopeCard {
   border-color: color-mix(in srgb, var(--accent) 70%, var(--line));
   background: color-mix(in srgb, var(--accent) 10%, var(--panel));
@@ -4000,9 +4068,53 @@ input.readonly {
   box-shadow: inset 0 0 0 4px var(--accent);
 }
 
+#usernameTokenConfirmOverlay .usernameTokenScopeOption.is-danger input:checked + .usernameTokenScopeCard {
+  border-color: color-mix(in srgb, var(--danger) 75%, var(--line));
+  background: color-mix(in srgb, var(--danger) 12%, var(--panel));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 30%, transparent);
+}
+
+#usernameTokenConfirmOverlay .usernameTokenScopeOption.is-danger input:checked + .usernameTokenScopeCard::before {
+  border-color: var(--danger);
+  box-shadow: inset 0 0 0 4px var(--danger);
+}
+
+#usernameTokenConfirmOverlay .usernameTokenScopeOption.is-danger input:checked + .usernameTokenScopeCard .usernameTokenScopeTitle {
+  color: var(--bad-text);
+}
+
 #usernameTokenConfirmOverlay .usernameTokenScopeOption input:focus-visible + .usernameTokenScopeCard {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenScopeOption.is-danger input:focus-visible + .usernameTokenScopeCard {
+  outline-color: var(--danger);
+}
+
+#usernameTokenConfirmOverlay .usernameTokenRevokeStep[hidden],
+#usernameTokenConfirmOverlay #usernameTokenConfirmStepScope[hidden] {
+  display: none !important;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenRevokeCard {
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--line));
+  background: color-mix(in srgb, var(--danger) 10%, var(--panel));
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenRevokeTitle {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--bad-text);
+  margin-bottom: 8px;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenRevokeDesc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 #usernameTokenConfirmOverlay .usernameTokenConfirmActions {
@@ -4012,6 +4124,10 @@ input.readonly {
   padding-top: 4px;
   border-top: 1px solid var(--line);
   margin-top: 2px;
+}
+
+#usernameTokenConfirmOverlay .usernameTokenConfirmActions .btn.danger {
+  min-width: 11rem;
 }
 
 #usernameTokenConfirmOverlay #usernameTokenConfirmMsg:empty {
