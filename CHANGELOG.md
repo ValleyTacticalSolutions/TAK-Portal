@@ -12,7 +12,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 ## Version History
 
 ### v2.0.34 - IN PROGRESS
-✨ `Enhancement` - Agencies - Modifing an agency's prefix/suffix is now allowed
+✨ `Enhancement` - Agencies - Modifying an agency's prefix/suffix is now allowed via the edit modal
 
 ### v2.0.33 - 11/10/26
 ✨ `Enhancement` - Improves handling for icon matching<br>
