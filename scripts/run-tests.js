@@ -38,6 +38,7 @@ const TEST_FILES = [
   "preferencePackage.service.test.js",
   "enrollmentPackage.service.test.js",
   "qr.cache.test.js",
+  "jimpImage.test.js",
   "takHttpSession.test.js",
   "takGroupControl.test.js",
   "takSubscriptionsCache.test.js",

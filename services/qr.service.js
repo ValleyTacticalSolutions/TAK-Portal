@@ -2,7 +2,7 @@ const QRCode = require("qrcode");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
-const Jimp = require("jimp"); // Jimp 0.22.x
+const Jimp = require("./jimpCompat");
 const settingsSvc = require("./settings.service");
 const { addLogoToQrPng, logoCacheIdentity } = require("./qrLogoOverlay.service");
 

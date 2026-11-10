@@ -3,7 +3,7 @@
  */
 const crypto = require("crypto");
 const path = require("path");
-const Jimp = require("jimp");
+const Jimp = require("./jimpCompat");
 const { getInt } = require("./env");
 const mapIcon = require("./mapIcon.service");
 const mapMilSym = require("./mapMilSym.service");

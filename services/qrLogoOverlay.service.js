@@ -2,7 +2,7 @@
  * Center logo overlay for QR PNGs — preserves source aspect ratio (no stretch).
  */
 const fs = require("fs");
-const Jimp = require("jimp");
+const Jimp = require("./jimpCompat");
 
 let _logoCache = { path: "", mtimeMs: 0, image: null };
 
