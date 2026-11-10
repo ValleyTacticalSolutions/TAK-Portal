@@ -7,7 +7,6 @@
     function setOpen(open) {
         document.body.classList.toggle("sidebar-open", open);
         btn.setAttribute("aria-expanded", open ? "true" : "false");
-        btn.setAttribute("aria-label", open ? "Close menu" : "Open menu");
         overlay.setAttribute("aria-hidden", open ? "false" : "true");
     }
 
@@ -21,8 +20,8 @@
         if (e.key === "Escape") setOpen(false);
     });
 
-    // If you resize back to desktop, close the mobile state (match CSS drawer at 990px)
-    const mq = window.matchMedia("(max-width: 990px)");
+    // If you resize back to desktop, close the mobile state
+    const mq = window.matchMedia("(max-width: 900px)");
     mq.addEventListener?.("change", (e) => {
         if (!e.matches) setOpen(false);
     });

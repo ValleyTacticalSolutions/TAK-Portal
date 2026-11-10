@@ -303,7 +303,7 @@
         }
 
         // Chart.js prefers mouse offsetX/offsetY, which Chromium does not
-        // map correctly under rem-based desktop density. Touch events skip
+        // map correctly when html { zoom } is applied. Touch events skip
         // offsetX and look correct. Always map from client coords instead.
         function positionFromPointer(nativeEvent, chart) {
           var source = nativeEvent;
@@ -1818,13 +1818,40 @@
   }
 
   /* Chart.js owns canvas size. Forcing CSS width/height on the canvas
-     breaks hover hit-testing under rem-based desktop density. */
+     breaks hover hit-testing (especially with html { zoom } on desktop). */
   .chartWrap{
     position: relative;
     max-width: 100%;
     width: 100%;
     height: 340px;
     margin: 0 auto;
+  }
+
+  .maBanner{
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-weight: 800;
+    color: #ffffff;
+    margin-bottom: 10px;
+  }
+  .maBannerIncident{ background: #992525; }
+  .maBannerEvent{ background: #995725; }
+  .channelPatchBanner{ background: #995725; }
+  .userReqBanner{
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-weight: 800;
+    color: #ffffff;
+    background: #1a49af;
+    display:block;
+  }
+  .mouPendingBanner{
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-weight: 800;
+    color: #ffffff;
+    background: #995725;
+    display: block;
   }
 
   #connectedClientsStatCard[role="button"]:hover { border-color: color-mix(in srgb, var(--btn) 42%, var(--line)); }

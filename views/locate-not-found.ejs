@@ -6,14 +6,10 @@
     <title>Locator not found</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body class="theme-<%= typeof brandTheme !== 'undefined' && brandTheme ? brandTheme : 'light' %>">
-    <main class="publicShell">
-      <div class="publicPanel">
-        <div class="pageHeader">
-          <h1 class="pageHeader__title">Locator not found</h1>
-        </div>
-        <p class="settings-help">This link is not valid or the locator has been archived.</p>
-      </div>
+  <body class="theme-<%= brandTheme || 'dark' %>">
+    <main class="main" style="max-width: 720px; margin: 2rem auto; padding: 0 1rem;">
+      <h1>Locator not found</h1>
+      <p class="settings-help">This link is not valid or the locator has been archived.</p>
     </main>
   </body>
 </html>

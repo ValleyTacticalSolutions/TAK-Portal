@@ -4094,9 +4094,8 @@
   }
 
   /**
-   * Per-pane width from the pointer using the stack's box vs clientX.
-   * Prefer the stack rect over window.innerWidth so panel drag stays correct
-   * under rem-based desktop density (and any future root scaling).
+   * Per-pane width from the pointer. Uses the stack's own box vs clientX so
+   * html { zoom: 0.8 } cannot mix window.innerWidth with layout CSS pixels.
    */
   function paneWidthFromClientX(clientX) {
     const rect = elDetailStack.getBoundingClientRect();

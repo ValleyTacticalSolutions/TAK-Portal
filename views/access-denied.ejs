@@ -2,30 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Access denied</title>
   <link rel="stylesheet" href="/styles.css" />
-  <% if (typeof brandLogoUrl !== "undefined" && brandLogoUrl) { %>
-    <link rel="icon" href="<%= brandLogoUrl %>" type="image/png" />
-  <% } %>
 </head>
-<body
-  class="theme-<%= brandTheme || 'dark' %>"
-  <% if (typeof primaryButtonColor !== "undefined" && primaryButtonColor || typeof siteFontFamily !== "undefined" && siteFontFamily) { %>
-    style="<% if (typeof primaryButtonColor !== "undefined" && primaryButtonColor) { %>--btn:<%= primaryButtonColor %>;<% } %><% if (typeof siteFontFamily !== "undefined" && siteFontFamily) { %>--site-font:<%= siteFontFamily %>;<% } %>"
-  <% } %>
->
-  <%- include("partials/theme-toggle") %>
-  <main class="publicShell">
-    <div class="publicPanel">
-      <div class="pageHeader">
-        <h1 class="pageHeader__title">Access Denied</h1>
-      </div>
+<body class="page theme-<%= brandTheme || 'dark' %>">
+  <main class="container">
+    <div class="card">
+      <h1>Access Denied</h1>
 
       <% if (username) { %>
         <p>
           You are logged in as <strong><%= username %></strong>, but you are not a member
-          of any allowed admin group for this page.
+          of any allowed admin group for this page. 
         </p>
 
         <p>
@@ -35,12 +23,11 @@
         <p>You are not authorized to access this portal.</p>
       <% } %>
 
-      <div class="row" style="margin-top: 1.5rem;">
-        <a href="/logout" class="btn danger">Log out</a>
+      <div style="margin-top: 1.5rem; display:flex; gap: 0.75rem; flex-wrap: wrap;">
+        <a href="/logout" class="btn btn-danger">Log out</a>
         <a href="/" class="btn">Back to home</a>
       </div>
     </div>
   </main>
-  <script src="/theme-toggle.js" defer></script>
 </body>
 </html>
