@@ -77,7 +77,7 @@ async function getGlobalAdminGroupDisplayNames(authUser) {
 }
 
 /** Ensure every group referenced by mutual aid appears in the global-admin Data Sync dropdown. */
-function mergeMutualAidGroupNames(byKey, takByKey) {
+function mergeMutualAidGroupNames(byKey) {
   const seenNames = new Set();
   for (const item of mutualAidStore.load()) {
     const name = String(item?.groupName || "").trim();
@@ -88,8 +88,7 @@ function mergeMutualAidGroupNames(byKey, takByKey) {
 
     const k = canonicalGroupKey(name);
     if (!k || byKey.has(k)) continue;
-    const display = takByKey.get(k) || takDisplayName(name) || name;
-    byKey.set(k, display);
+    byKey.set(k, takDisplayName(name) || name);
   }
 }
 
@@ -373,7 +372,8 @@ async function getAllowedTakGroupNameSet(authUser) {
 
 /**
  * Group names for the create/edit dropdown.
- * Agency admins: agency-specific groups; prefer TAK server spelling when present.
+ * Authentik is the source of truth for labels (Groups page spelling).
+ * Optional TAK payload is diagnostics-only and must not override Authentik names.
  */
 async function resolveGroupsForUser(authUser, takPayload) {
   const access = accessSvc.getAgencyAccess(authUser);
@@ -391,17 +391,11 @@ async function resolveGroupsForUser(authUser, takPayload) {
     for (const name of authentikNames) {
       const k = canonicalGroupKey(name);
       if (!k) continue;
-      byKey.set(k, takByKey.get(k) || name);
-    }
-
-    // Include any TAK-only groups not mirrored in Authentik (exclude _ / tak_ raw names).
-    for (const t of filterGlobalAdminGroupNames(takNames)) {
-      const k = canonicalGroupKey(t);
-      if (k && !byKey.has(k)) byKey.set(k, t);
+      byKey.set(k, name);
     }
 
     const beforeMaMerge = byKey.size;
-    mergeMutualAidGroupNames(byKey, takByKey);
+    mergeMutualAidGroupNames(byKey);
 
     const groups = Array.from(byKey.values())
       .filter((n) => !String(n || "").trim().toLowerCase().startsWith("cn="))
@@ -410,8 +404,13 @@ async function resolveGroupsForUser(authUser, takPayload) {
       groups,
       debug: {
         scope: "global",
+        sourceOfTruth: "authentik",
         authentikGroupCount: authentikNames.length,
         takGroupCount: takNames.length,
+        takOnlyIgnoredCount: filterGlobalAdminGroupNames(takNames).filter((t) => {
+          const k = canonicalGroupKey(t);
+          return k && !byKey.has(k);
+        }).length,
         mutualAidGroupsAdded: byKey.size - beforeMaMerge,
         visibleGroupCount: groups.length,
       },
@@ -425,16 +424,15 @@ async function resolveGroupsForUser(authUser, takPayload) {
   const seenKeys = new Set();
 
   const pushGroup = (entry, source) => {
-    const fromTak = takByKey.get(entry.canonicalKey);
-    const chosen = fromTak || entry.takDisplayName;
-    if (!entry.canonicalKey || seenKeys.has(entry.canonicalKey)) return;
+    const chosen = entry.takDisplayName;
+    if (!entry.canonicalKey || seenKeys.has(entry.canonicalKey) || !chosen) return;
     seenKeys.add(entry.canonicalKey);
     resolved.push(chosen);
     matchDetails.push({
       authentikName: entry.authentikName,
       takDisplayName: entry.takDisplayName,
       canonicalKey: entry.canonicalKey,
-      matchedTakName: fromTak || null,
+      matchedTakName: takByKey.get(entry.canonicalKey) || null,
       chosenForUi: chosen,
       source,
     });
@@ -455,6 +453,7 @@ async function resolveGroupsForUser(authUser, takPayload) {
     groups,
     debug: {
       scope: "agency",
+      sourceOfTruth: "authentik",
       allowedAgencySuffixes: access.allowedAgencySuffixes || [],
       authentikAllowedCount: allowed.length,
       managedMutualAidCount: managedMa.length,

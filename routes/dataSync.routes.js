@@ -237,8 +237,18 @@ async function prepareMissionWrite(req, res) {
 router.get("/groups", async (req, res) => {
   try {
     const authUser = req.authentikUser || null;
-    const data = await dataSyncSvc.listGroupsAll();
-    const resolved = await dataSyncAccess.resolveGroupsForUser(authUser, data);
+    // Authentik is the source of truth for Data Sync group labels.
+    // TAK /api/groups/all is optional diagnostics only (debug=1) and must not
+    // override Authentik spelling after agency renames / LDAP lag.
+    let takPayload = [];
+    if (String(req.query.debug || "") === "1") {
+      try {
+        takPayload = await dataSyncSvc.listGroupsAll();
+      } catch (_) {
+        takPayload = [];
+      }
+    }
+    const resolved = await dataSyncAccess.resolveGroupsForUser(authUser, takPayload);
     if (String(req.query.debug || "") === "1") {
       return res.json({ data: resolved.groups, _debug: resolved.debug });
     }

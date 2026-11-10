@@ -4,7 +4,9 @@ const {
   resolveManagedMutualAidGroups,
   filterMissionsForAccess,
   canonicalGroupKey,
+  resolveGroupsForUser,
 } = require("../services/dataSyncAccess.service");
+const groupsSvc = require("../services/groups.service");
 
 const maRecords = [
   {
@@ -93,4 +95,31 @@ assert.deepStrictEqual(
   ["Agency Mission", "MA Mission"]
 );
 
-console.log("dataSyncAccess.test.js: ok");
+(async () => {
+  const originalGetGroups = groupsSvc.getGroupsForAuthUser;
+  groupsSvc.getGroupsForAuthUser = async () => [
+    { name: "tak_Davis Main", pk: "g-davis" },
+    { name: "tak_HCSO Ops", pk: "g-hcso" },
+  ];
+  try {
+    const resolved = await resolveGroupsForUser(
+      { isGlobalAdmin: true, username: "admin" },
+      ["DAVIS Main", "HCSO Ops", "TAK-Only Orphan"]
+    );
+    assert.strictEqual(resolved.debug.sourceOfTruth, "authentik");
+    assert.ok(resolved.groups.includes("Davis Main"), "Authentik spelling must win");
+    assert.ok(!resolved.groups.includes("DAVIS Main"), "stale TAK spelling must not override Authentik");
+    assert.ok(resolved.groups.includes("HCSO Ops"));
+    assert.ok(
+      !resolved.groups.includes("TAK-Only Orphan"),
+      "TAK-only groups must not appear in the Authentik-backed list"
+    );
+  } finally {
+    groupsSvc.getGroupsForAuthUser = originalGetGroups;
+  }
+
+  console.log("dataSyncAccess.test.js: ok");
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
