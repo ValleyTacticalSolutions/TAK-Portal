@@ -318,6 +318,35 @@ async function refreshStoredStatusForUserIds(userIds) {
 }
 
 /**
+ * After TAK cert revoke for username rebuilds: force Users-page status to
+ * "{role} - No Logins" for the given users, even if they previously had
+ * Authentik last_login (which would otherwise show Web Only).
+ */
+async function forceNoLoginsStatusForUserIds(userIds) {
+  const ids = (Array.isArray(userIds) ? userIds : [])
+    .map((id) => String(id || "").trim())
+    .filter(Boolean);
+  if (!ids.length) return;
+
+  await db.query(
+    `UPDATE users
+     SET has_active_tak_cert = false,
+         last_login = null,
+         updated_at = now()
+     WHERE pending_delete = false
+       AND id = ANY($1::uuid[])`,
+    [ids]
+  );
+  await db.query(
+    `UPDATE directory_sync
+     SET tak_certs_known = true,
+         tak_certs_checked_at = now()
+     WHERE id = 1`
+  );
+  await refreshStoredStatusForUserIds(ids);
+}
+
+/**
  * Worker/sync: write portal_role, TAK cert flags, and status_label in Postgres.
  * includeTakCerts=false still refreshes role + label from the last successful cert snapshot.
  */
@@ -348,4 +377,5 @@ module.exports = {
   getPortalRoleNameLists,
   refreshStoredUserStatus,
   refreshStoredStatusForUserIds,
+  forceNoLoginsStatusForUserIds,
 };

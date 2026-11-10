@@ -252,6 +252,24 @@ try {
   );
   assert.ok(renameSrc.includes("revokeCertsForUsersBulk"));
   assert.ok(renameSrc.includes('scope === "existing"'));
+  assert.ok(
+    renameSrc.includes("forceNoLoginsStatusForUserIds"),
+    "replace-all must force No Logins status after cert revoke"
+  );
+
+  const statusSrc = fs.readFileSync(
+    path.join(__dirname, "..", "services", "userLoginStatus.service.js"),
+    "utf8"
+  );
+  assert.ok(statusSrc.includes("forceNoLoginsStatusForUserIds"));
+  assert.ok(
+    /forceNoLoginsStatusForUserIds[\s\S]*last_login\s*=\s*null/.test(statusSrc),
+    "force No Logins must clear last_login so status is not Web Only"
+  );
+  assert.ok(
+    /forceNoLoginsStatusForUserIds[\s\S]*has_active_tak_cert\s*=\s*false/.test(statusSrc),
+    "force No Logins must clear has_active_tak_cert"
+  );
 
   console.log("agencyUsernameTokenRename.test.js: ok");
 } catch (err) {

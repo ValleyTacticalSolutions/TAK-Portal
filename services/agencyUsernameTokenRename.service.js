@@ -13,6 +13,7 @@ const directoryRepo = require("./directoryRepo.service");
 const authentikOutbox = require("./authentikOutbox.service");
 const tak = require("./tak.service");
 const usersService = require("./users.service");
+const userLoginStatus = require("./userLoginStatus.service");
 const db = require("./db");
 
 function getConcurrency() {
@@ -290,6 +291,23 @@ async function applyExistingUserRenames(plans, newAgency) {
         failures.length > 5 ? " | …" : ""
       }`
     );
+  }
+
+  // Revoked users must show "{role} - No Logins" (not Web Only), so clear
+  // cert + last_login flags and refresh stored status labels.
+  const revokedIds = plans
+    .filter((p) => p.usernameChanged)
+    .map((p) => String(p.user.uuid || p.user.id || "").trim())
+    .filter(Boolean);
+  if (revokedIds.length) {
+    try {
+      await userLoginStatus.forceNoLoginsStatusForUserIds(revokedIds);
+    } catch (statusErr) {
+      console.warn(
+        "[agency-username-token] failed to force No Logins status:",
+        statusErr?.message || statusErr
+      );
+    }
   }
 
   usersService.invalidateUsersCache();
