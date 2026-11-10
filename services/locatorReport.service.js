@@ -5,7 +5,7 @@
 const fs = require("fs");
 const path = require("path");
 const PDFDocument = require("pdfkit");
-const Jimp = require("jimp");
+const Jimp = require("./jimpCompat");
 const settingsSvc = require("./settings.service");
 const locatorForm = require("./locatorForm.service");
 
