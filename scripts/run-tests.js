@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
- * Run unit tests in a fixed order; exit non-zero on first failure.
+ * Run unit tests; exit non-zero on first failure.
+ * Files in TEST_FILES run first, in that order. Any other tests/*.test.js run after them,
+ * alphabetically, so a new test can never be skipped by forgetting to list it here.
  */
 const { spawnSync } = require("child_process");
 const path = require("path");
@@ -88,9 +90,15 @@ const TEST_FILES = [
   "agencyUsernameTokenRename.test.js",
 ];
 
+const fs = require("fs");
 const testsDir = path.join(__dirname, "..", "tests");
 
-for (const file of TEST_FILES) {
+const unlisted = fs
+  .readdirSync(testsDir)
+  .filter((f) => f.endsWith(".test.js") && !TEST_FILES.includes(f))
+  .sort();
+
+for (const file of [...TEST_FILES, ...unlisted]) {
   const testPath = path.join(testsDir, file);
   const result = spawnSync(process.execPath, [testPath], {
     stdio: "inherit",
