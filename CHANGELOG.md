@@ -17,7 +17,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 ✨ `Enhancement` - Data Sync - Allows for multiple groups/channels to be selected for a DS Mission<br>
 ✨ `Enhancement` - Data Package - Allows for groups/channels to be selected for Data Packages<br>
 ✨ `Enhancement` - Channel Patching - Data Syncs are now included in the patch when channel patches are active<br>
-⬆️ `Dependency Update` - Security overrides for glob, minimatch, and brace-expansion; node-forge 1.4.3; within-range refreshes for @tak-ps/node-cot, @tak-ps/node-tak, axios, dotenv, marked, nodemailer, and sanitize-html
+⬆️ `Dependency Update` - Security overrides for glob, minimatch, and brace-expansion; node-forge 1.4.3; nodemailer ^10.4.1 (lockfile 10.5.0); within-range refreshes for @tak-ps/node-cot, @tak-ps/node-tak, axios, dotenv, marked, and sanitize-html (#108)
 
 ### v2.0.33 - 11/10/26
 ✨ `Enhancement` - Improves handling for icon matching<br>
