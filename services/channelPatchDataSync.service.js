@@ -160,8 +160,8 @@ function patchedWithLabelsForMission(mission, patches) {
   );
 }
 
-/** Channels added by enabled patches onto this mission (locked in the edit UI). */
-function lockedGroupsForMission(missionName, patches) {
+/** Channels this patch added onto the mission (orange "patched with" list). */
+function addedGroupsForMission(missionName, patches) {
   const name = String(missionName || "").trim();
   if (!name) return [];
   const byKey = new Map();
@@ -180,15 +180,37 @@ function lockedGroupsForMission(missionName, patches) {
   );
 }
 
+/**
+ * Every channel in an enabled patch that affects this mission is locked in the
+ * edit UI — including original mission channels that are part of the patch.
+ */
+function lockedGroupsForMission(missionName, patches) {
+  const name = String(missionName || "").trim();
+  if (!name) return [];
+  const byKey = new Map();
+  for (const p of Array.isArray(patches) ? patches : []) {
+    if (!p || p.enabled === false) continue;
+    const entry = normalizeAppliedMap(p.dataSyncApplied)[name];
+    if (!entry) continue;
+    for (const [key, cn] of patchGroupCnByKey(p)) {
+      if (!byKey.has(key)) byKey.set(key, cn);
+    }
+  }
+  return Array.from(byKey.values()).sort((a, b) =>
+    a.localeCompare(b, undefined, { sensitivity: "base" })
+  );
+}
+
 function annotateMissionsWithPatchPeers(missions, patches) {
   const list = Array.isArray(missions) ? missions : [];
   const patchList = Array.isArray(patches) ? patches : channelPatchStore.listEnabled();
   return list.map((m) => {
-    const patchLockedGroups = lockedGroupsForMission(missionNameOf(m), patchList);
-    // Prefer ledger-added channels (additional patched-on channels). Fall back to
-    // peer labels when no ledger entry exists yet.
-    const patchedWith = patchLockedGroups.length
-      ? patchLockedGroups.slice()
+    const name = missionNameOf(m);
+    const patchLockedGroups = lockedGroupsForMission(name, patchList);
+    const added = addedGroupsForMission(name, patchList);
+    // Orange label lists additional patched-on channels; fall back to peer labels.
+    const patchedWith = added.length
+      ? added.slice()
       : patchedWithLabelsForMission(m, patchList);
     if (!patchedWith.length && !patchLockedGroups.length) return m;
     const next = Object.assign({}, m);
@@ -517,6 +539,7 @@ module.exports = {
   planRestoreForMission,
   planRemovalsForMission,
   patchedWithLabelsForMission,
+  addedGroupsForMission,
   lockedGroupsForMission,
   annotateMissionsWithPatchPeers,
   annotateMissionsPayloadWithPatchPeers,

@@ -99,13 +99,18 @@ const channelPatchStore = require("../services/channelPatch.store");
   ];
   assert.deepStrictEqual(
     channelPatchDataSync.lockedGroupsForMission("Ops Mission", patches),
+    ["Alpha Ops", "Beta Tac"],
+    "all patch channels lock, including originals"
+  );
+  assert.deepStrictEqual(
+    channelPatchDataSync.addedGroupsForMission("Ops Mission", patches),
     ["Beta Tac"]
   );
   const annotated = channelPatchDataSync.annotateMissionsWithPatchPeers(
     [{ name: "Ops Mission", groups: ["Alpha Ops", "Beta Tac"] }],
     patches
   );
-  assert.deepStrictEqual(annotated[0].patchLockedGroups, ["Beta Tac"]);
+  assert.deepStrictEqual(annotated[0].patchLockedGroups, ["Alpha Ops", "Beta Tac"]);
   assert.deepStrictEqual(annotated[0].patchedWith, ["Beta Tac"]);
 })();
 
