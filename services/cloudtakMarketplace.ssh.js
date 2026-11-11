@@ -332,6 +332,16 @@ function sshStatus() {
 // Wide enough that a registry URL and its HTTP status stay on one line.
 const SSH_PTY_COLS = 1024;
 
+function ptyExecOptions() {
+  return { pty: { term: "xterm", cols: SSH_PTY_COLS, rows: 40 } };
+}
+
+/** ssh2 reports this when the server rejects the pty-req (PermitTTY no / no-pty). */
+function isPtyRefusal(err) {
+  const msg = err && err.message ? String(err.message) : String(err || "");
+  return /unable to request a pseudo-terminal/i.test(msg);
+}
+
 let activeAbort = null;
 
 function abortActiveCommand() {
@@ -393,9 +403,9 @@ function feedPtyChunk(hold, chunk) {
   return { lines, hold: current };
 }
 
-function execOverSsh(connectConfig, command, timeoutMs = 30000, onChunk) {
+function execOverSsh(connectConfig, command, timeoutMs = 30000, onChunk, createClient) {
   return new Promise((resolve) => {
-    const conn = new Client();
+    const conn = typeof createClient === "function" ? createClient() : new Client();
     let finished = false;
     let cancelled = false;
     let stream = null;
@@ -492,8 +502,78 @@ function execOverSsh(connectConfig, command, timeoutMs = 30000, onChunk) {
           done(cancelledPayload());
           return;
         }
-        conn.exec(command, { pty: { term: "xterm", cols: SSH_PTY_COLS, rows: 40 } }, (err, strm) => {
-          if (err) {
+        const beginExec = (usePty) => {
+          if (finished || cancelled) return;
+          const opts = usePty ? ptyExecOptions() : {};
+          try {
+            conn.exec(command, opts, (err, strm) => {
+              if (finished) return;
+              if (err) {
+                // ssh2 closes the session channel and never sends the command
+                // when pty-req fails. Open a new channel without a pty.
+                if (usePty && !cancelled && isPtyRefusal(err)) {
+                  beginExec(false);
+                  return;
+                }
+                if (cancelled) return;
+                done({
+                  ok: false,
+                  message: err.message || String(err),
+                  stdout: "",
+                  stderr: "",
+                  exitCode: null,
+                });
+                return;
+              }
+              stream = strm;
+              if (cancelled) {
+                sendRemoteInterrupt(stream, "INT");
+                return;
+              }
+              let stdout = "";
+              let stderr = "";
+              let stdoutHold = "";
+              let stderrHold = "";
+              const takeLines = (hold, chunk) => {
+                const next = feedPtyChunk(hold, chunk);
+                next.lines.forEach((line) => emit(line));
+                return next.hold;
+              };
+              stream.on("data", (data) => {
+                const s = data.toString();
+                stdout += s;
+                stdoutHold = takeLines(stdoutHold, s);
+              });
+              if (stream.stderr && typeof stream.stderr.on === "function") {
+                stream.stderr.on("data", (data) => {
+                  const s = data.toString();
+                  stderr += s;
+                  stderrHold = takeLines(stderrHold, s);
+                });
+              }
+              stream.on("close", (code) => {
+                emit(stripAnsi(stdoutHold).replace(/\s+$/, ""));
+                emit(stripAnsi(stderrHold).replace(/\s+$/, ""));
+                if (cancelled) {
+                  done(cancelledPayload());
+                  return;
+                }
+                const exitCode = Number.isInteger(code) ? code : null;
+                if (exitCode !== 0) {
+                  done({
+                    ok: false,
+                    message: stderr.trim() || stdout.trim() || `Exit code ${exitCode}`,
+                    stdout,
+                    stderr,
+                    exitCode,
+                  });
+                  return;
+                }
+                done({ ok: true, stdout, stderr, exitCode: 0 });
+              });
+            });
+          } catch (err) {
+            if (finished || cancelled) return;
             done({
               ok: false,
               message: err.message || String(err),
@@ -501,55 +581,9 @@ function execOverSsh(connectConfig, command, timeoutMs = 30000, onChunk) {
               stderr: "",
               exitCode: null,
             });
-            return;
           }
-          stream = strm;
-          if (cancelled) {
-            sendRemoteInterrupt(stream, "INT");
-            return;
-          }
-          let stdout = "";
-          let stderr = "";
-          let stdoutHold = "";
-          let stderrHold = "";
-          const takeLines = (hold, chunk) => {
-            const next = feedPtyChunk(hold, chunk);
-            next.lines.forEach((line) => emit(line));
-            return next.hold;
-          };
-          stream.on("data", (data) => {
-            const s = data.toString();
-            stdout += s;
-            stdoutHold = takeLines(stdoutHold, s);
-          });
-          if (stream.stderr && typeof stream.stderr.on === "function") {
-            stream.stderr.on("data", (data) => {
-              const s = data.toString();
-              stderr += s;
-              stderrHold = takeLines(stderrHold, s);
-            });
-          }
-          stream.on("close", (code) => {
-            emit(stripAnsi(stdoutHold).replace(/\s+$/, ""));
-            emit(stripAnsi(stderrHold).replace(/\s+$/, ""));
-            if (cancelled) {
-              done(cancelledPayload());
-              return;
-            }
-            const exitCode = Number.isInteger(code) ? code : null;
-            if (exitCode !== 0) {
-              done({
-                ok: false,
-                message: stderr.trim() || stdout.trim() || `Exit code ${exitCode}`,
-                stdout,
-                stderr,
-                exitCode,
-              });
-              return;
-            }
-            done({ ok: true, stdout, stderr, exitCode: 0 });
-          });
-        });
+        };
+        beginExec(true);
       })
       .on("error", (err) => {
         if (cancelled) return;
@@ -911,6 +945,8 @@ module.exports = {
   stripAnsi,
   feedPtyChunk,
   SSH_PTY_COLS,
+  isPtyRefusal,
+  execOverSsh,
   detectCheckout,
   testConnection,
   shellQuote,

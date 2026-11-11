@@ -76,6 +76,7 @@ const TEST_FILES = [
   "backup.test.js",
   "cloudtakMarketplace.test.js",
   "dockerPullRetry.test.js",
+  "marketplacePtyFallback.test.js",
   "marketplaceHelper.sudoers.test.js",
   "setupDeviceAccess.test.js",
   "activeUserGate.test.js",
