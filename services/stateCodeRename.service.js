@@ -92,7 +92,7 @@ async function renameStateTakGroups(oldState, newState) {
   const oldS = normalizeStateCode(oldState);
   const newS = normalizeStateCode(newState);
   if (!oldS || !newS || oldS === newS) {
-    return { groupsRenamed: 0 };
+    return { groupsRenamed: 0, groupNameMap: new Map() };
   }
 
   const repo = require("./directoryRepo.service");
@@ -112,6 +112,7 @@ async function renameStateTakGroups(oldState, newState) {
   for (const g of [...byDetail.groups, ...byQ.groups]) merged.set(String(g.pk), g);
   const allGroups = [...merged.values()];
   let groupsRenamed = 0;
+  const groupNameMap = new Map();
 
   for (const g of Array.isArray(allGroups) ? allGroups : []) {
     const gn = String(g?.name || "").trim();
@@ -149,10 +150,14 @@ async function renameStateTakGroups(oldState, newState) {
         private: nextAttrs.private,
       },
     });
+    if (nameChanged) {
+      groupNameMap.set(gn, finalName);
+      groupNameMap.set(gn.toLowerCase(), finalName);
+    }
     groupsRenamed += 1;
   }
 
-  return { groupsRenamed };
+  return { groupsRenamed, groupNameMap };
 }
 
 function anyAgencyUsesState(agencies, stateCode) {
@@ -231,9 +236,21 @@ async function renameStateCode(agencyIndex, newStateRaw) {
 
   const renameStateGroups = !anyAgencyUsesState(agencies, oldState) && oldState !== newState;
   let groupsRenamed = 0;
+  let takRefs = null;
   if (renameStateGroups) {
     const groupStats = await renameStateTakGroups(oldState, newState);
     groupsRenamed = groupStats.groupsRenamed;
+    if (groupStats.groupNameMap && groupStats.groupNameMap.size) {
+      try {
+        const groupRenamePropagate = require("./groupRenamePropagate.service");
+        takRefs = await groupRenamePropagate.propagateGroupRename(groupStats.groupNameMap);
+      } catch (err) {
+        console.warn(
+          "[stateCodeRename] Failed to propagate renames to Data Sync / packages:",
+          err?.message || err
+        );
+      }
+    }
   }
 
   agenciesStore.save(agencies);
@@ -249,6 +266,7 @@ async function renameStateCode(agencyIndex, newStateRaw) {
     updatedIndexes: matchingIndexes,
     groupsRenamed,
     stateGroupsRenamed: renameStateGroups && groupsRenamed > 0,
+    takRefs,
   };
 }
 

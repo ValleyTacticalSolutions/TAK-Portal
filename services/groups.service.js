@@ -796,6 +796,17 @@ async function renameGroup(groupId, newName, opts = {}) {
     templatesStore.save(updatedTemplates);
   }
 
+  let takRefs = null;
+  try {
+    const groupRenamePropagate = require("./groupRenamePropagate.service");
+    takRefs = await groupRenamePropagate.propagateGroupRename(oldName, n);
+  } catch (err) {
+    console.warn(
+      "[groups.renameGroup] Failed to propagate rename to Data Sync / packages:",
+      err?.message || err
+    );
+  }
+
   invalidateGroupsCache();
 
   return {
@@ -803,7 +814,8 @@ async function renameGroup(groupId, newName, opts = {}) {
     _meta: {
       oldName,
       newName: n,
-      templatesUpdated
+      templatesUpdated,
+      takRefs,
     }
   };
 }

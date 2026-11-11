@@ -81,7 +81,7 @@ async function renameCountyTakGroups(oldCounty, newCounty) {
   const oldC = String(oldCounty || "").trim();
   const newC = String(newCounty || "").trim();
   if (!oldC || !newC || oldC.toLowerCase() === newC.toLowerCase()) {
-    return { groupsRenamed: 0 };
+    return { groupsRenamed: 0, groupNameMap: new Map() };
   }
 
   const repo = require("./directoryRepo.service");
@@ -101,6 +101,7 @@ async function renameCountyTakGroups(oldCounty, newCounty) {
   for (const g of [...byDetail.groups, ...byQ.groups]) merged.set(String(g.pk), g);
   const allGroups = [...merged.values()];
   let groupsRenamed = 0;
+  const groupNameMap = new Map();
 
   for (const g of Array.isArray(allGroups) ? allGroups : []) {
     const gn = String(g?.name || "").trim();
@@ -142,10 +143,14 @@ async function renameCountyTakGroups(oldCounty, newCounty) {
         private: nextAttrs.private,
       },
     });
+    if (nameChanged) {
+      groupNameMap.set(gn, finalName);
+      groupNameMap.set(gn.toLowerCase(), finalName);
+    }
     groupsRenamed += 1;
   }
 
-  return { groupsRenamed };
+  return { groupsRenamed, groupNameMap };
 }
 
 /**
@@ -243,6 +248,19 @@ async function renameCountyName(agencyIndex, newCountyRaw) {
 
   const groupStats = await renameCountyTakGroups(oldCounty, newCounty);
 
+  let takRefs = null;
+  if (groupStats.groupNameMap && groupStats.groupNameMap.size) {
+    try {
+      const groupRenamePropagate = require("./groupRenamePropagate.service");
+      takRefs = await groupRenamePropagate.propagateGroupRename(groupStats.groupNameMap);
+    } catch (err) {
+      console.warn(
+        "[countyNameRename] Failed to propagate renames to Data Sync / packages:",
+        err?.message || err
+      );
+    }
+  }
+
   for (const i of matchingIndexes) {
     agencies[i] = { ...agencies[i], county: newCounty };
   }
@@ -257,6 +275,7 @@ async function renameCountyName(agencyIndex, newCountyRaw) {
     newCounty,
     updatedIndexes: matchingIndexes,
     groupsRenamed: groupStats.groupsRenamed,
+    takRefs,
   };
 }
 

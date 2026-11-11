@@ -268,6 +268,19 @@ async function renameAgencyGroupPrefix(agencyIndex, newGroupPrefix) {
     groupStats.groupNameMap
   );
 
+  let takRefs = null;
+  if (groupStats.groupNameMap && groupStats.groupNameMap.size) {
+    try {
+      const groupRenamePropagate = require("./groupRenamePropagate.service");
+      takRefs = await groupRenamePropagate.propagateGroupRename(groupStats.groupNameMap);
+    } catch (err) {
+      console.warn(
+        "[agencyAbbrevRename] Failed to propagate renames to Data Sync / packages:",
+        err?.message || err
+      );
+    }
+  }
+
   const templateReconcile = await usersService.reconcileCurrentTemplateForAgencySuffix(
     agency.suffix
   );
@@ -293,6 +306,7 @@ async function renameAgencyGroupPrefix(agencyIndex, newGroupPrefix) {
     groupsRenamed: groupStats.groupsRenamed,
     templatesUpdated: templateStats.templatesUpdated,
     currentTemplatesReconciled: templateReconcile.updated,
+    takRefs,
   };
 }
 

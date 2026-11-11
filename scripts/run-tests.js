@@ -31,6 +31,7 @@ const TEST_FILES = [
   "channelPatch.dataSync.test.js",
   "channelPatch.engine.test.js",
   "channelPatch.persist.test.js",
+  "groupRenamePropagate.test.js",
   "locatorForm.test.js",
   "locatorCot.test.js",
   "locatorAccess.test.js",

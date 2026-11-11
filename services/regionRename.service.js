@@ -73,7 +73,7 @@ async function renameRegionTakGroups(oldRegion, newRegion) {
   const oldR = regionsSvc.normalizeName(oldRegion);
   const newR = regionsSvc.normalizeName(newRegion);
   if (!oldR || !newR || oldR.toLowerCase() === newR.toLowerCase()) {
-    return { groupsRenamed: 0 };
+    return { groupsRenamed: 0, groupNameMap: new Map() };
   }
 
   const repo = require("./directoryRepo.service");
@@ -93,6 +93,7 @@ async function renameRegionTakGroups(oldRegion, newRegion) {
   for (const g of [...byDetail.groups, ...byQ.groups]) merged.set(String(g.pk), g);
   const allGroups = [...merged.values()];
   let groupsRenamed = 0;
+  const groupNameMap = new Map();
 
   for (const g of Array.isArray(allGroups) ? allGroups : []) {
     const gn = String(g?.name || "").trim();
@@ -134,10 +135,14 @@ async function renameRegionTakGroups(oldRegion, newRegion) {
         private: nextAttrs.private,
       },
     });
+    if (nameChanged) {
+      groupNameMap.set(gn, finalName);
+      groupNameMap.set(gn.toLowerCase(), finalName);
+    }
     groupsRenamed += 1;
   }
 
-  return { groupsRenamed };
+  return { groupsRenamed, groupNameMap };
 }
 
 /**
@@ -193,11 +198,23 @@ async function deleteRegionTakGroups(regionName) {
 async function renameRegion(id, newNameRaw) {
   const { region, oldName, newName } = regionsSvc.renameInStore(id, newNameRaw);
   let groupsRenamed = 0;
+  let takRefs = null;
   if (oldName.toLowerCase() !== newName.toLowerCase()) {
     const result = await renameRegionTakGroups(oldName, newName);
     groupsRenamed = result.groupsRenamed || 0;
+    if (result.groupNameMap && result.groupNameMap.size) {
+      try {
+        const groupRenamePropagate = require("./groupRenamePropagate.service");
+        takRefs = await groupRenamePropagate.propagateGroupRename(result.groupNameMap);
+      } catch (err) {
+        console.warn(
+          "[regionRename] Failed to propagate renames to Data Sync / packages:",
+          err?.message || err
+        );
+      }
+    }
   }
-  return { region, oldName, newName, groupsRenamed };
+  return { region, oldName, newName, groupsRenamed, takRefs };
 }
 
 /**
