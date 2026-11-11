@@ -130,31 +130,38 @@ assert.match(replayInstall, /install_ec" != 0[\s\S]*apply_plugin_patches/, "drif
     installBranch,
     /patch does not apply\|Nothing was changed[\s\S]*drifted patch applicator was not run[\s\S]*apply_plugin_patches/
   );
-  const replayHeader = "# Supported CloudTAK: v13.109.3 through v13.113.0 (every release in that range";
-  const replayErr = "Nothing was changed. This plugin supports CloudTAK v13.109.3 - v13.113.0;";
-  assert.deepStrictEqual(marketplace.parsePluginCloudtakRange(replayHeader), { min: "13.109.3", max: "13.113.0" });
-  assert.deepStrictEqual(marketplace.parsePluginCloudtakRange(replayErr), { min: "13.109.3", max: "13.113.0" });
+  // Replay v1.5.0+ declares through v13.122.8 (same "through" / "supports" shapes).
+  const replayHeader = "# Supported CloudTAK: v13.109.3 through v13.122.8 (every release in that range";
+  const replayErr = "Nothing was changed. This plugin supports CloudTAK v13.109.3 - v13.122.8;";
+  assert.deepStrictEqual(marketplace.parsePluginCloudtakRange(replayHeader), { min: "13.109.3", max: "13.122.8" });
+  assert.deepStrictEqual(marketplace.parsePluginCloudtakRange(replayErr), { min: "13.109.3", max: "13.122.8" });
   assert.strictEqual(marketplace.parsePluginCloudtakRange("no range here"), null);
-  const replayRange = { min: "13.109.3", max: "13.113.0" };
-  assert.strictEqual(marketplace.cloudtakRangeMismatch("13.114.2", replayRange), "above");
-  assert.strictEqual(marketplace.cloudtakRangeMismatch("13.113.0", replayRange), "");
+  const replayRange = { min: "13.109.3", max: "13.122.8" };
+  assert.strictEqual(marketplace.cloudtakRangeMismatch("13.114.2", replayRange), "", "Replay v1.5.0 covers 13.114.2");
+  assert.strictEqual(marketplace.cloudtakRangeMismatch("13.122.8", replayRange), "");
+  assert.strictEqual(marketplace.cloudtakRangeMismatch("13.122.9", replayRange), "above");
   assert.strictEqual(marketplace.cloudtakRangeMismatch("13.109.3", replayRange), "");
   assert.strictEqual(marketplace.cloudtakRangeMismatch("13.109.2", replayRange), "below");
   assert.strictEqual(marketplace.cloudtakRangeMismatch("13.9.0", replayRange), "below");
+  // Pre-1.5.0 Replay stopped at 13.113.0; marketplace must still refuse that pairing.
+  assert.strictEqual(
+    marketplace.cloudtakRangeMismatch("13.114.2", { min: "13.109.3", max: "13.113.0" }),
+    "above"
+  );
   assert.strictEqual(marketplace.compareCloudtakVersions("13.114.2", "13.113.0"), 1);
   assert.match(
     marketplace.summarizeCommandError(
       [
         "ERROR: patch does not apply cleanly: app/src/workers/atlas-database.ts",
-        "Nothing was changed. This plugin supports CloudTAK v13.109.3 - v13.113.0;",
+        "Nothing was changed. This plugin supports CloudTAK v13.109.3 - v13.122.8;",
         "ERROR: cannot write /home/takwerx/CloudTAK/app/plugins as takwerx, even with sudo/docker elevation. Ask your admin to enable marketplace installs",
       ].join("\n")
     ),
-    /supports CloudTAK v13\.109\.3 - v13\.113\.0/
+    /supports CloudTAK v13\.109\.3 - v13\.122\.8/
   );
   assert.doesNotMatch(
     marketplace.summarizeCommandError(
-      "ERROR: replay supports CloudTAK v13.109.3 - v13.113.0; this checkout is v13.114.2."
+      "ERROR: replay supports CloudTAK v13.109.3 - v13.122.8; this checkout is v13.200.0."
     ),
     /ask your admin/i
   );
@@ -189,6 +196,68 @@ assert.ok(!pluginPatch.isOptionalPatchTarget("app/src/workers/atlas-database.ts"
   assert.strictEqual(partial.ok, false);
   assert.ok(partial.skipped.some((s) => /atlas-database/.test(s)));
   assert.strictEqual(fs.readFileSync(path.join(ct, rel), "utf8"), original, "failed required hunk must not write the file");
+}
+// Replay v1.5.0: drifted applicator must pick one atlas-database layout variant, not all.
+{
+  assert.strictEqual(pluginPatch.isVersionedPatchVariant("atlas-database.ts.v13.114.1.patch"), true);
+  assert.strictEqual(pluginPatch.isVersionedPatchVariant("atlas-database.ts.patch"), false);
+  assert.ok(String(pluginPatch.patchFamilyKey("x/atlas-database.ts.v13.117.2.patch")).endsWith("atlas-database.ts.patch"));
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "ctak-atlas-variants-"));
+  const ct = fs.mkdtempSync(path.join(os.tmpdir(), "ctak-atlas-variants-ct-"));
+  const rel = path.join("app", "src", "workers", "atlas-database.ts");
+  const dir = path.join(repo, "core-integration", "app", "src", "workers");
+  fs.mkdirSync(path.dirname(path.join(ct, rel)), { recursive: true });
+  fs.mkdirSync(dir, { recursive: true });
+  // Checkout matches the v13.114.1 layout (outbox), not the main (beta) layout.
+  fs.writeFileSync(path.join(ct, rel), "alpha\noutbox\ngamma\n");
+  const mainPatch = [
+    "--- a/app/src/workers/atlas-database.ts",
+    "+++ b/app/src/workers/atlas-database.ts",
+    "@@",
+    " alpha",
+    "-beta",
+    "+BETA",
+    " gamma",
+    "",
+  ].join("\n");
+  const variantPatch = [
+    "--- a/app/src/workers/atlas-database.ts",
+    "+++ b/app/src/workers/atlas-database.ts",
+    "@@",
+    " alpha",
+    "-outbox",
+    "+OUTBOX",
+    " gamma",
+    "",
+  ].join("\n");
+  const otherVariant = [
+    "--- a/app/src/workers/atlas-database.ts",
+    "+++ b/app/src/workers/atlas-database.ts",
+    "@@",
+    " alpha",
+    "-remove-old",
+    "+REMOVE",
+    " gamma",
+    "",
+  ].join("\n");
+  fs.writeFileSync(path.join(dir, "atlas-database.ts.patch"), mainPatch);
+  fs.writeFileSync(path.join(dir, "atlas-database.ts.v13.114.1.patch"), variantPatch);
+  fs.writeFileSync(path.join(dir, "atlas-database.ts.v13.117.2.patch"), otherVariant);
+  const families = pluginPatch.groupPatchFamilies([
+    path.join(dir, "atlas-database.ts.v13.117.2.patch"),
+    path.join(dir, "atlas-database.ts.patch"),
+    path.join(dir, "atlas-database.ts.v13.114.1.patch"),
+  ]);
+  assert.strictEqual(families.size, 1);
+  const order = [...families.values()][0].map((p) => path.basename(p));
+  assert.deepStrictEqual(order, [
+    "atlas-database.ts.patch",
+    "atlas-database.ts.v13.114.1.patch",
+    "atlas-database.ts.v13.117.2.patch",
+  ]);
+  const result = pluginPatch.applyRepoPatches(repo, ct);
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(fs.readFileSync(path.join(ct, rel), "utf8"), "alpha\nOUTBOX\ngamma\n");
 }
 const helloworld = normalized.plugins.find((p) => p.id === "helloworld");
 const udashHidden = normalized.plugins.find((p) => p.id === "udash");

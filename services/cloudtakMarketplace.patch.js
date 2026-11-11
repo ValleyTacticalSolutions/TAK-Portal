@@ -217,6 +217,72 @@ function listPatches(dir, out = []) {
   return out;
 }
 
+// Replay (v1.5.0+) ships layout variants next to the main patch:
+// atlas-database.ts.patch, atlas-database.ts.v13.114.1.patch, …
+const VARIANT_PATCH_RE = /\.v\d+(?:\.\d+)*\.patch$/i;
+
+function isVersionedPatchVariant(patchPath) {
+  return VARIANT_PATCH_RE.test(path.basename(String(patchPath || "")));
+}
+
+/** Main patch path for a family (variants collapse onto the non-.v name). */
+function patchFamilyKey(patchPath) {
+  const full = String(patchPath || "");
+  const base = path.basename(full);
+  if (!VARIANT_PATCH_RE.test(base)) return full;
+  return path.join(path.dirname(full), base.replace(VARIANT_PATCH_RE, ".patch"));
+}
+
+/**
+ * Group main + .v* alternatives the same way Replay install.sh does: try the
+ * main patch first, then each variant in name order, and use only the first
+ * that applies. Applying every atlas-database variant would corrupt the file.
+ */
+function groupPatchFamilies(patchPaths) {
+  const map = new Map();
+  for (const p of patchPaths || []) {
+    const key = patchFamilyKey(p);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(p);
+  }
+  for (const group of map.values()) {
+    group.sort((a, b) => {
+      const am = isVersionedPatchVariant(a) ? 1 : 0;
+      const bm = isVersionedPatchVariant(b) ? 1 : 0;
+      if (am !== bm) return am - bm;
+      return String(a).localeCompare(String(b));
+    });
+  }
+  return map;
+}
+
+/**
+ * Strict gate when choosing among layout variants: every meaningful "-" line
+ * in the patch must already appear in the checkout. The fuzzy drifted matcher
+ * can otherwise accept the main atlas-database patch against a later layout
+ * (anchors on shared context only) and never try .v13.114.1 / .v13.117.2.
+ */
+function patchMinusLinesPresent(sourceText, patchText) {
+  const src = new Set(
+    String(sourceText || "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\n$/, "")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((t) => isAnchor(t))
+  );
+  for (const file of parsePatch(patchText)) {
+    for (const hunk of file.hunks || []) {
+      for (const op of hunk.ops || []) {
+        if (op.kind !== "-") continue;
+        if (!isAnchor(op.text)) continue;
+        if (!src.has(String(op.text).trim())) return false;
+      }
+    }
+  }
+  return true;
+}
+
 /** Test / fixture targets are optional — runtime does not need them. */
 function isOptionalPatchTarget(target) {
   const t = String(target || "").replace(/\\/g, "/");
@@ -374,43 +440,77 @@ function wireCotsReplayFlag(ctRoot) {
 }
 
 function applyRepoPatches(repoDir, ctRoot) {
-  const patches = listPatches(repoDir);
+  const families = groupPatchFamilies(listPatches(repoDir));
   const skipped = [];
   const optionalSkipped = [];
   let applied = 0;
-  for (const patchPath of patches) {
-    const parsed = parsePatch(fs.readFileSync(patchPath, "utf8"));
-    for (const file of parsed) {
-      if (!file.target) continue;
-      const optional = isOptionalPatchTarget(file.target);
-      const target = path.join(ctRoot, file.target);
-      if (!fs.existsSync(target)) {
-        const msg = `${file.target}: target file is missing`;
-        if (optional) optionalSkipped.push(msg);
-        else skipped.push(msg);
+  for (const candidates of families.values()) {
+    let targetRel = "";
+    let optional = false;
+    for (const patchPath of candidates) {
+      const parsed = parsePatch(fs.readFileSync(patchPath, "utf8"));
+      const file = parsed.find((f) => f && f.target);
+      if (file && file.target) {
+        targetRel = file.target;
+        optional = isOptionalPatchTarget(file.target);
+        break;
+      }
+    }
+    if (!targetRel) {
+      skipped.push(`${path.basename(candidates[0] || "patch")}: no hunks`);
+      continue;
+    }
+    const target = path.join(ctRoot, targetRel);
+    if (!fs.existsSync(target)) {
+      const msg = `${targetRel}: target file is missing`;
+      if (optional) optionalSkipped.push(msg);
+      else skipped.push(msg);
+      continue;
+    }
+    const source = fs.readFileSync(target, "utf8");
+    let chosenPath = "";
+    let chosen = null;
+    const attemptSkipped = [];
+    const requireMinus = candidates.length > 1;
+    for (const patchPath of candidates) {
+      const patchText = fs.readFileSync(patchPath, "utf8");
+      if (requireMinus && !patchMinusLinesPresent(source, patchText)) {
+        attemptSkipped.push(
+          `${targetRel} variant ${path.basename(patchPath)}: checkout is missing lines this patch removes`
+        );
         continue;
       }
-      const source = fs.readFileSync(target, "utf8");
-      const result = applyPatchToText(source, fs.readFileSync(patchPath, "utf8"));
+      const result = applyPatchToText(source, patchText);
       // All-or-nothing per file. A later hunk can fail because upstream changed
       // behavior (Replay atlas-database.ts vs FeatureOutbox). Writing the hunks
       // that still matched would edit core delete/archive code the plugin refused.
       if (!result.ok) {
         if (result.applied && !optional) {
-          console.error(`ERROR: left ${file.target} unchanged; a required hunk did not apply`);
+          console.error(`ERROR: left ${targetRel} unchanged; a required hunk did not apply`);
         }
         for (const reason of result.skipped) {
-          const msg = `${file.target} ${reason}`;
-          if (optional) optionalSkipped.push(msg);
-          else skipped.push(msg);
+          attemptSkipped.push(`${targetRel} ${reason}`);
         }
         continue;
       }
-      if (result.applied) {
-        fs.writeFileSync(target, result.text);
-        applied += result.applied;
-        console.log(`Applied ${result.applied} drifted hunk(s) in ${file.target}`);
+      chosenPath = patchPath;
+      chosen = result;
+      break;
+    }
+    if (!chosen) {
+      for (const msg of attemptSkipped) {
+        if (optional) optionalSkipped.push(msg);
+        else skipped.push(msg);
       }
+      continue;
+    }
+    if (chosen.applied) {
+      fs.writeFileSync(target, chosen.text);
+      applied += chosen.applied;
+      const variantNote = isVersionedPatchVariant(chosenPath)
+        ? ` (variant ${path.basename(chosenPath)})`
+        : "";
+      console.log(`Applied ${chosen.applied} drifted hunk(s) in ${targetRel}${variantNote}`);
     }
   }
   const wired = wireCotsReplayFlag(ctRoot);
@@ -445,4 +545,8 @@ module.exports = {
   repairOrphanedCotsReplay,
   repairReplayDriftArtifacts,
   isOptionalPatchTarget,
+  isVersionedPatchVariant,
+  patchFamilyKey,
+  groupPatchFamilies,
+  patchMinusLinesPresent,
 };

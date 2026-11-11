@@ -2222,7 +2222,7 @@ function formatRemoteLogLine(line) {
 
 /**
  * Plugin install.sh support line. Keep the bash preflight in installRemoteScript
- * matched to these two shapes (Replay: "v13.109.3 through v13.113.0" and the
+ * matched to these two shapes (Replay: "v13.109.3 through v13.122.8" and the
  * "supports CloudTAK vX - vY" error). Empty when the plugin states no range.
  */
 function parsePluginCloudtakRange(text) {

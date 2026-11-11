@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 ## Version History
 
 ### v2.0.34 - IN PROGRESS
+🐛 `Bug Fix` - CloudTAK Marketplace drifted patch applicator picks one `atlas-database.ts` layout variant (main, then `.v*`) instead of applying every Replay v1.5.0 variant to the same file<br>
 🐛 `Bug Fix` - CloudTAK Marketplace install and uninstall continue when the server refuses a pseudo-terminal (#109)<br>
 ✨ `Enhancement` - Agencies - Modifying an agency's prefix/suffix is now allowed via the edit modal<br>
 ✨ `Enhancement` - Data Sync - Allows for multiple groups/channels to be selected for a DS Mission<br>
