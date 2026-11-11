@@ -254,8 +254,21 @@ function enrichMissionAssignmentMeta(mission) {
   const groupNames = extractMissionGroupNames(mission);
   if (!groupNames.length) return mission;
 
-  const assignedGroups = groupNames.map((n) => takDisplayName(n) || n).filter(Boolean);
-  const single = groupNames.length === 1 ? resolveAssignmentMetaForGroup(groupNames[0]) : null;
+  // Resolve through rename aliases so Channels column tracks Authentik renames
+  // even when Marti still holds a prior CN briefly (or after a missed propagate).
+  let aliasResolve = (n) => takDisplayName(n) || n;
+  try {
+    const groupRenameAlias = require("./groupRenameAlias.store");
+    aliasResolve = (n) => {
+      const resolved = groupRenameAlias.resolve(n);
+      return takDisplayName(resolved) || resolved || n;
+    };
+  } catch (_) {}
+
+  const assignedGroups = groupNames.map((n) => aliasResolve(n)).filter(Boolean);
+  const displayNames = groupNames.map((n) => aliasResolve(n));
+  const single =
+    displayNames.length === 1 ? resolveAssignmentMetaForGroup(displayNames[0]) : null;
   return {
     ...mission,
     assignedGroups,

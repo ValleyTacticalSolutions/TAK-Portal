@@ -261,6 +261,18 @@ router.get("/groups", async (req, res) => {
 
 router.get("/missions", async (req, res) => {
   try {
+    // Seed rename aliases from audit so Channels labels resolve after group renames,
+    // then rewrite any Marti missions still holding historical CNs (background).
+    try {
+      const groupRenameAlias = require("../services/groupRenameAlias.store");
+      await groupRenameAlias.backfillFromAudit();
+    } catch (_) {}
+    try {
+      require("../services/groupRenamePropagate.service")
+        .maybeRepairStaleMissionGroups()
+        .catch(() => {});
+    } catch (_) {}
+
     const authUser = req.authentikUser || null;
     const allowedKeySet = await dataSyncAccess.getAllowedCanonicalKeySet(authUser);
     const data = await dataSyncSvc.listMissions(req.query);

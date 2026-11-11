@@ -14,6 +14,7 @@ const dataSyncAccess = require("./dataSyncAccess.service");
 const dataPackagesSvc = require("./dataPackages.service");
 const channelPatchStore = require("./channelPatch.store");
 const mutualAidStore = require("./mutualAid.store");
+const groupRenameAlias = require("./groupRenameAlias.store");
 const { isTakConfigured } = require("./tak.service");
 const { getBool } = require("./env");
 
@@ -191,18 +192,21 @@ async function propagateToMissions(renameMap, opts = {}) {
   if (!renameMap.size) return result;
   if (getBool("TAK_BYPASS_ENABLED", false) || !isTakConfigured()) return result;
 
-  const waitMs = opts.waitForGroupsMs != null ? Number(opts.waitForGroupsMs) : 10000;
-  const newCns = [...renameMap.values()];
-  const groupsReady =
-    waitMs <= 0 ? await takHasAllGroupKeys(newCns.map(matchKey)) : await waitForTakGroupNames(newCns, {
+  // Soft wait only — Authentik is SoT; /api/groups/all can lag or omit CNs.
+  // Still attempt the mission rewrite so channels do not stay stranded.
+  const waitMs = opts.waitForGroupsMs != null ? Number(opts.waitForGroupsMs) : 8000;
+  const newCns = [...new Set([...renameMap.values()].map(toTakCn).filter(Boolean))];
+  if (waitMs > 0) {
+    const groupsReady = await waitForTakGroupNames(newCns, {
       timeoutMs: waitMs,
       intervalMs: opts.intervalMs,
     });
-  if (!groupsReady) {
-    console.warn(
-      "[groupRenamePropagate] New group CNs not yet visible in TAK; will retry mission updates:",
-      newCns.join(", ")
-    );
+    if (!groupsReady) {
+      console.warn(
+        "[groupRenamePropagate] New group CNs not yet listed by TAK; attempting mission updates anyway:",
+        newCns.join(", ")
+      );
+    }
   }
 
   let missions = [];
@@ -231,12 +235,6 @@ async function propagateToMissions(renameMap, opts = {}) {
     const current = dataSyncAccess.extractMissionGroupNames(full);
     const { next, changed } = rewriteGroupList(current, renameMap);
     if (!changed || !next.length) continue;
-
-    if (!groupsReady) {
-      // Avoid writing a CN TAK/LDAP does not know yet (often leaves the old name).
-      result.pending += 1;
-      continue;
-    }
 
     try {
       await dataSyncSvc.changeMission(name, buildMissionWriteBody(full, next));
@@ -306,6 +304,71 @@ async function propagateToPackages(renameMap) {
 
 /** Dedup in-flight deferred mission/package retries for the same rename set. */
 const pendingRetryFingerprints = new Set();
+
+let staleRepairInFlight = false;
+let staleRepairCompleted = false;
+
+/**
+ * One-shot per process: backfill aliases from audit, then rewrite any missions /
+ * packages / patches still holding historical CNs. Safe to call from list routes.
+ */
+async function maybeRepairStaleMissionGroups() {
+  if (staleRepairCompleted || staleRepairInFlight) return { skipped: true };
+  staleRepairInFlight = true;
+  try {
+    await groupRenameAlias.backfillFromAudit();
+    const aliases = groupRenameAlias.load();
+    const renameMap = normalizeRenameMap(aliases);
+    if (!renameMap.size) {
+      staleRepairCompleted = true;
+      return { renameCount: 0 };
+    }
+
+    const [missions, packages, channelPatches, mutualAid] = await Promise.all([
+      propagateToMissions(renameMap, { waitForGroupsMs: 0 }),
+      propagateToPackages(renameMap),
+      Promise.resolve(propagateToChannelPatches(renameMap)),
+      propagateToMutualAid(renameMap),
+    ]);
+
+    const needsDeferred =
+      Number(missions.errors) > 0 ||
+      Number(missions.pending) > 0 ||
+      Number(packages.errors) > 0 ||
+      Number(packages.pending) > 0;
+    if (needsDeferred) {
+      scheduleDeferredTakPropagate(renameMap);
+    } else {
+      staleRepairCompleted = true;
+    }
+
+    console.warn(
+      "[groupRenamePropagate] stale repair:",
+      `renames=${renameMap.size}`,
+      `missions updated=${missions.updated} errors=${missions.errors} pending=${missions.pending}`,
+      `packages updated=${packages.updated}`,
+      `patches updated=${channelPatches.updated}`,
+      `mutualAid updated=${mutualAid.updated}`
+    );
+
+    return {
+      renameCount: renameMap.size,
+      missions,
+      packages,
+      channelPatches,
+      mutualAid,
+      deferredScheduled: needsDeferred,
+    };
+  } catch (err) {
+    console.warn(
+      "[groupRenamePropagate] stale repair failed:",
+      err?.message || err
+    );
+    return { error: err?.message || String(err) };
+  } finally {
+    staleRepairInFlight = false;
+  }
+}
 
 /**
  * Authentik→LDAP→TAK can take up to ~60s. Keep trying mission/package rewrites
@@ -565,12 +628,77 @@ async function propagateToMutualAid(renameMap) {
 }
 
 /**
+ * Expand rename map with prior CNs for this group (aliases + audit history)
+ * so missions still holding an older name are rewritten to the latest CN.
+ */
+async function expandRenameMapForGroup(renameMap, opts = {}) {
+  const targetName = opts.targetName != null ? opts.targetName : [...renameMap.values()][0];
+  const targetCn = toTakCn(targetName);
+  const targetK = matchKey(targetCn);
+  let out = new Map(renameMap);
+  if (!targetK) return out;
+
+  try {
+    await groupRenameAlias.backfillFromAudit();
+  } catch (_) {}
+
+  out = groupRenameAlias.expandMap(out, targetCn);
+
+  if (opts.groupId) {
+    const historical = await groupRenameAlias.historicalNamesForGroup(opts.groupId);
+    for (const raw of historical) {
+      const k = matchKey(raw);
+      if (!k || k === targetK) continue;
+      out.set(k, targetCn);
+    }
+  }
+
+  // Ensure every value is the latest CN (collapse multi-hop maps).
+  for (const [k, v] of out) {
+    out.set(k, targetCn || toTakCn(v));
+  }
+  out.delete(targetK);
+  return out;
+}
+
+/**
  * Propagate one or many group renames into TAK missions/packages, patches, and Mutual Aid.
  * @param {Map|object|string} renameMapOrOldName
  * @param {string} [newName] when first arg is a single old name
+ * @param {{ groupId?: string, targetName?: string }} [opts]
  */
-async function propagateGroupRename(renameMapOrOldName, newName) {
-  const renameMap = normalizeRenameMap(renameMapOrOldName, newName);
+async function propagateGroupRename(renameMapOrOldName, newName, opts = {}) {
+  // Allow propagateGroupRename(map, { groupId, targetName })
+  if (
+    newName &&
+    typeof newName === "object" &&
+    !Array.isArray(newName) &&
+    !(newName instanceof Map)
+  ) {
+    opts = newName;
+    newName = undefined;
+  }
+
+  let renameMap = normalizeRenameMap(renameMapOrOldName, newName);
+  const targetName =
+    opts.targetName != null
+      ? opts.targetName
+      : newName != null
+        ? newName
+        : [...renameMap.values()][0];
+
+  if (opts.groupId || opts.targetName) {
+    renameMap = await expandRenameMapForGroup(renameMap, {
+      groupId: opts.groupId,
+      targetName,
+    });
+  }
+
+  // Persist aliases even when TAK is down so the Data Sync UI can resolve labels.
+  if (renameMap.size) {
+    groupRenameAlias.record(renameMap);
+  }
+
   const empty = {
     renameCount: renameMap.size,
     missions: { scanned: 0, updated: 0, errors: 0, pending: 0 },
@@ -623,10 +751,12 @@ module.exports = {
   formatMutualAidGroupName,
   groupKeysMatch,
   waitForTakGroupNames,
+  expandRenameMapForGroup,
   propagateToMissions,
   propagateToPackages,
   propagateToChannelPatches,
   propagateToMutualAid,
   propagateGroupRename,
   scheduleDeferredTakPropagate,
+  maybeRepairStaleMissionGroups,
 };

@@ -800,7 +800,8 @@ async function renameGroup(groupId, newName, opts = {}) {
   try {
     const groupRenamePropagate = require("./groupRenamePropagate.service");
     // Missions / packages store TAK CNs (no tak_). Include both Authentik name
-    // and the prior CN attribute so either shape still matches.
+    // and the prior CN attribute so either shape still matches. Audit/alias
+    // expand also picks up older names left behind by earlier failed propagates.
     const oldCnAttr = stripTakPrefix(
       normalizeCNValue(
         Object.prototype.hasOwnProperty.call(existingAttrs, "CN")
@@ -812,7 +813,10 @@ async function renameGroup(groupId, newName, opts = {}) {
     const renamePairs = new Map([[oldName, n]]);
     if (oldCnAttr) renamePairs.set(oldCnAttr, stripTakPrefix(n));
     renamePairs.set(stripTakPrefix(oldName), stripTakPrefix(n));
-    takRefs = await groupRenamePropagate.propagateGroupRename(renamePairs);
+    takRefs = await groupRenamePropagate.propagateGroupRename(renamePairs, {
+      groupId: id,
+      targetName: n,
+    });
   } catch (err) {
     console.warn(
       "[groups.renameGroup] Failed to propagate rename to Data Sync / packages:",

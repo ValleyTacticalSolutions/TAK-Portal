@@ -2,6 +2,9 @@
 
 const assert = require("assert");
 const propagate = require("../services/groupRenamePropagate.service");
+const groupRenameAlias = require("../services/groupRenameAlias.store");
+
+groupRenameAlias.resetForTests();
 
 (function testRewriteGroupList() {
   const map = propagate.normalizeRenameMap("tak_Old Ops", "New Ops");
@@ -245,7 +248,8 @@ const propagate = require("../services/groupRenamePropagate.service");
   console.log("groupRenamePropagate.test.js: ok");
 })()
   .then(async () => {
-    // When the new CN is not in TAK yet, do not rewrite missions (LDAP lag).
+    // Even when TAK has not listed the new CN yet, still attempt the rewrite.
+    groupRenameAlias.resetForTests();
     const prevTakUrl = process.env.TAK_URL;
     const prevBypass = process.env.TAK_BYPASS_ENABLED;
     process.env.TAK_URL = process.env.TAK_URL || "https://tak.test.example";
@@ -258,25 +262,30 @@ const propagate = require("../services/groupRenamePropagate.service");
       listGroupsAll: dataSyncSvc.listGroupsAll,
       changeMission: dataSyncSvc.changeMission,
     };
+    const mission = {
+      name: "Ops Mission",
+      groups: ["Old Ops"],
+      tool: "public",
+      description: "",
+      defaultRole: { type: "MISSION_SUBSCRIBER" },
+      keywords: [],
+    };
     let writes = 0;
-    dataSyncSvc.listMissions = async () => ({
-      data: [{ name: "Ops Mission", groups: ["Old Ops"], tool: "public" }],
-    });
-    dataSyncSvc.getMission = async () => ({
-      data: [{ name: "Ops Mission", groups: ["Old Ops"], tool: "public" }],
-    });
+    dataSyncSvc.listMissions = async () => ({ data: [{ ...mission }] });
+    dataSyncSvc.getMission = async () => ({ data: [{ ...mission }] });
     dataSyncSvc.listGroupsAll = async () => ({ data: ["Old Ops"] });
-    dataSyncSvc.changeMission = async () => {
+    dataSyncSvc.changeMission = async (name, body) => {
       writes += 1;
+      mission.groups = body.groups.slice();
       return {};
     };
 
     try {
       const map = propagate.normalizeRenameMap("Old Ops", "Renamed Ops");
       const result = await propagate.propagateToMissions(map, { waitForGroupsMs: 0 });
-      assert.strictEqual(writes, 0, "must not write before new CN exists in TAK");
-      assert.strictEqual(result.pending, 1);
-      assert.strictEqual(result.updated, 0);
+      assert.strictEqual(writes, 1, "must attempt rewrite even if TAK list lags");
+      assert.strictEqual(result.updated, 1);
+      assert.deepStrictEqual(mission.groups, ["Renamed Ops"]);
     } finally {
       dataSyncSvc.listMissions = orig.listMissions;
       dataSyncSvc.getMission = orig.getMission;
@@ -288,7 +297,84 @@ const propagate = require("../services/groupRenamePropagate.service");
       else process.env.TAK_BYPASS_ENABLED = prevBypass;
     }
 
-    console.log("groupRenamePropagate.test.js: pending-when-missing ok");
+    console.log("groupRenamePropagate.test.js: write-despite-lag ok");
+  })
+  .then(async () => {
+    // Historical / stranded CN on a mission is rewritten via alias expansion.
+    groupRenameAlias.resetForTests();
+    groupRenameAlias.record(new Map([["alpha channel", "Beta Channel"]]));
+    groupRenameAlias.record(new Map([["beta channel", "Gamma Channel"]]));
+
+    const prevTakUrl = process.env.TAK_URL;
+    const prevBypass = process.env.TAK_BYPASS_ENABLED;
+    process.env.TAK_URL = process.env.TAK_URL || "https://tak.test.example";
+    delete process.env.TAK_BYPASS_ENABLED;
+
+    const dataSyncSvc = require("../services/dataSync.service");
+    const dataPackagesSvc = require("../services/dataPackages.service");
+    const channelPatchStore = require("../services/channelPatch.store");
+    const mutualAidStore = require("../services/mutualAid.store");
+
+    const orig = {
+      listMissions: dataSyncSvc.listMissions,
+      getMission: dataSyncSvc.getMission,
+      listGroupsAll: dataSyncSvc.listGroupsAll,
+      changeMission: dataSyncSvc.changeMission,
+      listPackages: dataPackagesSvc.listDataPackages,
+      updateMeta: dataPackagesSvc.updateDataPackageMetadata,
+      listPatches: channelPatchStore.list,
+      updatePatch: channelPatchStore.update,
+      maLoad: mutualAidStore.load,
+      maSave: mutualAidStore.save,
+    };
+
+    const mission = {
+      name: "Stranded",
+      groups: ["Alpha Channel"],
+      tool: "public",
+      description: "",
+      defaultRole: { type: "MISSION_SUBSCRIBER" },
+      keywords: [],
+    };
+    dataSyncSvc.listMissions = async () => ({ data: [{ ...mission }] });
+    dataSyncSvc.getMission = async () => ({ data: [{ ...mission }] });
+    dataSyncSvc.listGroupsAll = async () => ({ data: ["Gamma Channel"] });
+    dataSyncSvc.changeMission = async (name, body) => {
+      mission.groups = body.groups.slice();
+      return {};
+    };
+    dataPackagesSvc.listDataPackages = async () => ({ items: [] });
+    channelPatchStore.list = () => [];
+    mutualAidStore.load = () => [];
+    mutualAidStore.save = () => {};
+
+    try {
+      const result = await propagate.propagateGroupRename(
+        new Map([["Beta Channel", "Gamma Channel"]]),
+        { targetName: "Gamma Channel" }
+      );
+      assert.ok(result.missions.updated >= 1, "stranded Alpha rewritten");
+      assert.deepStrictEqual(mission.groups, ["Gamma Channel"]);
+      assert.strictEqual(groupRenameAlias.resolve("Alpha Channel"), "Gamma Channel");
+    } finally {
+      dataSyncSvc.listMissions = orig.listMissions;
+      dataSyncSvc.getMission = orig.getMission;
+      dataSyncSvc.listGroupsAll = orig.listGroupsAll;
+      dataSyncSvc.changeMission = orig.changeMission;
+      dataPackagesSvc.listDataPackages = orig.listPackages;
+      dataPackagesSvc.updateDataPackageMetadata = orig.updateMeta;
+      channelPatchStore.list = orig.listPatches;
+      channelPatchStore.update = orig.updatePatch;
+      mutualAidStore.load = orig.maLoad;
+      mutualAidStore.save = orig.maSave;
+      groupRenameAlias.resetForTests();
+      if (prevTakUrl == null) delete process.env.TAK_URL;
+      else process.env.TAK_URL = prevTakUrl;
+      if (prevBypass == null) delete process.env.TAK_BYPASS_ENABLED;
+      else process.env.TAK_BYPASS_ENABLED = prevBypass;
+    }
+
+    console.log("groupRenamePropagate.test.js: stranded-alias ok");
   })
   .catch((err) => {
     console.error(err);
