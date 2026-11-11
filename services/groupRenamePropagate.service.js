@@ -3,6 +3,7 @@
  * - Data Sync missions (Marti mission groups)
  * - Data Packages / file-sync metadata groups
  * - Channel patch stored channel names + Data Sync apply ledger
+ * - Mutual Aid deployments linked to (or created as) that channel
  *
  * Best-effort: rename callers should not fail if TAK is down.
  */
@@ -12,6 +13,7 @@ const dataSyncSvc = require("./dataSync.service");
 const dataSyncAccess = require("./dataSyncAccess.service");
 const dataPackagesSvc = require("./dataPackages.service");
 const channelPatchStore = require("./channelPatch.store");
+const mutualAidStore = require("./mutualAid.store");
 const { isTakConfigured } = require("./tak.service");
 const { getBool } = require("./env");
 
@@ -282,8 +284,108 @@ function propagateToChannelPatches(renameMap) {
   return result;
 }
 
+/** Keep Authentik-shaped names when the MA row already used tak_. */
+function formatMutualAidGroupName(previousName, newCn) {
+  const prev = String(previousName || "").trim();
+  const cn = toTakCn(newCn);
+  if (!cn) return prev;
+  if (prev.toLowerCase().startsWith("tak_")) return groupsSvc.ensureTakPrefix(cn);
+  return cn;
+}
+
+async function patchMutualAidUserGroupAttr(userId, groupName) {
+  const id = String(userId || "").trim();
+  const name = String(groupName || "").trim();
+  if (!id || !name) return;
+  try {
+    const usersSvc = require("./users.service");
+    const user = await usersSvc.getUserById(id);
+    if (!user) return;
+    await usersSvc.enqueueLocalUserAttributePatch(user, {
+      ...(user.attributes || {}),
+      mutual_aid: true,
+      mutual_aid_group: name,
+    });
+  } catch (err) {
+    console.warn(
+      `[groupRenamePropagate] Failed to update mutual_aid_group for user ${id}:`,
+      err?.message || err
+    );
+  }
+}
+
 /**
- * Propagate one or many group renames into TAK missions/packages and portal patches.
+ * Rewrite Mutual Aid deployments that reference renamed channels
+ * (existing linked groups and MA-created groups alike).
+ */
+async function propagateToMutualAid(renameMap) {
+  const result = { scanned: 0, updated: 0, userAttrsUpdated: 0, errors: 0 };
+  if (!renameMap.size) return result;
+
+  let items = [];
+  try {
+    items = mutualAidStore.load().map((x) => (x && typeof x === "object" ? { ...x } : x));
+  } catch (err) {
+    console.warn(
+      "[groupRenamePropagate] Failed to list mutual aid items:",
+      err?.message || err
+    );
+    return result;
+  }
+
+  let dirty = false;
+  const userPatches = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (!item || typeof item !== "object") continue;
+    result.scanned += 1;
+    const prevName = String(item.groupName || "").trim();
+    if (!prevName) continue;
+    const key = matchKey(prevName);
+    if (!key || !renameMap.has(key)) continue;
+    const nextName = formatMutualAidGroupName(prevName, renameMap.get(key));
+    if (!nextName || matchKey(nextName) === key) continue;
+
+    items[i] = {
+      ...item,
+      groupName: nextName,
+      updatedAt: new Date().toISOString(),
+    };
+    dirty = true;
+    result.updated += 1;
+    if (item.userId) {
+      userPatches.push({ userId: item.userId, groupName: nextName });
+    }
+  }
+
+  if (dirty) {
+    try {
+      mutualAidStore.save(items);
+    } catch (err) {
+      result.errors += 1;
+      console.warn(
+        "[groupRenamePropagate] Failed to save mutual aid store:",
+        err?.message || err
+      );
+      return result;
+    }
+  }
+
+  for (const patch of userPatches) {
+    try {
+      await patchMutualAidUserGroupAttr(patch.userId, patch.groupName);
+      result.userAttrsUpdated += 1;
+    } catch (_) {
+      result.errors += 1;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Propagate one or many group renames into TAK missions/packages, patches, and Mutual Aid.
  * @param {Map|object|string} renameMapOrOldName
  * @param {string} [newName] when first arg is a single old name
  */
@@ -294,13 +396,15 @@ async function propagateGroupRename(renameMapOrOldName, newName) {
     missions: { scanned: 0, updated: 0, errors: 0 },
     packages: { scanned: 0, updated: 0, errors: 0 },
     channelPatches: { scanned: 0, updated: 0, errors: 0 },
+    mutualAid: { scanned: 0, updated: 0, userAttrsUpdated: 0, errors: 0 },
   };
   if (!renameMap.size) return empty;
 
-  const [missions, packages, channelPatches] = await Promise.all([
+  const [missions, packages, channelPatches, mutualAid] = await Promise.all([
     propagateToMissions(renameMap),
     propagateToPackages(renameMap),
     Promise.resolve(propagateToChannelPatches(renameMap)),
+    propagateToMutualAid(renameMap),
   ]);
 
   return {
@@ -308,6 +412,7 @@ async function propagateGroupRename(renameMapOrOldName, newName) {
     missions,
     packages,
     channelPatches,
+    mutualAid,
   };
 }
 
@@ -316,8 +421,10 @@ module.exports = {
   toTakCn,
   normalizeRenameMap,
   rewriteGroupList,
+  formatMutualAidGroupName,
   propagateToMissions,
   propagateToPackages,
   propagateToChannelPatches,
+  propagateToMutualAid,
   propagateGroupRename,
 };
