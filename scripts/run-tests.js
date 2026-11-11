@@ -28,6 +28,7 @@ const TEST_FILES = [
   "dataPackages.uploadGroups.test.js",
   "directoryOutbox.createUser.test.js",
   "channelPatch.access.test.js",
+  "channelPatch.dataSync.test.js",
   "channelPatch.engine.test.js",
   "channelPatch.persist.test.js",
   "locatorForm.test.js",

@@ -1143,9 +1143,11 @@ app.get("/locate", requirePermission("page.locate"), (req, res) =>
   })
 );
 
-app.get("/data-sync", requirePermission("page.data_sync"), (req, res) =>
-  res.render("data-sync")
-);
+app.get("/data-sync", requirePermission("page.data_sync"), (req, res) => {
+  const canSeeChannelPatch =
+    typeof res.locals.perm !== "function" || res.locals.perm("page.channel_patch");
+  return res.render("data-sync", { canSeeChannelPatch });
+});
 
 // Public share link for a locator (no auth)
 app.get("/locate/:slug", (req, res) => {

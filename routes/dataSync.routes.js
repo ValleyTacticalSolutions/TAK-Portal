@@ -10,6 +10,7 @@ const { getBool } = require("../services/env");
 const dataSyncSvc = require("../services/dataSync.service");
 const dataSyncAccess = require("../services/dataSyncAccess.service");
 const dataPackagesSvc = require("../services/dataPackages.service");
+const channelPatchDataSync = require("../services/channelPatchDataSync.service");
 const auditSvc = require("../services/auditLog.service");
 
 const router = express.Router();
@@ -271,7 +272,9 @@ router.get("/missions", async (req, res) => {
         : Array.isArray(filtered)
           ? filtered
           : [];
-      const enriched = dataSyncAccess.enrichMissionListAssignmentMeta(list);
+      const enriched = channelPatchDataSync.annotateMissionsWithPatchPeers(
+        dataSyncAccess.enrichMissionListAssignmentMeta(list)
+      );
       return res.json({
         ...filtered,
         data: enriched,
@@ -282,7 +285,8 @@ router.get("/missions", async (req, res) => {
         },
       });
     }
-    return res.json(dataSyncAccess.enrichMissionsPayloadAssignmentMeta(filtered));
+    const enriched = dataSyncAccess.enrichMissionsPayloadAssignmentMeta(filtered);
+    return res.json(channelPatchDataSync.annotateMissionsPayloadWithPatchPeers(enriched));
   } catch (err) {
     return handleRouteError(res, err);
   }

@@ -236,6 +236,13 @@
   .data-sync-channel-item + .data-sync-channel-item {
     margin-top: 2px;
   }
+  .data-sync-patched-text {
+    font-size: 11px;
+    margin-top: 2px;
+    white-space: normal;
+    color: #c2410c;
+    font-weight: 600;
+  }
   .mission-action-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .muted { color: var(--muted); }
 
@@ -391,6 +398,7 @@
   var ARCHIVED_KEYWORD = "ARCHIVED_MISSION";
   var DATA_SYNC_KEYWORD = "datasync";
   var DATA_SYNC_KIND = "data_sync";
+  var CAN_SEE_CHANNEL_PATCH = <%= (typeof canSeeChannelPatch !== "undefined" && canSeeChannelPatch) ? "true" : "false" %>;
 
   var statusBanner = document.getElementById("statusBanner");
   var missionsMsg = document.getElementById("missionsMsg");
@@ -1033,6 +1041,10 @@
     var groupNames = missionGroupNames(m);
     if (!groupNames.length) return false;
     var channelNames = missionChannelDisplayNames(m);
+    var patchedWithLabel =
+      CAN_SEE_CHANNEL_PATCH && Array.isArray(m.patchedWith) && m.patchedWith.length
+        ? m.patchedWith.join(", ")
+        : "";
 
     var pw = m.passwordProtected === true ? "Yes" : "No";
     var ct = m.createTime ? String(m.createTime) : "";
@@ -1044,6 +1056,12 @@
     var nameSubLines = "";
     if (agencyName) {
       nameSubLines += "<div class=\"data-sync-mission-sub\">Agency: " + esc(agencyName) + "</div>";
+    }
+    if (patchedWithLabel) {
+      nameSubLines +=
+        "<div class=\"data-sync-patched-text\">Channel Patched With " +
+        esc(patchedWithLabel) +
+        "</div>";
     }
 
     var tr = document.createElement("tr");

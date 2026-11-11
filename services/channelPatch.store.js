@@ -107,6 +107,34 @@ function normalizeDirection(raw) {
   return "ltr";
 }
 
+/** Mission name → group CNs this patch added to that Data Sync. */
+function normalizeDataSyncApplied(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [missionName, groups] of Object.entries(raw)) {
+    const name = safeStr(missionName).trim();
+    if (!name) continue;
+    const list = [];
+    const seen = new Set();
+    for (const item of Array.isArray(groups) ? groups : []) {
+      const label = groupDisplayLabel(
+        typeof item === "string" || typeof item === "number"
+          ? item
+          : item && typeof item === "object"
+            ? item.group || item.name || item.groupName
+            : ""
+      );
+      if (!label) continue;
+      const key = groupMatchKey(label);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      list.push(label);
+    }
+    if (list.length) out[name] = list;
+  }
+  return out;
+}
+
 /**
  * Resolved traffic ends for a patch.
  * @returns {{ sources: string[], destinations: string[] }}
@@ -207,6 +235,7 @@ function normalizePatch(raw, { assignId = false } = {}) {
   if (!id) return null;
 
   const now = new Date().toISOString();
+  const dataSyncApplied = normalizeDataSyncApplied(raw.dataSyncApplied);
   const base = {
     id,
     name: safeStr(raw.name).trim() || "Untitled Patch",
@@ -220,6 +249,7 @@ function normalizePatch(raw, { assignId = false } = {}) {
       : [],
     lastForwardAt: safeStr(raw.lastForwardAt).trim() || null,
     lastError: safeStr(raw.lastError).trim() || null,
+    dataSyncApplied,
   };
 
   if (mode === "unidirectional") {
@@ -389,6 +419,12 @@ function update(id, patchFields) {
     !Object.prototype.hasOwnProperty.call(patchFields, "lastError")
   ) {
     next.lastError = prev.lastError || null;
+  }
+  if (
+    patchFields &&
+    !Object.prototype.hasOwnProperty.call(patchFields, "dataSyncApplied")
+  ) {
+    next.dataSyncApplied = normalizeDataSyncApplied(prev.dataSyncApplied);
   }
 
   items[idx] = next;

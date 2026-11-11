@@ -7,7 +7,28 @@ const store = require("../services/channelPatch.store");
 const engine = require("../services/channelPatch.engine");
 const auditSvc = require("../services/auditLog.service");
 const channelPatchAccess = require("../services/channelPatchAccess.service");
+const channelPatchDataSync = require("../services/channelPatchDataSync.service");
 const { toSafeApiError } = require("../services/apiErrorPayload.service");
+
+function patchGroupsSignature(patch) {
+  const mode = store.normalizeMode(patch || {});
+  const parts = [mode, patch && patch.enabled !== false ? "1" : "0"];
+  if (mode === "unidirectional") {
+    parts.push(
+      (Array.isArray(patch?.leftGroups) ? patch.leftGroups : []).join("\0"),
+      (Array.isArray(patch?.rightGroups) ? patch.rightGroups : []).join("\0"),
+      store.normalizeDirection(patch)
+    );
+  } else {
+    parts.push((Array.isArray(patch?.groups) ? patch.groups : []).join("\0"));
+  }
+  return parts.join("|");
+}
+
+function shouldSyncDataSyncs(before, after) {
+  if (!before || !after) return true;
+  return patchGroupsSignature(before) !== patchGroupsSignature(after);
+}
 
 function toErrorPayload(err) {
   return toSafeApiError(err);
@@ -145,23 +166,28 @@ router.post("/", async (req, res) => {
     }
 
     const patch = store.create(createInput, actorLabel(authUser));
+    await channelPatchDataSync.syncDataSyncsForPatchChange({
+      before: null,
+      after: patch,
+    });
+    const synced = store.getById(patch.id) || patch;
 
     auditSvc.auditFromRequest(req, {
       action: "CHANNEL_PATCH_CREATED",
       targetType: "channel_patch",
-      targetId: patch.id,
+      targetId: synced.id,
       details: {
-        name: patch.name,
-        mode: patch.mode,
-        direction: patch.direction || null,
-        groups: patch.groups,
-        leftGroups: patch.leftGroups || null,
-        rightGroups: patch.rightGroups || null,
-        summary: `Created channel patch ${patch.name}.`,
+        name: synced.name,
+        mode: synced.mode,
+        direction: synced.direction || null,
+        groups: synced.groups,
+        leftGroups: synced.leftGroups || null,
+        rightGroups: synced.rightGroups || null,
+        summary: `Created channel patch ${synced.name}.`,
       },
     });
 
-    res.status(201).json(enrichPatch(patch));
+    res.status(201).json(enrichPatch(synced));
   } catch (err) {
     const status = err.status || 500;
     res.status(status).json({ error: toErrorPayload(err) });
@@ -235,24 +261,31 @@ router.patch("/:id", async (req, res) => {
     }
 
     const patch = store.update(req.params.id, fields);
+    if (shouldSyncDataSyncs(existing, patch)) {
+      await channelPatchDataSync.syncDataSyncsForPatchChange({
+        before: existing,
+        after: patch,
+      });
+    }
+    const synced = store.getById(patch.id) || patch;
 
     auditSvc.auditFromRequest(req, {
       action: "CHANNEL_PATCH_UPDATED",
       targetType: "channel_patch",
-      targetId: patch.id,
+      targetId: synced.id,
       details: {
-        name: patch.name,
-        enabled: patch.enabled,
-        mode: patch.mode,
-        direction: patch.direction || null,
-        groups: patch.groups,
-        leftGroups: patch.leftGroups || null,
-        rightGroups: patch.rightGroups || null,
-        summary: `Updated channel patch ${patch.name}.`,
+        name: synced.name,
+        enabled: synced.enabled,
+        mode: synced.mode,
+        direction: synced.direction || null,
+        groups: synced.groups,
+        leftGroups: synced.leftGroups || null,
+        rightGroups: synced.rightGroups || null,
+        summary: `Updated channel patch ${synced.name}.`,
       },
     });
 
-    res.json(enrichPatch(patch));
+    res.json(enrichPatch(synced));
   } catch (err) {
     const status = err.status || 500;
     res.status(status).json({ error: toErrorPayload(err) });
@@ -279,6 +312,10 @@ router.delete("/:id", async (req, res) => {
       return hideOutOfScopePatch(res);
     }
 
+    await channelPatchDataSync.syncDataSyncsForPatchChange({
+      before: existing,
+      after: null,
+    });
     store.remove(req.params.id);
 
     auditSvc.auditFromRequest(req, {
