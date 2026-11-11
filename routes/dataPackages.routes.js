@@ -40,6 +40,13 @@ function sendTakError(res, err, fallbackStatus) {
   if (code === "NOT_FOUND") {
     return res.status(404).json({ error: err.message, code });
   }
+  if (code === "SIBLING_RESTORE_FAILED") {
+    return res.status(502).json({
+      error: err.message,
+      code,
+      details: err.details,
+    });
+  }
   const status = err?.response?.status;
   const outStatus =
     typeof status === "number" && status >= 400 && status < 600 ? status : fallbackStatus || 502;
@@ -345,8 +352,13 @@ router.delete("/packages/:hash", async (req, res) => {
     const fileNameHint = fileNameFromRequest(req, req.body);
     await dataSyncAccess.assertDataPackageAllowed(authUser, hash, { fileName: fileNameHint });
     const label = await resolveDataPackageLabel(hash, fileNameHint);
-    const out = await dataPackagesSvc.deleteDataPackage(hash);
-    auditDataPackage(req, "DATA_PACKAGE_DELETED", hash, { fileName: label });
+    // Pass name so hash twins are re-uploaded after Marti's content-addressed delete.
+    const out = await dataPackagesSvc.deleteDataPackage(hash, { fileName: fileNameHint || label });
+    auditDataPackage(req, "DATA_PACKAGE_DELETED", hash, {
+      fileName: label,
+      restoredCount: out && out.restoredCount,
+      twinCount: out && out.twinCount,
+    });
     return res.json(out || { ok: true });
   } catch (err) {
     return handleRouteError(res, err);

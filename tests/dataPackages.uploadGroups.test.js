@@ -13,6 +13,7 @@ const {
   parseExpirationMillis,
   pickPackageRecord,
   packageNamesEqual,
+  planContentAddressedDelete,
 } = dataPackagesSvc;
 
 assert.deepStrictEqual(normalizeGroupsList([" FL Interop ", "", "DAVIS Main"]), [
@@ -144,6 +145,33 @@ assert.strictEqual(
   pickPackageRecord(twinRows, { hash: twinHash }).filename,
   "TDOT Cameras - Test",
   "hash-only lookup may use first row"
+);
+
+const simplePlan = planContentAddressedDelete(twinRows, {
+  hash: twinHash,
+  name: "",
+});
+assert.strictEqual(simplePlan.mode, "simple");
+assert.strictEqual(simplePlan.keep.length, 0);
+
+const twinPlan = planContentAddressedDelete(twinRows, {
+  hash: twinHash,
+  name: "TDOT Cameras - Test",
+});
+assert.strictEqual(twinPlan.mode, "restore_siblings");
+assert.strictEqual(twinPlan.keep.length, 1);
+assert.strictEqual(twinPlan.keep[0].filename, "TDOT Cameras - Chattanooga");
+
+const missingPlan = planContentAddressedDelete(twinRows, {
+  hash: twinHash,
+  name: "Does Not Exist",
+});
+assert.strictEqual(missingPlan.mode, "missing");
+
+assert.ok(
+  /deleteDataPackage\(hash,\s*\{\s*fileName/.test(routeSrc) ||
+    /deleteDataPackage\(\s*hash,\s*\{\s*fileName/.test(routeSrc),
+  "delete route must pass fileName so hash twins are preserved"
 );
 
 console.log("dataPackages.uploadGroups.test.js: ok");

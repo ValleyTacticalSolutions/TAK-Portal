@@ -341,7 +341,85 @@ async function listDataPackages(query = {}) {
   };
 }
 
-async function deleteDataPackage(hash) {
+/**
+ * Marti Enterprise Sync is content-addressed: DELETE /files/{hash} removes the
+ * shared bytes and every File Manager row that points at that hash.
+ * When a name is provided and other rows share the hash, delete then re-upload
+ * the siblings so only the named package stays gone.
+ */
+function planContentAddressedDelete(records, { hash, name } = {}) {
+  const h = String(hash || "")
+    .trim()
+    .toLowerCase();
+  const wantName = String(name || "").trim();
+  const twins = (Array.isArray(records) ? records : []).filter((item) => {
+    const itemHash = String(item?.hash || item?.Hash || "")
+      .trim()
+      .toLowerCase();
+    return h && itemHash === h;
+  });
+  if (!twins.length) {
+    return { mode: "simple", target: null, keep: [], twins: [] };
+  }
+  if (!wantName || twins.length === 1) {
+    return { mode: "simple", target: twins[0] || null, keep: [], twins };
+  }
+  const target = pickPackageRecord(twins, { hash: h, name: wantName });
+  if (!target) {
+    return { mode: "missing", target: null, keep: twins, twins };
+  }
+  const keep = twins.filter(
+    (item) => !packageNamesEqual(packageRecordTitle(item), wantName)
+  );
+  if (!keep.length) {
+    return { mode: "simple", target, keep: [], twins };
+  }
+  return { mode: "restore_siblings", target, keep, twins };
+}
+
+async function deleteDataPackageByHash(hash) {
+  const h = String(hash || "").trim();
+  const client = buildTakOriginAxios({ timeout: 60000 });
+  const res = await client.delete(`/Marti/api/files/${encodeURIComponent(h)}`, {
+    validateStatus: (s) => (s >= 200 && s < 300) || s === 404,
+  });
+  if (res.status === 404) return { ok: true, alreadyGone: true };
+  return res.data || { ok: true };
+}
+
+async function restoreDeletedSiblingPackage(buffer, record) {
+  const title = packageRecordTitle(record) || "data-package";
+  const groups = normalizeGroupsList(record.groups || record.Groups);
+  const keywords = normalizeKeywordList(
+    record.keywords || record.Keywords || "missionpackage"
+  );
+  const tool = String(record.tool || record.Tool || "public").trim() || "public";
+  const mimeType = String(
+    record.mime_type || record.mimeType || record.MimeType || "application/zip"
+  ).trim();
+  const uploadOut = await uploadDataPackage(buffer, title, {
+    mimeType,
+    keywords: keywords.length ? keywords : ["missionpackage"],
+    tool,
+    groups,
+  });
+  const hash =
+    extractUploadHash(uploadOut) ||
+    crypto.createHash("sha256").update(buffer).digest("hex");
+  const metaPatch = { title };
+  const expirationMs = parseExpirationMillis(
+    record.expiration != null ? record.expiration : record.Expiration
+  );
+  if (expirationMs != null) metaPatch.expiration = expirationMs;
+  try {
+    await updateDataPackageMetadata(hash, metaPatch);
+  } catch (_) {
+    /* best-effort metadata after restore */
+  }
+  return { hash, title, groups };
+}
+
+async function deleteDataPackage(hash, options = {}) {
   await assertTakAvailable();
   const h = String(hash || "").trim();
   if (!h) {
@@ -349,12 +427,72 @@ async function deleteDataPackage(hash) {
     e.code = "INVALID_HASH";
     throw e;
   }
-  const client = buildTakOriginAxios({ timeout: 60000 });
-  const res = await client.delete(`/Marti/api/files/${encodeURIComponent(h)}`, {
-    validateStatus: (s) => (s >= 200 && s < 300) || s === 404,
+  const nameHint = String(
+    options.name || options.filename || options.fileName || options.title || ""
+  ).trim();
+
+  let plan = { mode: "simple", target: null, keep: [], twins: [] };
+  try {
+    // Full list (not hash-filtered): Marti may collapse hash queries to one row
+    // even when File Manager shows multiple names for the same content.
+    const listed = await listDataPackages({});
+    plan = planContentAddressedDelete(listed.items || [], { hash: h, name: nameHint });
+  } catch (err) {
+    dbg("delete twin scan failed; falling back to hash delete", err?.message || err);
+  }
+
+  if (plan.mode === "missing") {
+    const e = new Error("Data package not found for that hash and name.");
+    e.code = "NOT_FOUND";
+    throw e;
+  }
+
+  if (plan.mode !== "restore_siblings") {
+    const out = await deleteDataPackageByHash(h);
+    return {
+      ...(out && typeof out === "object" ? out : { ok: true }),
+      deletedName: nameHint || packageRecordTitle(plan.target) || undefined,
+      twinCount: plan.twins.length || undefined,
+    };
+  }
+
+  // Download once, delete shared content, re-upload every sibling we must keep.
+  const buffer = await downloadDataPackageBuffer(h, {
+    maxBytes: 512 * 1024 * 1024,
   });
-  if (res.status === 404) return { ok: true, alreadyGone: true };
-  return res.data || { ok: true };
+  await deleteDataPackageByHash(h);
+
+  const restored = [];
+  const restoreErrors = [];
+  for (const sibling of plan.keep) {
+    try {
+      restored.push(await restoreDeletedSiblingPackage(buffer, sibling));
+    } catch (err) {
+      restoreErrors.push({
+        name: packageRecordTitle(sibling),
+        error: err?.message || String(err),
+      });
+    }
+  }
+
+  if (restoreErrors.length) {
+    const e = new Error(
+      "Deleted package, but failed to restore " +
+        restoreErrors.length +
+        " sibling package(s) that shared the same file content."
+    );
+    e.code = "SIBLING_RESTORE_FAILED";
+    e.details = { restored, restoreErrors };
+    throw e;
+  }
+
+  return {
+    ok: true,
+    deletedName: nameHint || packageRecordTitle(plan.target) || undefined,
+    twinCount: plan.twins.length,
+    restoredCount: restored.length,
+    restored,
+  };
 }
 
 async function downloadDataPackageStream(hash) {
@@ -846,6 +984,7 @@ module.exports = {
   packageNamesEqual,
   packageRecordTitle,
   pickPackageRecord,
+  planContentAddressedDelete,
   zipDownloadFilename,
   safeFilename,
 };
