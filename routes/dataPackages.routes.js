@@ -376,21 +376,34 @@ router.put("/packages/:hash/metadata", async (req, res) => {
       await assertWriteGroups(req, groups);
     }
     const title = String(body.title || body.name || body.filename || "").trim();
+    const hasExpiration = Object.prototype.hasOwnProperty.call(body, "expiration");
+    const expirationMs = hasExpiration
+      ? dataPackagesSvc.parseExpirationMillis(body.expiration)
+      : undefined;
+    if (expirationMs != null && expirationMs <= Date.now()) {
+      return res.status(400).json({
+        error: "Expiration date/time must be in the future.",
+        code: "INVALID_EXPIRATION",
+      });
+    }
     const action = resolveDataPackageMetadataAction(keywords);
-    const out = await dataPackagesSvc.updateDataPackageMetadata(hash, {
+    const metaPatch = {
       tool: body.tool,
       keywords: body.keywords,
       groups,
       title: title || undefined,
       installOnEnrollment: body.installOnEnrollment,
       installOnConnection: body.installOnConnection,
-    });
+    };
+    if (hasExpiration && expirationMs != null) metaPatch.expiration = expirationMs;
+    const out = await dataPackagesSvc.updateDataPackageMetadata(hash, metaPatch);
     auditDataPackage(req, action, hash, {
       fileName: title || label,
       tool: body.tool,
       keywords: normalizeKeywordList(keywords),
       groups,
       title: title || undefined,
+      expiration: hasExpiration ? expirationMs || undefined : undefined,
       installOnEnrollment: body.installOnEnrollment,
       installOnConnection: body.installOnConnection,
     });
