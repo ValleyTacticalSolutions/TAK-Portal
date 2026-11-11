@@ -367,6 +367,42 @@ function persistPatchApplied(patchId, appliedMap) {
   }
 }
 
+function patchChannelCns(patch) {
+  return Array.from(patchGroupCnByKey(patch).values());
+}
+
+function desiredGroupsFromOriginal(originalGroups, patch) {
+  return uniqueCns([...(Array.isArray(originalGroups) ? originalGroups : []), ...patchChannelCns(patch)]);
+}
+
+function groupsEqual(a, b) {
+  const ak = uniqueCns(a).map(matchKey).filter(Boolean).sort();
+  const bk = uniqueCns(b).map(matchKey).filter(Boolean).sort();
+  if (ak.length !== bk.length) return false;
+  for (let i = 0; i < ak.length; i++) {
+    if (ak[i] !== bk[i]) return false;
+  }
+  return true;
+}
+
+async function loadMissionByName(name) {
+  try {
+    const raw = await dataSyncSvc.getMission(name);
+    return dataSyncAccess.unwrapMission(raw);
+  } catch (err) {
+    console.warn(
+      `[channelPatchDataSync] Mission ${name} missing:`,
+      err?.message || err
+    );
+    return null;
+  }
+}
+
+/**
+ * Apply patch channels onto Data Syncs.
+ * Re-applies missions remembered in the ledger first (disable → re-enable),
+ * then scans for any newly intersecting missions.
+ */
 async function applyPatchToDataSyncs(patch) {
   if (!patch || patch.enabled === false) {
     return { applied: {}, changed: [] };
@@ -375,13 +411,51 @@ async function applyPatchToDataSyncs(patch) {
     return { applied: normalizeAppliedMap(patch.dataSyncApplied), changed: [] };
   }
 
-  const missions = await listAllMissionsSafe();
+  const prior = normalizeAppliedMap(patch.dataSyncApplied);
   const applied = {};
   const changed = [];
+  const handled = new Set();
 
+  for (const [name, entry] of Object.entries(prior)) {
+    handled.add(name.toLowerCase());
+    let mission = await loadMissionByName(name);
+    if (!mission) continue;
+    const current = dataSyncAccess.extractMissionGroupNames(mission);
+    const addedKeys = new Set(entry.added.map(matchKey).filter(Boolean));
+    const original = uniqueCns(
+      entry.original.length
+        ? entry.original
+        : current.filter((n) => {
+            const k = matchKey(n);
+            return k && !addedKeys.has(k);
+          })
+    );
+    if (!original.length && !current.length) continue;
+    const base = original.length ? original : uniqueCns(current);
+    const baseKeys = new Set(base.map(matchKey).filter(Boolean));
+    const desired = desiredGroupsFromOriginal(base, patch);
+    const added = desired.filter((g) => {
+      const k = matchKey(g);
+      return k && !baseKeys.has(k);
+    });
+    try {
+      if (!groupsEqual(current, desired)) {
+        await setMissionGroups(mission, desired);
+        changed.push(name);
+      }
+      applied[name] = { original: base.slice(), added: uniqueCns(added) };
+    } catch (err) {
+      console.warn(
+        `[channelPatchDataSync] Failed to re-apply patch channels on mission ${name}:`,
+        err?.message || err
+      );
+    }
+  }
+
+  const missions = await listAllMissionsSafe();
   for (const mission of missions) {
     const name = missionNameOf(mission);
-    if (!name) continue;
+    if (!name || handled.has(name.toLowerCase())) continue;
     const plan = planAdditionsForMission(mission, patch);
     if (!plan.add.length) continue;
     try {
@@ -492,8 +566,12 @@ async function unapplyPatchFromDataSyncs(patch) {
 }
 
 /**
- * Sync Data Sync missions after a patch create/update/delete.
+ * Sync Data Sync missions after a patch create/update/delete/enable/disable.
  * Best-effort: patch persistence already succeeded; TAK errors are logged.
+ *
+ * Disable → restore remembered originals (ledger kept for re-enable).
+ * Re-enable → re-apply from that ledger, then scan for new intersections.
+ * Delete → restore originals (caller removes the patch afterward).
  *
  * @param {{ before?: object|null, after?: object|null }} change
  *   before = prior row (null on create); after = new row (null on delete)
@@ -506,19 +584,27 @@ async function syncDataSyncsForPatchChange({ before = null, after = null } = {})
   };
 
   try {
-    if (before && before.enabled !== false) {
+    const beforeOn = !!(before && before.enabled !== false);
+    const afterOn = !!(after && after.enabled !== false);
+
+    // Enabled → disabled, or enabled → deleted/changed: strip this patch's channels.
+    if (beforeOn) {
       const out = await unapplyPatchFromDataSyncs(before);
       result.unapplied = out.changed;
     }
 
-    if (after && after.enabled !== false) {
-      const out = await applyPatchToDataSyncs(after);
+    if (afterOn) {
+      // Carry ledger forward on re-enable so the same missions are restored.
+      const seed =
+        !beforeOn && before && before.id && after && after.id === before.id
+          ? { ...after, dataSyncApplied: before.dataSyncApplied || after.dataSyncApplied }
+          : after;
+      const out = await applyPatchToDataSyncs(seed);
       result.applied = out.changed;
       result.dataSyncApplied = out.applied;
       persistPatchApplied(after.id, out.applied);
-    } else if (before && before.id && after && after.enabled === false) {
-      persistPatchApplied(after.id, {});
     }
+    // Keep ledger while disabled so re-enable can target the same Data Syncs.
   } catch (err) {
     console.warn(
       "[channelPatchDataSync] syncDataSyncsForPatchChange failed:",

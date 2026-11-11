@@ -204,4 +204,114 @@ const channelPatchStore = require("../services/channelPatch.store");
   assert.deepStrictEqual(body.keywords, ["datasync"]);
 })();
 
-console.log("channelPatch.dataSync.test.js: ok");
+(async function testDisableUnappliesAndReenableReapplies() {
+  const prevTakUrl = process.env.TAK_URL;
+  const prevBypass = process.env.TAK_BYPASS_ENABLED;
+  process.env.TAK_URL = process.env.TAK_URL || "https://tak.test.example";
+  delete process.env.TAK_BYPASS_ENABLED;
+
+  const dataSyncSvc = require("../services/dataSync.service");
+  const store = require("../services/channelPatch.store");
+
+  let missionGroups = ["Alpha Ops"];
+  let persistedApplied = {};
+  const orig = {
+    list: dataSyncSvc.listMissions,
+    get: dataSyncSvc.getMission,
+    change: dataSyncSvc.changeMission,
+    listEnabled: store.listEnabled,
+    update: store.update,
+  };
+
+  function missionPayload() {
+    return {
+      name: "Ops Mission",
+      groups: missionGroups.slice(),
+      tool: "public",
+      description: "",
+      defaultRole: { type: "MISSION_SUBSCRIBER" },
+      keywords: [],
+    };
+  }
+
+  dataSyncSvc.listMissions = async () => ({ data: [missionPayload()] });
+  dataSyncSvc.getMission = async () => missionPayload();
+  dataSyncSvc.changeMission = async (_name, body) => {
+    missionGroups = Array.isArray(body.groups) ? body.groups.slice() : [];
+    return {};
+  };
+  store.listEnabled = () => [];
+  store.update = (id, fields) => {
+    if (fields && Object.prototype.hasOwnProperty.call(fields, "dataSyncApplied")) {
+      persistedApplied = fields.dataSyncApplied || {};
+    }
+    return { id, ...(fields || {}) };
+  };
+
+  try {
+    const patchBase = {
+      id: "p-toggle",
+      name: "Toggle Patch",
+      enabled: true,
+      mode: "bidirectional",
+      groups: ["Alpha Ops", "Beta Tac"],
+      dataSyncApplied: {},
+    };
+
+    await channelPatchDataSync.syncDataSyncsForPatchChange({
+      before: null,
+      after: patchBase,
+    });
+    assert.deepStrictEqual(
+      missionGroups.slice().sort(),
+      ["Alpha Ops", "Beta Tac"],
+      "enable adds patched channels"
+    );
+    assert.ok(persistedApplied["Ops Mission"], "ledger recorded");
+    assert.deepStrictEqual(persistedApplied["Ops Mission"].original, ["Alpha Ops"]);
+    assert.deepStrictEqual(persistedApplied["Ops Mission"].added, ["Beta Tac"]);
+
+    const enabledWithLedger = {
+      ...patchBase,
+      dataSyncApplied: persistedApplied,
+    };
+    await channelPatchDataSync.syncDataSyncsForPatchChange({
+      before: enabledWithLedger,
+      after: { ...enabledWithLedger, enabled: false },
+    });
+    assert.deepStrictEqual(
+      missionGroups,
+      ["Alpha Ops"],
+      "disable restores original channels"
+    );
+    assert.ok(
+      persistedApplied["Ops Mission"],
+      "ledger kept while disabled for re-enable"
+    );
+
+    await channelPatchDataSync.syncDataSyncsForPatchChange({
+      before: { ...enabledWithLedger, enabled: false },
+      after: { ...enabledWithLedger, enabled: true },
+    });
+    assert.deepStrictEqual(
+      missionGroups.slice().sort(),
+      ["Alpha Ops", "Beta Tac"],
+      "re-enable adds patched channels back"
+    );
+  } finally {
+    dataSyncSvc.listMissions = orig.list;
+    dataSyncSvc.getMission = orig.get;
+    dataSyncSvc.changeMission = orig.change;
+    store.listEnabled = orig.listEnabled;
+    store.update = orig.update;
+    if (prevTakUrl == null) delete process.env.TAK_URL;
+    else process.env.TAK_URL = prevTakUrl;
+    if (prevBypass == null) delete process.env.TAK_BYPASS_ENABLED;
+    else process.env.TAK_BYPASS_ENABLED = prevBypass;
+  }
+
+  console.log("channelPatch.dataSync.test.js: ok");
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
