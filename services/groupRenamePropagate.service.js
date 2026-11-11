@@ -112,10 +112,98 @@ function buildMissionWriteBody(mission, groups) {
   };
 }
 
-async function propagateToMissions(renameMap) {
-  const result = { scanned: 0, updated: 0, errors: 0 };
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function renameMapFingerprint(renameMap) {
+  return [...renameMap.entries()]
+    .map(([k, v]) => `${k}=>${v}`)
+    .sort()
+    .join("|");
+}
+
+function groupKeysMatch(a, b) {
+  const ak = (Array.isArray(a) ? a : []).map(matchKey).filter(Boolean).sort();
+  const bk = (Array.isArray(b) ? b : []).map(matchKey).filter(Boolean).sort();
+  if (ak.length !== bk.length) return false;
+  for (let i = 0; i < ak.length; i++) {
+    if (ak[i] !== bk[i]) return false;
+  }
+  return true;
+}
+
+async function loadMissionHydrated(listRow) {
+  const name = missionNameOf(listRow);
+  if (!name) return null;
+  try {
+    const raw = await dataSyncSvc.getMission(name);
+    const full = dataSyncAccess.unwrapMission(raw);
+    if (full && typeof full === "object") return full;
+  } catch (err) {
+    console.warn(
+      `[groupRenamePropagate] Failed to load mission ${name}:`,
+      err?.message || err
+    );
+  }
+  return listRow && typeof listRow === "object" ? listRow : null;
+}
+
+async function takHasAllGroupKeys(neededKeys) {
+  const needed = [...new Set((Array.isArray(neededKeys) ? neededKeys : []).filter(Boolean))];
+  if (!needed.length) return true;
+  try {
+    const raw = await dataSyncSvc.listGroupsAll();
+    const present = new Set(
+      dataSyncAccess.extractTakGroupNameList(raw).map(matchKey).filter(Boolean)
+    );
+    return needed.every((k) => present.has(k));
+  } catch (err) {
+    console.warn(
+      "[groupRenamePropagate] Failed to list TAK groups:",
+      err?.message || err
+    );
+    return false;
+  }
+}
+
+/**
+ * LDAP sync often lags Authentik rename. Wait briefly for new CNs to appear in TAK.
+ * @returns {boolean} true when all new names are visible (or none required)
+ */
+async function waitForTakGroupNames(cns, opts = {}) {
+  const needed = [
+    ...new Set((Array.isArray(cns) ? cns : []).map(toTakCn).map(matchKey).filter(Boolean)),
+  ];
+  if (!needed.length) return true;
+  const timeoutMs = Math.max(0, Number(opts.timeoutMs) || 10000);
+  const intervalMs = Math.max(250, Number(opts.intervalMs) || 2000);
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    if (await takHasAllGroupKeys(needed)) return true;
+    if (Date.now() >= deadline) return false;
+    await sleep(Math.min(intervalMs, Math.max(0, deadline - Date.now())));
+  }
+}
+
+async function propagateToMissions(renameMap, opts = {}) {
+  const result = { scanned: 0, updated: 0, errors: 0, pending: 0 };
   if (!renameMap.size) return result;
   if (getBool("TAK_BYPASS_ENABLED", false) || !isTakConfigured()) return result;
+
+  const waitMs = opts.waitForGroupsMs != null ? Number(opts.waitForGroupsMs) : 10000;
+  const newCns = [...renameMap.values()];
+  const groupsReady =
+    waitMs <= 0 ? await takHasAllGroupKeys(newCns.map(matchKey)) : await waitForTakGroupNames(newCns, {
+      timeoutMs: waitMs,
+      intervalMs: opts.intervalMs,
+    });
+  if (!groupsReady) {
+    console.warn(
+      "[groupRenamePropagate] New group CNs not yet visible in TAK; will retry mission updates:",
+      newCns.join(", ")
+    );
+  }
 
   let missions = [];
   try {
@@ -133,14 +221,41 @@ async function propagateToMissions(renameMap) {
     result.scanned += 1;
     const name = missionNameOf(mission);
     if (!name) continue;
-    const current = dataSyncAccess.extractMissionGroupNames(mission);
+
+    // Skip hydrate when the list already shows groups and none need renaming.
+    const listed = dataSyncAccess.extractMissionGroupNames(mission);
+    const listedProbe = rewriteGroupList(listed, renameMap);
+    if (!listedProbe.changed && listed.length > 0) continue;
+
+    const full = (await loadMissionHydrated(mission)) || mission;
+    const current = dataSyncAccess.extractMissionGroupNames(full);
     const { next, changed } = rewriteGroupList(current, renameMap);
     if (!changed || !next.length) continue;
+
+    if (!groupsReady) {
+      // Avoid writing a CN TAK/LDAP does not know yet (often leaves the old name).
+      result.pending += 1;
+      continue;
+    }
+
     try {
-      await dataSyncSvc.changeMission(name, buildMissionWriteBody(mission, next));
+      await dataSyncSvc.changeMission(name, buildMissionWriteBody(full, next));
+      const verified = (await loadMissionHydrated({ name })) || null;
+      const after = verified
+        ? dataSyncAccess.extractMissionGroupNames(verified)
+        : [];
+      if (!groupKeysMatch(after, next)) {
+        result.errors += 1;
+        result.pending += 1;
+        console.warn(
+          `[groupRenamePropagate] Mission ${name} group rewrite did not stick (got: ${after.join(", ") || "none"})`
+        );
+        continue;
+      }
       result.updated += 1;
     } catch (err) {
       result.errors += 1;
+      result.pending += 1;
       console.warn(
         `[groupRenamePropagate] Failed to update mission ${name}:`,
         err?.message || err
@@ -151,7 +266,7 @@ async function propagateToMissions(renameMap) {
 }
 
 async function propagateToPackages(renameMap) {
-  const result = { scanned: 0, updated: 0, errors: 0 };
+  const result = { scanned: 0, updated: 0, errors: 0, pending: 0 };
   if (!renameMap.size) return result;
   if (getBool("TAK_BYPASS_ENABLED", false) || !isTakConfigured()) return result;
 
@@ -179,6 +294,7 @@ async function propagateToPackages(renameMap) {
       result.updated += 1;
     } catch (err) {
       result.errors += 1;
+      result.pending += 1;
       console.warn(
         `[groupRenamePropagate] Failed to update package ${hash}:`,
         err?.message || err
@@ -186,6 +302,70 @@ async function propagateToPackages(renameMap) {
     }
   }
   return result;
+}
+
+/** Dedup in-flight deferred mission/package retries for the same rename set. */
+const pendingRetryFingerprints = new Set();
+
+/**
+ * Authentik→LDAP→TAK can take up to ~60s. Keep trying mission/package rewrites
+ * in the background without blocking the Groups rename HTTP response.
+ */
+function scheduleDeferredTakPropagate(renameMap) {
+  if (!(renameMap instanceof Map) || !renameMap.size) return;
+  if (getBool("TAK_BYPASS_ENABLED", false) || !isTakConfigured()) return;
+
+  const fp = renameMapFingerprint(renameMap);
+  if (pendingRetryFingerprints.has(fp)) return;
+  pendingRetryFingerprints.add(fp);
+
+  const delaysMs = [8000, 20000, 45000, 90000];
+  let attempt = 0;
+  const mapCopy = new Map(renameMap);
+
+  const run = async () => {
+    try {
+      const [missions, packages] = await Promise.all([
+        propagateToMissions(mapCopy, { waitForGroupsMs: 5000 }),
+        propagateToPackages(mapCopy),
+      ]);
+      console.warn(
+        `[groupRenamePropagate] deferred attempt ${attempt + 1}/${delaysMs.length}:`,
+        `missions updated=${missions.updated} errors=${missions.errors} pending=${missions.pending};`,
+        `packages updated=${packages.updated} errors=${packages.errors}`
+      );
+      const needMore =
+        (Number(missions.errors) > 0 ||
+          Number(missions.pending) > 0 ||
+          Number(packages.errors) > 0 ||
+          Number(packages.pending) > 0) &&
+        attempt < delaysMs.length - 1;
+      if (needMore) {
+        attempt += 1;
+        setTimeout(() => {
+          run().catch(() => {});
+        }, delaysMs[attempt]);
+        return;
+      }
+    } catch (err) {
+      console.warn(
+        "[groupRenamePropagate] deferred retry failed:",
+        err?.message || err
+      );
+      if (attempt < delaysMs.length - 1) {
+        attempt += 1;
+        setTimeout(() => {
+          run().catch(() => {});
+        }, delaysMs[attempt]);
+        return;
+      }
+    }
+    pendingRetryFingerprints.delete(fp);
+  };
+
+  setTimeout(() => {
+    run().catch(() => {});
+  }, delaysMs[0]);
 }
 
 function rewritePatchNameList(list, renameMap) {
@@ -393,10 +573,11 @@ async function propagateGroupRename(renameMapOrOldName, newName) {
   const renameMap = normalizeRenameMap(renameMapOrOldName, newName);
   const empty = {
     renameCount: renameMap.size,
-    missions: { scanned: 0, updated: 0, errors: 0 },
-    packages: { scanned: 0, updated: 0, errors: 0 },
+    missions: { scanned: 0, updated: 0, errors: 0, pending: 0 },
+    packages: { scanned: 0, updated: 0, errors: 0, pending: 0 },
     channelPatches: { scanned: 0, updated: 0, errors: 0 },
     mutualAid: { scanned: 0, updated: 0, userAttrsUpdated: 0, errors: 0 },
+    deferredScheduled: false,
   };
   if (!renameMap.size) return empty;
 
@@ -407,12 +588,30 @@ async function propagateGroupRename(renameMapOrOldName, newName) {
     propagateToMutualAid(renameMap),
   ]);
 
+  const needsDeferred =
+    Number(missions.errors) > 0 ||
+    Number(missions.pending) > 0 ||
+    Number(packages.errors) > 0 ||
+    Number(packages.pending) > 0;
+  if (needsDeferred) {
+    scheduleDeferredTakPropagate(renameMap);
+  }
+
+  console.warn(
+    "[groupRenamePropagate] sync pass:",
+    `renames=${renameMap.size}`,
+    `missions updated=${missions.updated} errors=${missions.errors} pending=${missions.pending}`,
+    `packages updated=${packages.updated} errors=${packages.errors}`,
+    needsDeferred ? "(deferred retries scheduled)" : ""
+  );
+
   return {
     renameCount: renameMap.size,
     missions,
     packages,
     channelPatches,
     mutualAid,
+    deferredScheduled: needsDeferred,
   };
 }
 
@@ -422,9 +621,12 @@ module.exports = {
   normalizeRenameMap,
   rewriteGroupList,
   formatMutualAidGroupName,
+  groupKeysMatch,
+  waitForTakGroupNames,
   propagateToMissions,
   propagateToPackages,
   propagateToChannelPatches,
   propagateToMutualAid,
   propagateGroupRename,
+  scheduleDeferredTakPropagate,
 };

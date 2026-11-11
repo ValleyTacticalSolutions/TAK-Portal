@@ -54,6 +54,8 @@ const propagate = require("../services/groupRenamePropagate.service");
 
   const orig = {
     listMissions: dataSyncSvc.listMissions,
+    getMission: dataSyncSvc.getMission,
+    listGroupsAll: dataSyncSvc.listGroupsAll,
     changeMission: dataSyncSvc.changeMission,
     listPackages: dataPackagesSvc.listDataPackages,
     updateMeta: dataPackagesSvc.updateDataPackageMetadata,
@@ -65,28 +67,61 @@ const propagate = require("../services/groupRenamePropagate.service");
     enqueueAttrs: usersSvc.enqueueLocalUserAttributePatch,
   };
 
+  const missionByName = {
+    "Ops Mission": {
+      name: "Ops Mission",
+      groups: ["Old Ops", "Keep Me"],
+      tool: "public",
+      description: "",
+      defaultRole: { type: "MISSION_SUBSCRIBER" },
+      keywords: [],
+    },
+    Untouched: {
+      name: "Untouched",
+      groups: ["Other Channel"],
+      tool: "public",
+      description: "",
+      defaultRole: { type: "MISSION_SUBSCRIBER" },
+      keywords: [],
+    },
+    // List omits groups; hydrate must still find the renamed channel.
+    "Hydrate Me": {
+      name: "Hydrate Me",
+      groups: ["Old Ops"],
+      tool: "public",
+      description: "",
+      defaultRole: { type: "MISSION_SUBSCRIBER" },
+      keywords: [],
+    },
+  };
+
   dataSyncSvc.listMissions = async () => ({
     data: [
-      {
-        name: "Ops Mission",
-        groups: ["Old Ops", "Keep Me"],
-        tool: "public",
-        description: "",
-        defaultRole: { type: "MISSION_SUBSCRIBER" },
-        keywords: [],
-      },
-      {
-        name: "Untouched",
-        groups: ["Other Channel"],
-        tool: "public",
-        description: "",
-        defaultRole: { type: "MISSION_SUBSCRIBER" },
-        keywords: [],
-      },
+      { ...missionByName["Ops Mission"] },
+      { ...missionByName.Untouched },
+      { name: "Hydrate Me", groups: [], tool: "public", description: "" },
     ],
+  });
+  dataSyncSvc.getMission = async (name) => {
+    const m = missionByName[name];
+    if (!m) {
+      const err = new Error("not found");
+      err.response = { status: 404 };
+      throw err;
+    }
+    return { data: [JSON.parse(JSON.stringify(m))] };
+  };
+  dataSyncSvc.listGroupsAll = async () => ({
+    data: ["Renamed Ops", "Keep Me", "Other Channel", "Shared"],
   });
   dataSyncSvc.changeMission = async (name, body) => {
     missionWrites.push({ name, groups: body.groups.slice() });
+    if (missionByName[name]) {
+      missionByName[name] = {
+        ...missionByName[name],
+        groups: body.groups.slice(),
+      };
+    }
     return {};
   };
   dataPackagesSvc.listDataPackages = async () => ({
@@ -157,11 +192,17 @@ const propagate = require("../services/groupRenamePropagate.service");
 
   try {
     const result = await propagate.propagateGroupRename("Old Ops", "Renamed Ops");
-    assert.strictEqual(result.missions.updated, 1);
+    assert.strictEqual(result.missions.updated, 2, "list match + hydrate-only match");
     assert.strictEqual(result.packages.updated, 1);
     assert.strictEqual(result.channelPatches.updated, 1);
     assert.strictEqual(result.mutualAid.updated, 2, "existing + sub linked to renamed channel");
-    assert.deepStrictEqual(missionWrites[0].groups.sort(), ["Keep Me", "Renamed Ops"]);
+    assert.strictEqual(result.deferredScheduled, false);
+    const opsWrite = missionWrites.find((w) => w.name === "Ops Mission");
+    const hydrateWrite = missionWrites.find((w) => w.name === "Hydrate Me");
+    assert.ok(opsWrite, "Ops Mission rewritten");
+    assert.ok(hydrateWrite, "Hydrate Me rewritten from detail fetch");
+    assert.deepStrictEqual(opsWrite.groups.sort(), ["Keep Me", "Renamed Ops"]);
+    assert.deepStrictEqual(hydrateWrite.groups, ["Renamed Ops"]);
     assert.deepStrictEqual(packageWrites[0].groups.sort(), ["Renamed Ops", "Shared"]);
     assert.deepStrictEqual(
       patchUpdates[0].fields.groups.sort(),
@@ -184,6 +225,8 @@ const propagate = require("../services/groupRenamePropagate.service");
     );
   } finally {
     dataSyncSvc.listMissions = orig.listMissions;
+    dataSyncSvc.getMission = orig.getMission;
+    dataSyncSvc.listGroupsAll = orig.listGroupsAll;
     dataSyncSvc.changeMission = orig.changeMission;
     dataPackagesSvc.listDataPackages = orig.listPackages;
     dataPackagesSvc.updateDataPackageMetadata = orig.updateMeta;
@@ -200,7 +243,54 @@ const propagate = require("../services/groupRenamePropagate.service");
   }
 
   console.log("groupRenamePropagate.test.js: ok");
-})().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+})()
+  .then(async () => {
+    // When the new CN is not in TAK yet, do not rewrite missions (LDAP lag).
+    const prevTakUrl = process.env.TAK_URL;
+    const prevBypass = process.env.TAK_BYPASS_ENABLED;
+    process.env.TAK_URL = process.env.TAK_URL || "https://tak.test.example";
+    delete process.env.TAK_BYPASS_ENABLED;
+
+    const dataSyncSvc = require("../services/dataSync.service");
+    const orig = {
+      listMissions: dataSyncSvc.listMissions,
+      getMission: dataSyncSvc.getMission,
+      listGroupsAll: dataSyncSvc.listGroupsAll,
+      changeMission: dataSyncSvc.changeMission,
+    };
+    let writes = 0;
+    dataSyncSvc.listMissions = async () => ({
+      data: [{ name: "Ops Mission", groups: ["Old Ops"], tool: "public" }],
+    });
+    dataSyncSvc.getMission = async () => ({
+      data: [{ name: "Ops Mission", groups: ["Old Ops"], tool: "public" }],
+    });
+    dataSyncSvc.listGroupsAll = async () => ({ data: ["Old Ops"] });
+    dataSyncSvc.changeMission = async () => {
+      writes += 1;
+      return {};
+    };
+
+    try {
+      const map = propagate.normalizeRenameMap("Old Ops", "Renamed Ops");
+      const result = await propagate.propagateToMissions(map, { waitForGroupsMs: 0 });
+      assert.strictEqual(writes, 0, "must not write before new CN exists in TAK");
+      assert.strictEqual(result.pending, 1);
+      assert.strictEqual(result.updated, 0);
+    } finally {
+      dataSyncSvc.listMissions = orig.listMissions;
+      dataSyncSvc.getMission = orig.getMission;
+      dataSyncSvc.listGroupsAll = orig.listGroupsAll;
+      dataSyncSvc.changeMission = orig.changeMission;
+      if (prevTakUrl == null) delete process.env.TAK_URL;
+      else process.env.TAK_URL = prevTakUrl;
+      if (prevBypass == null) delete process.env.TAK_BYPASS_ENABLED;
+      else process.env.TAK_BYPASS_ENABLED = prevBypass;
+    }
+
+    console.log("groupRenamePropagate.test.js: pending-when-missing ok");
+  })
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
