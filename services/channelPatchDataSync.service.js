@@ -2,9 +2,9 @@
  * Keep Data Sync mission group lists aligned with channel patches.
  *
  * When an enabled patch links channels, any mission that already includes one
- * of those channels also receives the other patch channels. Disable/delete
- * reverses only the groups this patch added (unless another enabled patch
- * still requires them).
+ * of those channels also receives the other patch channels. The ledger stores
+ * each mission's pre-patch channels plus what this patch added, so disable /
+ * delete can restore the originals (then re-apply any remaining patches).
  */
 
 const dataSyncSvc = require("./dataSync.service");
@@ -73,16 +73,42 @@ function intersects(aKeys, bKeys) {
   return false;
 }
 
+/**
+ * @returns {{ original: string[], added: string[] }|null}
+ */
+function normalizeAppliedEntry(raw) {
+  if (raw == null) return null;
+  if (Array.isArray(raw)) {
+    const added = uniqueCns(raw);
+    if (!added.length) return null;
+    return { original: [], added };
+  }
+  if (typeof raw !== "object") return null;
+  const added = uniqueCns(
+    Array.isArray(raw.added) ? raw.added : Array.isArray(raw.groups) ? raw.groups : []
+  );
+  const original = uniqueCns(Array.isArray(raw.original) ? raw.original : []);
+  if (!added.length && !original.length) return null;
+  return { original, added };
+}
+
 function normalizeAppliedMap(raw) {
   const out = {};
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
-  for (const [missionName, groups] of Object.entries(raw)) {
+  for (const [missionName, entryRaw] of Object.entries(raw)) {
     const name = String(missionName || "").trim();
     if (!name) continue;
-    const list = uniqueCns(groups);
-    if (list.length) out[name] = list;
+    const entry = normalizeAppliedEntry(entryRaw);
+    if (!entry) continue;
+    out[name] = entry;
   }
   return out;
+}
+
+function affectedDataSyncNames(patch) {
+  return Object.keys(normalizeAppliedMap(patch?.dataSyncApplied)).sort((a, b) =>
+    a.localeCompare(b, undefined, { sensitivity: "base" })
+  );
 }
 
 function buildMissionWriteBody(mission, groups) {
@@ -134,13 +160,41 @@ function patchedWithLabelsForMission(mission, patches) {
   );
 }
 
+/** Channels added by enabled patches onto this mission (locked in the edit UI). */
+function lockedGroupsForMission(missionName, patches) {
+  const name = String(missionName || "").trim();
+  if (!name) return [];
+  const byKey = new Map();
+  for (const p of Array.isArray(patches) ? patches : []) {
+    if (!p || p.enabled === false) continue;
+    const entry = normalizeAppliedMap(p.dataSyncApplied)[name];
+    if (!entry) continue;
+    for (const g of entry.added) {
+      const key = matchKey(g);
+      if (!key || byKey.has(key)) continue;
+      byKey.set(key, g);
+    }
+  }
+  return Array.from(byKey.values()).sort((a, b) =>
+    a.localeCompare(b, undefined, { sensitivity: "base" })
+  );
+}
+
 function annotateMissionsWithPatchPeers(missions, patches) {
   const list = Array.isArray(missions) ? missions : [];
   const patchList = Array.isArray(patches) ? patches : channelPatchStore.listEnabled();
   return list.map((m) => {
-    const patchedWith = patchedWithLabelsForMission(m, patchList);
-    if (!patchedWith.length) return m;
-    return Object.assign({}, m, { patchedWith });
+    const patchLockedGroups = lockedGroupsForMission(missionNameOf(m), patchList);
+    // Prefer ledger-added channels (additional patched-on channels). Fall back to
+    // peer labels when no ledger entry exists yet.
+    const patchedWith = patchLockedGroups.length
+      ? patchLockedGroups.slice()
+      : patchedWithLabelsForMission(m, patchList);
+    if (!patchedWith.length && !patchLockedGroups.length) return m;
+    const next = Object.assign({}, m);
+    if (patchedWith.length) next.patchedWith = patchedWith;
+    if (patchLockedGroups.length) next.patchLockedGroups = patchLockedGroups;
+    return next;
   });
 }
 
@@ -164,6 +218,22 @@ function annotateMissionsPayloadWithPatchPeers(payload, patches) {
     }
   }
   return payload;
+}
+
+function annotateMissionDetailWithPatchPeers(mission, patches) {
+  if (!mission || typeof mission !== "object") return mission;
+  const patchList = Array.isArray(patches) ? patches : channelPatchStore.listEnabled();
+  const [annotated] = annotateMissionsWithPatchPeers([mission], patchList);
+  return annotated || mission;
+}
+
+/** Force patch-added channels to remain on mission writes while patches are active. */
+function ensureLockedGroupsInMissionBody(missionName, body) {
+  const locked = lockedGroupsForMission(missionName, channelPatchStore.listEnabled());
+  if (!locked.length) return body;
+  const o = body && typeof body === "object" ? { ...body } : {};
+  o.groups = uniqueCns([...(Array.isArray(o.groups) ? o.groups : []), ...locked]);
+  return o;
 }
 
 async function listAllMissionsSafe() {
@@ -201,48 +271,78 @@ async function setMissionGroups(mission, nextGroups) {
  */
 function planAdditionsForMission(mission, patch) {
   const current = dataSyncAccess.extractMissionGroupNames(mission);
-  const currentKeys = new Set(current.map(matchKey).filter(Boolean));
+  const original = uniqueCns(current);
+  const currentKeys = new Set(original.map(matchKey).filter(Boolean));
   const patchKeys = patchGroupKeys(patch);
   if (!intersects(currentKeys, patchKeys)) {
-    return { add: [], nextGroups: uniqueCns(current) };
+    return { original, add: [], nextGroups: original.slice() };
   }
   const byKey = patchGroupCnByKey(patch);
   const add = [];
   for (const [key, cn] of byKey) {
     if (!currentKeys.has(key)) add.push(cn);
   }
-  return { add, nextGroups: uniqueCns([...current, ...add]) };
+  return { original, add, nextGroups: uniqueCns([...original, ...add]) };
 }
 
 /**
- * Pure helper: remove this patch's prior additions unless still required.
+ * Restore toward remembered originals, then keep peers still required by others.
+ * Legacy entries without original fall back to (current − added).
  */
-function planRemovalsForMission(mission, addedCns, otherEnabledPatches) {
+function planRestoreForMission(mission, entry, otherEnabledPatches) {
   const current = dataSyncAccess.extractMissionGroupNames(mission);
-  const addedKeys = new Set(uniqueCns(addedCns).map(matchKey).filter(Boolean));
-  if (!addedKeys.size) {
-    return { nextGroups: uniqueCns(current), removed: [] };
+  const normalized = normalizeAppliedEntry(entry) || { original: [], added: [] };
+  const addedKeys = new Set(normalized.added.map(matchKey).filter(Boolean));
+  let original = uniqueCns(normalized.original);
+  if (!original.length) {
+    original = uniqueCns(
+      current.filter((n) => {
+        const k = matchKey(n);
+        return k && !addedKeys.has(k);
+      })
+    );
   }
-  const home = [];
-  for (const n of current) {
-    const k = matchKey(n);
-    if (!k || addedKeys.has(k)) continue;
-    home.push(n);
-  }
-  const homeKeys = new Set(home.map(matchKey).filter(Boolean));
-  const stillRequired = groupsStillRequiredKeys(homeKeys, otherEnabledPatches);
-  const removed = [];
-  const keep = [];
-  for (const n of current) {
-    const k = matchKey(n);
-    if (addedKeys.has(k) && !stillRequired.has(k)) {
-      removed.push(toTakCn(n));
-      continue;
+  let next = original.slice();
+  let nextKeys = new Set(next.map(matchKey).filter(Boolean));
+  for (const other of Array.isArray(otherEnabledPatches) ? otherEnabledPatches : []) {
+    const pKeys = patchGroupKeys(other);
+    if (!intersects(nextKeys, pKeys)) continue;
+    const byKey = patchGroupCnByKey(other);
+    for (const [key, cn] of byKey) {
+      if (nextKeys.has(key)) continue;
+      next.push(cn);
+      nextKeys.add(key);
     }
-    keep.push(n);
   }
-  const nextGroups = uniqueCns(keep.length ? keep : home);
-  return { nextGroups, removed };
+  next = uniqueCns(next);
+  const removed = uniqueCns(current).filter((n) => {
+    const k = matchKey(n);
+    return k && !nextKeys.has(k);
+  });
+  return { nextGroups: next, original, removed };
+}
+
+/** @deprecated use planRestoreForMission — kept for older tests/callers */
+function planRemovalsForMission(mission, addedCns, otherEnabledPatches) {
+  return planRestoreForMission(
+    mission,
+    { original: [], added: addedCns },
+    otherEnabledPatches
+  );
+}
+
+function persistPatchApplied(patchId, appliedMap) {
+  if (!patchId) return;
+  try {
+    channelPatchStore.update(patchId, {
+      dataSyncApplied: normalizeAppliedMap(appliedMap),
+    });
+  } catch (err) {
+    console.warn(
+      "[channelPatchDataSync] Failed to persist dataSyncApplied:",
+      err?.message || err
+    );
+  }
 }
 
 async function applyPatchToDataSyncs(patch) {
@@ -264,7 +364,10 @@ async function applyPatchToDataSyncs(patch) {
     if (!plan.add.length) continue;
     try {
       await setMissionGroups(mission, plan.nextGroups);
-      applied[name] = plan.add.slice();
+      applied[name] = {
+        original: plan.original.slice(),
+        added: plan.add.slice(),
+      };
       changed.push(name);
     } catch (err) {
       console.warn(
@@ -275,6 +378,17 @@ async function applyPatchToDataSyncs(patch) {
   }
 
   return { applied, changed };
+}
+
+async function refreshOtherPatchLedger(otherPatch, missionName, beforeGroups, added) {
+  if (!otherPatch?.id || !missionName || !added.length) return;
+  const prior = normalizeAppliedMap(otherPatch.dataSyncApplied);
+  const existing = prior[missionName] || { original: [], added: [] };
+  const original =
+    existing.original.length > 0 ? existing.original : uniqueCns(beforeGroups);
+  const mergedAdded = uniqueCns([...existing.added, ...added]);
+  prior[missionName] = { original, added: mergedAdded };
+  persistPatchApplied(otherPatch.id, prior);
 }
 
 async function unapplyPatchFromDataSyncs(patch) {
@@ -291,7 +405,7 @@ async function unapplyPatchFromDataSyncs(patch) {
     .filter((p) => p && p.id && patch && p.id !== patch.id);
 
   const changed = [];
-  for (const [name, added] of Object.entries(prior)) {
+  for (const [name, entry] of Object.entries(prior)) {
     let mission = null;
     try {
       const raw = await dataSyncSvc.getMission(name);
@@ -304,16 +418,51 @@ async function unapplyPatchFromDataSyncs(patch) {
       continue;
     }
     if (!mission) continue;
-    const plan = planRemovalsForMission(mission, added, otherEnabled);
-    if (!plan.removed.length) continue;
+
+    const addedKeys = new Set(entry.added.map(matchKey).filter(Boolean));
+    const restored = uniqueCns(
+      entry.original.length
+        ? entry.original
+        : dataSyncAccess.extractMissionGroupNames(mission).filter((n) => {
+            const k = matchKey(n);
+            return k && !addedKeys.has(k);
+          })
+    );
+    if (!restored.length) {
+      console.warn(
+        `[channelPatchDataSync] No original channels to restore for mission ${name}`
+      );
+      continue;
+    }
+
     try {
-      await setMissionGroups(mission, plan.nextGroups);
+      await setMissionGroups(mission, restored);
       changed.push(name);
     } catch (err) {
       console.warn(
-        `[channelPatchDataSync] Failed to remove patch channels from mission ${name}:`,
+        `[channelPatchDataSync] Failed to restore mission ${name}:`,
         err?.message || err
       );
+      continue;
+    }
+
+    let currentGroups = restored.slice();
+    for (const other of otherEnabled) {
+      const plan = planAdditionsForMission(
+        { ...mission, groups: currentGroups },
+        other
+      );
+      if (!plan.add.length) continue;
+      try {
+        await setMissionGroups({ ...mission, groups: currentGroups }, plan.nextGroups);
+        await refreshOtherPatchLedger(other, name, currentGroups, plan.add);
+        currentGroups = plan.nextGroups;
+      } catch (err) {
+        console.warn(
+          `[channelPatchDataSync] Failed to re-apply patch ${other.id} on ${name}:`,
+          err?.message || err
+        );
+      }
     }
   }
 
@@ -344,24 +493,9 @@ async function syncDataSyncsForPatchChange({ before = null, after = null } = {})
       const out = await applyPatchToDataSyncs(after);
       result.applied = out.changed;
       result.dataSyncApplied = out.applied;
-      if (after.id) {
-        try {
-          channelPatchStore.update(after.id, {
-            dataSyncApplied: out.applied,
-          });
-        } catch (err) {
-          console.warn(
-            "[channelPatchDataSync] Failed to persist dataSyncApplied:",
-            err?.message || err
-          );
-        }
-      }
+      persistPatchApplied(after.id, out.applied);
     } else if (before && before.id && after && after.enabled === false) {
-      try {
-        channelPatchStore.update(after.id, { dataSyncApplied: {} });
-      } catch (_) {
-        /* ignore */
-      }
+      persistPatchApplied(after.id, {});
     }
   } catch (err) {
     console.warn(
@@ -376,12 +510,18 @@ async function syncDataSyncsForPatchChange({ before = null, after = null } = {})
 module.exports = {
   matchKey,
   toTakCn,
+  normalizeAppliedEntry,
   normalizeAppliedMap,
+  affectedDataSyncNames,
   planAdditionsForMission,
+  planRestoreForMission,
   planRemovalsForMission,
   patchedWithLabelsForMission,
+  lockedGroupsForMission,
   annotateMissionsWithPatchPeers,
   annotateMissionsPayloadWithPatchPeers,
+  annotateMissionDetailWithPatchPeers,
+  ensureLockedGroupsInMissionBody,
   applyPatchToDataSyncs,
   unapplyPatchFromDataSyncs,
   syncDataSyncsForPatchChange,

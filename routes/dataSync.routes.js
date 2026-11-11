@@ -417,7 +417,18 @@ router.get("/missions/:missionName", async (req, res) => {
   try {
     const authUser = req.authentikUser || null;
     const data = await dataSyncAccess.assertMissionReadable(authUser, req.params.missionName);
-    return res.json(data);
+    const mission = dataSyncAccess.unwrapMission(data);
+    if (!mission) return res.json(data);
+    const annotated = channelPatchDataSync.annotateMissionDetailWithPatchPeers(
+      dataSyncAccess.enrichMissionAssignmentMeta(mission)
+    );
+    if (data && typeof data === "object" && !Array.isArray(data) && data.data != null) {
+      if (Array.isArray(data.data)) {
+        return res.json({ ...data, data: [annotated] });
+      }
+      return res.json({ ...data, data: annotated });
+    }
+    return res.json(annotated);
   } catch (err) {
     return handleRouteError(res, err);
   }
@@ -443,11 +454,14 @@ router.put("/missions/:missionName", async (req, res) => {
       const authUser = req.authentikUser || null;
       await dataSyncAccess.assertMissionReadable(authUser, missionName);
     }
-    const data = await dataSyncSvc.putMission(missionName, body);
-    const groups = missionGroupsFromBody(body);
+    const writeBody = existedBefore
+      ? channelPatchDataSync.ensureLockedGroupsInMissionBody(missionName, body)
+      : body;
+    const data = await dataSyncSvc.putMission(missionName, writeBody);
+    const groups = missionGroupsFromBody(writeBody);
     auditDataSync(req, resolveMissionWriteAction(req, missionName, existedBefore), missionName, {
       missionName,
-      fields: Object.keys(body || {}),
+      fields: Object.keys(writeBody || {}),
       groups,
       group: groups[0] || undefined,
       operation: "put",
@@ -464,8 +478,11 @@ router.post("/missions/:missionName", async (req, res) => {
     await dataSyncAccess.assertMissionReadable(authUser, req.params.missionName);
     const prepared = await prepareMissionWrite(req, res);
     if (!prepared.ok) return;
-    const body = prepared.body;
     const missionName = req.params.missionName;
+    const body = channelPatchDataSync.ensureLockedGroupsInMissionBody(
+      missionName,
+      prepared.body
+    );
     const data = await dataSyncSvc.changeMission(missionName, body);
     const groups = missionGroupsFromBody(body);
     auditDataSync(req, "DATA_SYNC_MISSION_UPDATED", missionName, {

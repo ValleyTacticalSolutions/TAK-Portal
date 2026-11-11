@@ -107,30 +107,48 @@ function normalizeDirection(raw) {
   return "ltr";
 }
 
-/** Mission name → group CNs this patch added to that Data Sync. */
+function normalizeAppliedGroupList(list) {
+  const out = [];
+  const seen = new Set();
+  for (const item of Array.isArray(list) ? list : []) {
+    const label = groupDisplayLabel(
+      typeof item === "string" || typeof item === "number"
+        ? item
+        : item && typeof item === "object"
+          ? item.group || item.name || item.groupName
+          : ""
+    );
+    if (!label) continue;
+    const key = groupMatchKey(label);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(label);
+  }
+  return out;
+}
+
+/**
+ * Mission name → { original, added } channel CNs for Data Sync patch sync.
+ * Legacy shape (string[]) is treated as added-only.
+ */
 function normalizeDataSyncApplied(raw) {
   const out = {};
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
-  for (const [missionName, groups] of Object.entries(raw)) {
+  for (const [missionName, entryRaw] of Object.entries(raw)) {
     const name = safeStr(missionName).trim();
     if (!name) continue;
-    const list = [];
-    const seen = new Set();
-    for (const item of Array.isArray(groups) ? groups : []) {
-      const label = groupDisplayLabel(
-        typeof item === "string" || typeof item === "number"
-          ? item
-          : item && typeof item === "object"
-            ? item.group || item.name || item.groupName
-            : ""
+    let original = [];
+    let added = [];
+    if (Array.isArray(entryRaw)) {
+      added = normalizeAppliedGroupList(entryRaw);
+    } else if (entryRaw && typeof entryRaw === "object") {
+      original = normalizeAppliedGroupList(entryRaw.original);
+      added = normalizeAppliedGroupList(
+        Array.isArray(entryRaw.added) ? entryRaw.added : entryRaw.groups
       );
-      if (!label) continue;
-      const key = groupMatchKey(label);
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      list.push(label);
     }
-    if (list.length) out[name] = list;
+    if (!original.length && !added.length) continue;
+    out[name] = { original, added };
   }
   return out;
 }

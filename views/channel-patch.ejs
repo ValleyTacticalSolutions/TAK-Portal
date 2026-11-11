@@ -365,6 +365,19 @@
     align-items: center;
     gap: 8px;
   }
+  .cp-dataSyncs {
+    margin-top: 10px;
+    font-size: 0.86rem;
+    line-height: 1.4;
+  }
+  .cp-dataSyncsLabel {
+    font-weight: 700;
+    color: #c2410c;
+  }
+  .cp-dataSyncsList {
+    margin-top: 2px;
+    color: var(--muted, #8b93a7);
+  }
   .cp-topoSide {
     display: flex;
     flex-wrap: wrap;
@@ -837,6 +850,26 @@
     return nodesHtml(p.groups);
   }
 
+  function affectedDataSyncNames(p) {
+    const applied = p && p.dataSyncApplied && typeof p.dataSyncApplied === "object"
+      ? p.dataSyncApplied
+      : {};
+    return Object.keys(applied)
+      .map((n) => String(n || "").trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }
+
+  function dataSyncsHtml(p) {
+    const names = affectedDataSyncNames(p);
+    if (!names.length) return "";
+    return `
+      <div class="cp-dataSyncs">
+        <div class="cp-dataSyncsLabel">Affected Data Sync${names.length === 1 ? "" : "s"}</div>
+        <div class="cp-dataSyncsList">${esc(names.join(", "))}</div>
+      </div>`;
+  }
+
   function renderBoard(patches) {
     patchesCache = Array.isArray(patches) ? patches : [];
     if (!patchesCache.length) {
@@ -873,6 +906,7 @@
               </div>
             </div>
             <div class="cp-topology">${topologyHtml(p)}</div>
+            ${dataSyncsHtml(p)}
           </article>`;
       })
       .join("");

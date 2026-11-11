@@ -4,7 +4,7 @@ const assert = require("assert");
 const channelPatchDataSync = require("../services/channelPatchDataSync.service");
 const channelPatchStore = require("../services/channelPatch.store");
 
-(function testPlanAdditions() {
+(function testPlanAdditionsTracksOriginal() {
   const patch = {
     id: "p1",
     enabled: true,
@@ -20,6 +20,7 @@ const channelPatchStore = require("../services/channelPatch.store");
     keywords: [],
   };
   const plan = channelPatchDataSync.planAdditionsForMission(mission, patch);
+  assert.deepStrictEqual(plan.original, ["Alpha Ops"]);
   assert.deepStrictEqual(plan.add.sort(), ["Beta Tac", "Gamma Main"]);
   assert.deepStrictEqual(plan.nextGroups.sort(), ["Alpha Ops", "Beta Tac", "Gamma Main"]);
 
@@ -37,7 +38,7 @@ const channelPatchStore = require("../services/channelPatch.store");
   assert.deepStrictEqual(unrelated.add, []);
 })();
 
-(function testPlanRemovalsKeepsOtherPatchPeers() {
+(function testPlanRestoreUsesOriginalAndOtherPatches() {
   const mission = {
     name: "Ops Mission",
     groups: ["Alpha Ops", "Beta Tac", "Gamma Main"],
@@ -50,24 +51,74 @@ const channelPatchStore = require("../services/channelPatch.store");
       groups: ["Alpha Ops", "Gamma Main"],
     },
   ];
-  const plan = channelPatchDataSync.planRemovalsForMission(
+  const plan = channelPatchDataSync.planRestoreForMission(
     mission,
-    ["Beta Tac", "Gamma Main"],
+    { original: ["Alpha Ops"], added: ["Beta Tac", "Gamma Main"] },
     otherEnabled
   );
+  assert.deepStrictEqual(plan.original, ["Alpha Ops"]);
   assert.ok(plan.removed.includes("Beta Tac"));
-  assert.ok(!plan.removed.includes("Gamma Main"), "still required by another patch");
+  assert.ok(!plan.nextGroups.includes("Beta Tac"));
   assert.deepStrictEqual(plan.nextGroups.sort(), ["Alpha Ops", "Gamma Main"]);
 })();
 
-(function testPlanRemovalsWithoutOtherPatches() {
+(function testPlanRestoreWithoutOtherPatches() {
   const mission = {
     name: "Ops Mission",
     groups: ["Alpha Ops", "Beta Tac"],
   };
-  const plan = channelPatchDataSync.planRemovalsForMission(mission, ["Beta Tac"], []);
-  assert.deepStrictEqual(plan.removed, ["Beta Tac"]);
+  const plan = channelPatchDataSync.planRestoreForMission(
+    mission,
+    { original: ["Alpha Ops"], added: ["Beta Tac"] },
+    []
+  );
   assert.deepStrictEqual(plan.nextGroups, ["Alpha Ops"]);
+  assert.deepStrictEqual(plan.removed, ["Beta Tac"]);
+})();
+
+(function testLockedGroupsFromAppliedLedger() {
+  const patches = [
+    {
+      id: "p1",
+      enabled: true,
+      mode: "bidirectional",
+      groups: ["Alpha Ops", "Beta Tac"],
+      dataSyncApplied: {
+        "Ops Mission": { original: ["Alpha Ops"], added: ["Beta Tac"] },
+      },
+    },
+    {
+      id: "p2",
+      enabled: false,
+      mode: "bidirectional",
+      groups: ["Alpha Ops", "Gamma Main"],
+      dataSyncApplied: {
+        "Ops Mission": { original: ["Alpha Ops"], added: ["Gamma Main"] },
+      },
+    },
+  ];
+  assert.deepStrictEqual(
+    channelPatchDataSync.lockedGroupsForMission("Ops Mission", patches),
+    ["Beta Tac"]
+  );
+  const annotated = channelPatchDataSync.annotateMissionsWithPatchPeers(
+    [{ name: "Ops Mission", groups: ["Alpha Ops", "Beta Tac"] }],
+    patches
+  );
+  assert.deepStrictEqual(annotated[0].patchLockedGroups, ["Beta Tac"]);
+  assert.deepStrictEqual(annotated[0].patchedWith, ["Beta Tac"]);
+})();
+
+(function testAffectedDataSyncNames() {
+  assert.deepStrictEqual(
+    channelPatchDataSync.affectedDataSyncNames({
+      dataSyncApplied: {
+        "Mission B": { original: ["A"], added: ["B"] },
+        "Mission A": { original: ["A"], added: ["C"] },
+      },
+    }),
+    ["Mission A", "Mission B"]
+  );
 })();
 
 (function testPatchedWithLabels() {
@@ -96,7 +147,7 @@ const channelPatchStore = require("../services/channelPatch.store");
   assert.strictEqual(annotated[1].patchedWith, undefined);
 })();
 
-(function testNormalizePersistsDataSyncApplied() {
+(function testNormalizePersistsDataSyncAppliedObject() {
   const patch = channelPatchStore.normalizePatch({
     id: "p-applied",
     name: "Applied",
@@ -104,11 +155,30 @@ const channelPatchStore = require("../services/channelPatch.store");
     mode: "bidirectional",
     groups: ["Alpha Ops", "Beta Tac"],
     dataSyncApplied: {
-      "Ops Mission": ["tak_Beta Tac", "Beta Tac"],
+      "Ops Mission": {
+        original: ["tak_Alpha Ops"],
+        added: ["tak_Beta Tac", "Beta Tac"],
+      },
     },
   });
   assert.ok(patch);
-  assert.deepStrictEqual(patch.dataSyncApplied["Ops Mission"], ["Beta Tac"]);
+  assert.deepStrictEqual(patch.dataSyncApplied["Ops Mission"].original, ["Alpha Ops"]);
+  assert.deepStrictEqual(patch.dataSyncApplied["Ops Mission"].added, ["Beta Tac"]);
+})();
+
+(function testNormalizeLegacyAppliedArray() {
+  const patch = channelPatchStore.normalizePatch({
+    id: "p-legacy",
+    name: "Legacy",
+    enabled: true,
+    mode: "bidirectional",
+    groups: ["Alpha Ops", "Beta Tac"],
+    dataSyncApplied: {
+      "Ops Mission": ["Beta Tac"],
+    },
+  });
+  assert.deepStrictEqual(patch.dataSyncApplied["Ops Mission"].added, ["Beta Tac"]);
+  assert.deepStrictEqual(patch.dataSyncApplied["Ops Mission"].original, []);
 })();
 
 (function testBuildMissionWriteBody() {

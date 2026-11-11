@@ -129,87 +129,89 @@
 
 <!-- Create / Edit mission -->
 <div class="modalOverlay" id="missionModal" style="display: none;">
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="missionModalTitle" style="width: min(900px, 96vw);">
+  <div class="modal editDataSyncModal" role="dialog" aria-modal="true" aria-labelledby="missionModalTitle">
     <div class="modalHeader">
-      <h2 id="missionModalTitle" style="margin: 0;">Edit Data Sync Mission</h2>
+      <div class="modalHeaderLeft">
+        <h2 id="missionModalTitle" style="margin: 0;">Edit Data Sync Mission</h2>
+      </div>
       <button type="button" class="btn" id="missionModalClose">Close</button>
     </div>
     <div class="modalBody">
-      <div id="missionModalMsg" class="msg" style="margin-bottom: 10px;"></div>
-
-      <label style="display: block;">
-        Mission Name
-        <input type="text" id="mName" readonly style="width: 100%; box-sizing: border-box; opacity: 0.85;" />
-      </label>
-
-      <label style="display: block; margin-top: 12px;">
-        Description
-        <textarea id="mDescription" rows="3" placeholder="Mission description" style="width: 100%; box-sizing: border-box; resize: vertical;"></textarea>
-      </label>
-
-      <label style="margin-top: 12px;">
-        Default Role
-        <select id="mDefaultRole" style="width: 100%; box-sizing: border-box;">
-          <option value="MISSION_SUBSCRIBER">Mission Subscriber (MISSION_SUBSCRIBER)</option>
-          <option value="MISSION_OWNER">Mission Owner (MISSION_OWNER)</option>
-          <option value="MISSION_READONLY_SUBSCRIBER">Read-only Subscriber (MISSION_READONLY_SUBSCRIBER)</option>
-        </select>
-      </label>
-
-      <div style="margin-top: 14px;">
-        <label class="ma-multiselect-label" for="editGroupsToggle" style="font-weight: 600;">Assigned Groups / Channels</label>
-        <div id="editGroupsPickerRoot" class="ma-multiselect-wrap" style="max-width: none; margin-top: 6px;">
-          <div class="ma-multiselect filter-multiselect" id="editGroupsMultiselect">
-            <button type="button" class="btn filter-toggle ma-multiselect-toggle" id="editGroupsToggle">Select groups ▾</button>
-            <div class="filter-menu ma-multiselect-menu" id="editGroupsMenu">
-              <div class="filter-menu-inner">
-                <input type="text" class="ma-multiselect-search" id="editGroupsSearch" placeholder="Search groups…" autocomplete="off" />
-                <div class="ma-multiselect-list" id="editGroupsList"></div>
-                <div class="ma-multiselect-actions">
-                  <button type="button" class="btn link-btn" id="editGroupsSelectAll">Select all</button>
-                  <button type="button" class="btn link-btn" id="editGroupsClear">Clear</button>
-                </div>
+      <form id="editDataSyncForm" class="editDataSyncForm" autocomplete="off" onsubmit="return false;">
+        <section class="editDataSyncTop">
+          <div id="missionModalMsg" class="msg"></div>
+          <div class="editDataSyncTopGrid">
+            <label>
+              Mission Name
+              <input type="text" id="mName" readonly />
+            </label>
+            <label>
+              Default Role
+              <select id="mDefaultRole">
+                <option value="MISSION_SUBSCRIBER">Mission Subscriber (MISSION_SUBSCRIBER)</option>
+                <option value="MISSION_OWNER">Mission Owner (MISSION_OWNER)</option>
+                <option value="MISSION_READONLY_SUBSCRIBER">Read-only Subscriber (MISSION_READONLY_SUBSCRIBER)</option>
+              </select>
+            </label>
+          </div>
+          <label class="editDataSyncFull">
+            Description
+            <textarea id="mDescription" rows="2" placeholder="Mission description"></textarea>
+          </label>
+          <div class="editDataSyncPasswordRow">
+            <label class="editDataSyncFull">
+              New Password (optional)
+              <div class="passwordWrap">
+                <input type="password" id="mNewPw" autocomplete="new-password" />
+                <button type="button" id="mNewPwToggle" class="passwordToggle" aria-label="Show password" title="Show password">👁</button>
               </div>
+            </label>
+            <div class="editDataSyncPasswordActions">
+              <button type="button" class="btn success" id="mBtnSetPw">Set password</button>
+              <button type="button" class="btn danger" id="mBtnClearPw">Remove password</button>
             </div>
           </div>
-          <div class="ma-multiselect-summary muted" id="editGroupsSummary"></div>
-        </div>
-      </div>
+        </section>
 
-      <div class="card" style="margin-top: 16px; background: var(--card);">
-        <h3 style="margin: 0 0 8px 0; font-size: 1rem;">Password (optional)</h3>
-        <div class="row" style="flex-wrap: wrap; gap: 10px; align-items: flex-end;">
-          <label style="flex: 1; min-width: 200px;">New Password
-            <div class="passwordWrap">
-              <input type="password" id="mNewPw" autocomplete="new-password" style="width: 100%; box-sizing: border-box;" />
-              <button type="button" id="mNewPwToggle" class="passwordToggle" aria-label="Show password" title="Show password">👁</button>
+        <section class="editDataSyncSplit">
+          <div class="editDataSyncSplitPane">
+            <div class="editDataSyncSplitPaneHead">
+              <h3>Assigned Groups / Channels</h3>
+              <div class="row" style="gap:8px; flex-wrap:wrap;">
+                <button class="btn" type="button" id="editGroupsSelectAll">Select All</button>
+                <button class="btn" type="button" id="editGroupsClear">Clear</button>
+              </div>
             </div>
-          </label>
-          <button type="button" class="btn success" id="mBtnSetPw">Set password</button>
-          <button type="button" class="btn danger" id="mBtnClearPw">Remove password</button>
-        </div>
-      </div>
+            <p id="editGroupsSummary" class="msg"></p>
+            <input id="editGroupsSearch" placeholder="Search groups..." autocomplete="off" />
+            <div id="editGroupsBox" class="groupsBox editDataSyncListBox">
+              <div id="editGroupsInner" class="groupsInner"></div>
+            </div>
+            <small id="mSaveHint" class="muted"></small>
+          </div>
+        </section>
 
-      <div id="mContentsWrap" style="margin-top: 16px; display: none;">
-        <h3 style="margin: 0 0 8px 0; font-size: 1rem;">Contents</h3>
-        <p class="muted" style="margin: 0 0 8px 0; font-size: 13px;">Per-item downloads use <code>GET /Marti/sync/content</code> (may not be KML). For a full package, use <strong>Download</strong> (ZIP) or <strong>KML</strong> on the mission row.</p>
-        <div style="overflow-x: auto;">
-          <table class="table" style="margin: 0;">
-            <thead>
-              <tr>
-                <th>Label</th>
-                <th style="min-width: 140px;">Download</th>
-              </tr>
-            </thead>
-            <tbody id="mContentsTbody"></tbody>
-          </table>
+        <div id="mContentsWrap" class="editDataSyncContents" style="display: none;">
+          <h3>Contents</h3>
+          <p class="muted">Per-item downloads use sync content URLs. For a full package, use Download (ZIP) or KML on the mission row.</p>
+          <div class="editDataSyncContentsTableWrap">
+            <table class="table" style="margin: 0;">
+              <thead>
+                <tr>
+                  <th>Label</th>
+                  <th style="min-width: 140px;">Download</th>
+                </tr>
+              </thead>
+              <tbody id="mContentsTbody"></tbody>
+            </table>
+          </div>
         </div>
-      </div>
 
-      <div style="margin-top: 18px; display: flex; justify-content: flex-end; align-items: center; gap: 10px; flex-wrap: wrap;">
-        <span id="mSaveHint" class="muted" style="font-size: 13px; margin-right: auto;"></span>
-        <button type="button" class="btn success" id="mBtnSave">Save Data Sync Mission</button>
-      </div>
+        <div class="editDataSyncFooter row">
+          <span id="editDataSyncFooterMsg" class="msg"></span>
+          <button type="button" class="btn success" id="mBtnSave">Save Changes</button>
+        </div>
+      </form>
     </div>
   </div>
 </div>
@@ -267,9 +269,6 @@
     column-gap: 14px;
     column-count: 4;
   }
-  .data-sync-page #editGroupsPickerRoot .ma-multiselect.filter-multiselect {
-    max-width: none;
-  }
   @media (max-width: 990px) {
     .data-sync-page .groupsInner {
       column-count: 2;
@@ -278,6 +277,186 @@
   }
   @media (max-width: 640px) {
     .data-sync-page .groupsInner {
+      column-count: 1;
+    }
+  }
+
+  #missionModal .editDataSyncModal {
+    display: flex;
+    flex-direction: column;
+    width: min(1100px, 100%);
+    max-height: 92vh;
+    overflow: hidden;
+  }
+  #missionModal .modalHeader {
+    flex: 0 0 auto;
+  }
+  #missionModal .modalHeaderLeft {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+  #missionModal .modalHeaderLeft h2 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #missionModal .modalBody {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #missionModal .editDataSyncForm {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #missionModal .editDataSyncTop {
+    flex: 0 0 auto;
+  }
+  #missionModal .editDataSyncTop .msg:empty {
+    display: none;
+  }
+  #missionModal .editDataSyncTopGrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 16px;
+    margin-top: 4px;
+  }
+  #missionModal .editDataSyncFull {
+    display: block;
+    margin-top: 12px;
+  }
+  #missionModal .editDataSyncPasswordRow {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px 12px;
+    align-items: end;
+    margin-top: 4px;
+  }
+  #missionModal .editDataSyncPasswordActions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-bottom: 2px;
+  }
+  #missionModal .editDataSyncTop label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+  #missionModal .editDataSyncTop label > input:not([type="checkbox"]),
+  #missionModal .editDataSyncTop label > select,
+  #missionModal .editDataSyncTop label > textarea {
+    width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
+  }
+  #missionModal #mName {
+    opacity: 0.85;
+  }
+  #missionModal .editDataSyncSplit {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    overflow: hidden;
+  }
+  #missionModal .editDataSyncSplitPane {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    flex: 1 1 auto;
+  }
+  #missionModal .editDataSyncSplitPaneHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex: 0 0 auto;
+    margin-bottom: 6px;
+  }
+  #missionModal .editDataSyncSplitPaneHead h3 {
+    margin: 0;
+  }
+  #missionModal .editDataSyncSplitPaneHead .row {
+    margin: 0;
+  }
+  #missionModal .editDataSyncSplitPane .msg:empty,
+  #missionModal .editDataSyncSplitPane .muted:empty {
+    display: none;
+  }
+  #missionModal #editGroupsSearch {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 8px;
+    flex: 0 0 auto;
+  }
+  #missionModal .editDataSyncListBox {
+    flex: 1 1 auto;
+    min-height: 10rem;
+    overflow: auto;
+    max-height: none;
+    margin-top: 0;
+  }
+  #missionModal .editDataSyncListBox .groupsInner {
+    column-count: 3;
+    column-width: 220px;
+  }
+  #missionModal .groupItem.is-patch-locked {
+    opacity: 0.55;
+    cursor: not-allowed;
+    color: var(--muted);
+  }
+  #missionModal .groupItem.is-patch-locked:hover {
+    background: transparent;
+  }
+  #missionModal .groupItem.is-patch-locked input {
+    cursor: not-allowed;
+  }
+  #missionModal .editDataSyncContents {
+    flex: 0 0 auto;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    max-height: 28vh;
+    overflow: auto;
+  }
+  #missionModal .editDataSyncContents h3 {
+    margin: 0 0 6px 0;
+    font-size: 1rem;
+  }
+  #missionModal .editDataSyncContents .muted {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+  }
+  #missionModal .editDataSyncFooter {
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    padding-top: 12px;
+  }
+  #missionModal .editDataSyncFooter .msg {
+    margin-right: auto;
+  }
+  @media (max-width: 800px) {
+    #missionModal .editDataSyncTopGrid,
+    #missionModal .editDataSyncPasswordRow {
+      grid-template-columns: 1fr;
+    }
+    #missionModal .editDataSyncListBox .groupsInner {
       column-count: 1;
     }
   }
@@ -432,15 +611,13 @@
   var mName = document.getElementById("mName");
   var mDescription = document.getElementById("mDescription");
   var mDefaultRole = document.getElementById("mDefaultRole");
-  var editGroupsMultiselect = document.getElementById("editGroupsMultiselect");
-  var editGroupsToggle = document.getElementById("editGroupsToggle");
-  var editGroupsMenu = document.getElementById("editGroupsMenu");
   var editGroupsSearch = document.getElementById("editGroupsSearch");
-  var editGroupsList = document.getElementById("editGroupsList");
+  var editGroupsInner = document.getElementById("editGroupsInner");
   var editGroupsSelectAll = document.getElementById("editGroupsSelectAll");
   var editGroupsClear = document.getElementById("editGroupsClear");
   var editGroupsSummary = document.getElementById("editGroupsSummary");
   var editPickedGroups = {};
+  var editLockedGroupKeys = {};
   var mNewPw = document.getElementById("mNewPw");
   var mBtnSetPw = document.getElementById("mBtnSetPw");
   var mBtnClearPw = document.getElementById("mBtnClearPw");
@@ -854,53 +1031,82 @@
     }).join("");
   }
 
+  function isEditGroupLocked(name) {
+    var key = canonicalGroupKey(name);
+    return !!(key && editLockedGroupKeys[key]);
+  }
+
+  function setEditLockedGroups(names) {
+    editLockedGroupKeys = {};
+    (Array.isArray(names) ? names : []).forEach(function (n) {
+      var key = canonicalGroupKey(n);
+      if (key) editLockedGroupKeys[key] = true;
+    });
+  }
+
+  function ensureLockedGroupsSelected() {
+    Object.keys(editLockedGroupKeys).forEach(function (key) {
+      var match = groupNamesForPicker(editPickedGroups).find(function (n) {
+        return canonicalGroupKey(n) === key;
+      });
+      if (match) editPickedGroups[match] = true;
+      else {
+        // Keep a display name from locked annotation if picker list lacks it yet
+        var fromMission = (missionDetail && Array.isArray(missionDetail.patchLockedGroups)
+          ? missionDetail.patchLockedGroups
+          : []
+        ).find(function (n) { return canonicalGroupKey(n) === key; });
+        if (fromMission) editPickedGroups[fromMission] = true;
+      }
+    });
+  }
+
   function updateEditGroupsSummary() {
     var selected = pickedGroupsList(editPickedGroups);
     var count = selected.length;
-    if (editGroupsToggle) {
-      if (!count) editGroupsToggle.textContent = "Select groups ▾";
-      else if (count === 1) editGroupsToggle.textContent = selected[0] + " ▾";
-      else editGroupsToggle.textContent = count + " groups selected ▾";
-    }
+    var lockedCount = Object.keys(editLockedGroupKeys).length;
     if (editGroupsSummary) {
-      editGroupsSummary.textContent = count
+      var text = count
         ? (count === 1 ? "1 group selected" : count + " groups selected")
         : "No groups selected";
+      if (lockedCount) {
+        text +=
+          " · " +
+          lockedCount +
+          " channel" +
+          (lockedCount === 1 ? "" : "s") +
+          " locked by active patch";
+      }
+      editGroupsSummary.textContent = text;
     }
   }
 
   function renderEditGroupsList() {
-    if (!editGroupsList) return;
+    if (!editGroupsInner) return;
+    ensureLockedGroupsSelected();
     var names = filterGroupNames(groupNamesForPicker(editPickedGroups), editGroupsSearch && editGroupsSearch.value);
     if (!names.length) {
-      editGroupsList.innerHTML =
-        '<div style="padding:10px; color: var(--muted);">' +
+      editGroupsInner.innerHTML =
+        '<p class="muted" style="margin:0;padding:8px;">' +
         (groupsCache.length ? "No matching groups." : "No groups found.") +
-        "</div>";
+        "</p>";
       updateEditGroupsSummary();
       return;
     }
-    editGroupsList.innerHTML = names.map(function (name) {
-      var checked = editPickedGroups[name] ? " checked" : "";
+    editGroupsInner.innerHTML = names.map(function (name) {
+      var locked = isEditGroupLocked(name);
+      var checked = editPickedGroups[name] || locked ? " checked" : "";
+      var disabled = locked ? " disabled" : "";
+      var lockedClass = locked ? " is-patch-locked" : "";
+      var title = locked ? ' title="Locked by active channel patch"' : "";
       return (
-        '<label class="filter-option">' +
-          '<input type="checkbox" value="' + esc(name) + '"' + checked + " />" +
-          "<span>" + esc(name) + "</span>" +
+        '<label class="groupItem' + lockedClass + '"' + title + ">" +
+          '<input type="checkbox" value="' + esc(name) + '"' + checked + disabled + " />" +
+          "<span>" + esc(name) + (locked ? " (patched)" : "") + "</span>" +
         "</label>"
       );
     }).join("");
     updateEditGroupsSummary();
-  }
-
-  function setEditGroupsMenuOpen(open) {
-    if (!editGroupsMultiselect || !editGroupsMenu) return;
-    if (open) {
-      editGroupsMultiselect.classList.add("open");
-      editGroupsMenu.classList.add("is-open");
-    } else {
-      editGroupsMultiselect.classList.remove("open");
-      editGroupsMenu.classList.remove("is-open");
-    }
   }
 
   function renderGroupPickers() {
@@ -1582,9 +1788,9 @@
     missionModal.style.display = "none";
     document.body.classList.remove("noScroll");
     missionDetail = null;
+    setEditLockedGroups([]);
     editingOriginalName = "";
     clearPickedGroups(editPickedGroups);
-    setEditGroupsMenuOpen(false);
     if (editGroupsSearch) editGroupsSearch.value = "";
     renderEditGroupsList();
   }
@@ -1593,9 +1799,9 @@
     missionModalTitle.textContent = "Edit Data Sync Mission";
     mName.readOnly = true;
     setMissionModalMsg("Loading…", undefined);
-    mSaveHint.textContent = "";
+    if (mSaveHint) mSaveHint.textContent = "";
     mNewPw.value = "";
-    setEditGroupsMenuOpen(false);
+    setEditLockedGroups([]);
     if (editGroupsSearch) editGroupsSearch.value = "";
     openModal();
     try {
@@ -1609,17 +1815,29 @@
 
       editingOriginalName = String(missionDetail.name);
       mName.value = missionDetail.name;
+      missionModalTitle.textContent = "Edit Data Sync - " + missionDetail.name;
       if (mDescription) mDescription.value = missionDetail.description != null ? String(missionDetail.description) : "";
       syncDefaultRoleSelectFromMission(missionDetail);
 
       /* GET /missions/:name often returns groups as {name:"…"} objects; list endpoint uses strings. */
+      var row = missionRowFromCache(name);
       var editGroups = missionGroupNames(missionDetail);
-      if (!editGroups.length) {
-        var row = missionRowFromCache(name);
-        if (row) editGroups = missionGroupNames(row);
-      }
+      if (!editGroups.length && row) editGroups = missionGroupNames(row);
+      var locked =
+        Array.isArray(missionDetail.patchLockedGroups) && missionDetail.patchLockedGroups.length
+          ? missionDetail.patchLockedGroups
+          : row && Array.isArray(row.patchLockedGroups)
+            ? row.patchLockedGroups
+            : [];
+      setEditLockedGroups(locked);
       setPickedGroups(editPickedGroups, editGroups);
+      ensureLockedGroupsSelected();
       renderEditGroupsList();
+      if (mSaveHint) {
+        mSaveHint.textContent = locked.length
+          ? "Patched channels stay selected and cannot be changed while the patch is active."
+          : "";
+      }
 
       mContentsTbody.innerHTML = "";
       var contents = Array.isArray(missionDetail.contents) ? missionDetail.contents : [];
@@ -1656,6 +1874,7 @@
 
   function buildSavePayload() {
     var name = (mName.value || "").trim();
+    ensureLockedGroupsSelected();
     var groups = getSelectedEditGroups();
     var kw = missionDetail && Array.isArray(missionDetail.keywords) ? missionDetail.keywords.slice() : [];
     return {
@@ -1933,20 +2152,17 @@
     });
   }
 
-  if (editGroupsToggle) {
-    editGroupsToggle.addEventListener("click", function (e) {
-      e.preventDefault();
-      e.stopPropagation();
-      var open = !(editGroupsMultiselect && editGroupsMultiselect.classList.contains("open"));
-      setEditGroupsMenuOpen(open);
-    });
-  }
-  if (editGroupsList) {
-    editGroupsList.addEventListener("change", function (e) {
+  if (editGroupsInner) {
+    editGroupsInner.addEventListener("change", function (e) {
       var cb = e.target;
       if (!cb || cb.tagName !== "INPUT" || cb.type !== "checkbox") return;
       var value = String(cb.value || "").trim();
       if (!value) return;
+      if (isEditGroupLocked(value)) {
+        cb.checked = true;
+        editPickedGroups[value] = true;
+        return;
+      }
       if (cb.checked) editPickedGroups[value] = true;
       else delete editPickedGroups[value];
       updateEditGroupsSummary();
@@ -1967,14 +2183,10 @@
   if (editGroupsClear) {
     editGroupsClear.addEventListener("click", function () {
       clearPickedGroups(editPickedGroups);
+      ensureLockedGroupsSelected();
       renderEditGroupsList();
     });
   }
-  document.addEventListener("click", function (e) {
-    if (!editGroupsMultiselect || !editGroupsMultiselect.classList.contains("open")) return;
-    if (editGroupsMultiselect.contains(e.target)) return;
-    setEditGroupsMenuOpen(false);
-  });
 
   if (missionTableFilter) {
     missionTableFilter.addEventListener("input", function () {
