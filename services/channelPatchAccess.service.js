@@ -141,7 +141,8 @@ function catalogCountByKey(catalogGroups) {
 
 /**
  * Build picker rows from Data Sync's Authentik-backed group list.
- * Catalog may supply live counts only.
+ * Catalog may supply live counts only. Dedupe on full display name so
+ * behavior-suffixed variants stay separate picker rows.
  */
 function channelsFromAuthentikNames(displayNames, catalogByKey) {
   const channels = [];
@@ -151,10 +152,10 @@ function channelsFromAuthentikNames(displayNames, catalogByKey) {
     if (!displayName || isAuthentikAgencyAdminGroupName(displayName)) continue;
     const name = groupsSvc.ensureTakPrefix(displayName);
     const baseKey = mapMeta.channelBaseKey(name);
-    if (!baseKey || baseKey === mapMeta.UNASSIGNED_CHANNEL_KEY || seen.has(baseKey)) {
-      continue;
-    }
-    seen.add(baseKey);
+    if (!baseKey || baseKey === mapMeta.UNASSIGNED_CHANNEL_KEY) continue;
+    const dedupeKey = displayName.toLowerCase().replace(/\s+/g, " ").trim();
+    if (!dedupeKey || seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
     const cat = catalogByKey.get(baseKey);
     channels.push(
       toPickerChannel({

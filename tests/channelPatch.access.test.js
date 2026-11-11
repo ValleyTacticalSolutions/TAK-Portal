@@ -34,12 +34,12 @@ assert.ok(
 
 const agencyAccess = { isGlobalAdmin: false, isAgencyAdmin: true };
 const globalAccess = { isGlobalAdmin: true };
-const allowed = new Set(["hcso ops", "hcso tac"]);
+const allowed = new Set(["alpha ops", "alpha tac"]);
 
 const patches = [
-  { id: "1", name: "Agency only", groups: ["tak_HCSO Ops", "tak_HCSO Tac"] },
-  { id: "2", name: "Mixed", groups: ["tak_HCSO Ops", "tak_County Law"] },
-  { id: "3", name: "Out of scope", groups: ["tak_County Law", "tak_State"] },
+  { id: "1", name: "Agency only", groups: ["tak_Alpha Ops", "tak_Alpha Tac"] },
+  { id: "2", name: "Mixed", groups: ["tak_Alpha Ops", "tak_Other Law"] },
+  { id: "3", name: "Out of scope", groups: ["tak_Other Law", "tak_Other State"] },
   { id: "4", name: "Empty", groups: [] },
 ];
 
@@ -60,69 +60,69 @@ assert.deepStrictEqual(
 );
 
 assert.doesNotThrow(() =>
-  access.assertGroupsInScope(agencyAccess, ["tak_HCSO Ops", "HCSO Tac"], allowed)
+  access.assertGroupsInScope(agencyAccess, ["tak_Alpha Ops", "Alpha Tac"], allowed)
 );
 assert.throws(
-  () => access.assertGroupsInScope(agencyAccess, ["tak_HCSO Ops", "County Law"], allowed),
+  () => access.assertGroupsInScope(agencyAccess, ["tak_Alpha Ops", "Other Law"], allowed),
   (err) => err && err.status === 403
 );
 assert.doesNotThrow(() =>
-  access.assertGroupsInScope(globalAccess, ["County Law", "State"], allowed)
+  access.assertGroupsInScope(globalAccess, ["Other Law", "Other State"], allowed)
 );
 
 const keys = access.patchGroupKeys({
-  groups: ["tak_HCSO Ops_READ", "HCSO Tac"],
+  groups: ["tak_Alpha Ops_READ", "Alpha Tac"],
 });
-assert.ok(keys.has("hcso ops"));
-assert.ok(keys.has("hcso tac"));
+assert.ok(keys.has("alpha ops"));
+assert.ok(keys.has("alpha tac"));
 
 const uniKeys = access.patchGroupKeys({
   mode: "unidirectional",
-  leftGroups: ["tak_HCSO Ops"],
-  rightGroups: ["tak_HCSO Tac"],
+  leftGroups: ["tak_Alpha Ops"],
+  rightGroups: ["tak_Alpha Tac"],
   groups: [],
 });
-assert.ok(uniKeys.has("hcso ops"), "uni leftGroups count toward scope keys");
-assert.ok(uniKeys.has("hcso tac"), "uni rightGroups count toward scope keys");
+assert.ok(uniKeys.has("alpha ops"), "uni leftGroups count toward scope keys");
+assert.ok(uniKeys.has("alpha tac"), "uni rightGroups count toward scope keys");
 
 const picker = access.allowedKeySetFromPicker({
-  allowedChannelKeys: ["hcso ops", "hcso tac"],
+  allowedChannelKeys: ["alpha ops", "alpha tac"],
 });
 assert.ok(picker instanceof Set);
-assert.ok(picker.has("hcso ops"));
+assert.ok(picker.has("alpha ops"));
 assert.strictEqual(access.allowedKeySetFromPicker({ allowedChannelKeys: null }), null);
 
 const merged = access.mergeCreatedMutualAidPickerChannels(
-  [{ name: "tak_HCSO Ops", displayName: "HCSO Ops", baseKey: "hcso ops", count: 2 }],
-  ["tak_MA - Disaster", "MA - Disaster", "tak_HCSO Ops"]
+  [{ name: "tak_Alpha Ops", displayName: "Alpha Ops", baseKey: "alpha ops", count: 2 }],
+  ["tak_MA - Shared", "MA - Shared", "tak_Alpha Ops"]
 );
 assert.strictEqual(
-  merged.filter((c) => c.baseKey === "ma - disaster").length,
+  merged.filter((c) => c.baseKey === "ma - shared").length,
   1,
   "global picker adds unique MA-created channels"
 );
 assert.strictEqual(merged.length, 2, "existing channels are not duplicated");
-assert.strictEqual(merged.find((c) => c.baseKey === "ma - disaster").displayName, "MA - Disaster");
-assert.strictEqual(merged.find((c) => c.baseKey === "ma - disaster").name, "tak_MA - Disaster");
+assert.strictEqual(merged.find((c) => c.baseKey === "ma - shared").displayName, "MA - Shared");
+assert.strictEqual(merged.find((c) => c.baseKey === "ma - shared").name, "tak_MA - Shared");
 
 const agencyOnly = access.mergeCreatedMutualAidPickerChannels(
-  [{ name: "tak_HCSO Ops", displayName: "HCSO Ops", baseKey: "hcso ops" }],
+  [{ name: "tak_Alpha Ops", displayName: "Alpha Ops", baseKey: "alpha ops" }],
   []
 );
 assert.strictEqual(agencyOnly.length, 1, "agency picker does not receive MA names");
 
 const annotated = store.annotateGroupsWithPatchPeers(
-  [{ name: "tak_HCSO Ops" }, { name: "tak_County Law" }],
-  [{ enabled: true, groups: ["tak_HCSO Ops", "tak_HCSO Tac"] }]
+  [{ name: "tak_Alpha Ops" }, { name: "tak_Other Law" }],
+  [{ enabled: true, groups: ["tak_Alpha Ops", "tak_Alpha Tac"] }]
 );
-assert.deepStrictEqual(annotated[0].patchedWith, ["HCSO Tac"]);
+assert.deepStrictEqual(annotated[0].patchedWith, ["Alpha Tac"]);
 assert.strictEqual(annotated[1].patchedWith, undefined);
 
 (async () => {
   const dataSyncAccess = require("../services/dataSyncAccess.service");
   const originalResolve = dataSyncAccess.resolveGroupsForUser;
   dataSyncAccess.resolveGroupsForUser = async () => ({
-    groups: ["Davis Main", "HCSO Ops"],
+    groups: ["Alpha Main", "Beta Ops", "Beta Ops_WRITE", "Beta Ops_READ"],
     debug: { sourceOfTruth: "authentik" },
   });
   try {
@@ -130,21 +130,35 @@ assert.strictEqual(annotated[1].patchedWith, undefined);
       { isGlobalAdmin: true },
       [
         {
-          baseKey: "davis main",
-          name: "tak_DAVIS Main",
-          displayName: "DAVIS Main",
+          baseKey: "alpha main",
+          name: "tak_ALPHA Main",
+          displayName: "ALPHA Main",
           count: 3,
         },
       ]
     );
-    const davis = picker.channels.find((c) => c.baseKey === "davis main");
-    assert.ok(davis, "Authentik channel must appear in picker");
-    assert.strictEqual(davis.displayName, "Davis Main", "Authentik spelling must win over catalog");
-    assert.strictEqual(davis.name, "tak_Davis Main");
-    assert.strictEqual(davis.count, 3, "catalog may still enrich live counts");
+    const alpha = picker.channels.find((c) => c.displayName === "Alpha Main");
+    assert.ok(alpha, "Authentik channel must appear in picker");
+    assert.strictEqual(alpha.displayName, "Alpha Main", "Authentik spelling must win over catalog");
+    assert.strictEqual(alpha.name, "tak_Alpha Main");
+    assert.strictEqual(alpha.count, 3, "catalog may still enrich live counts");
     assert.ok(
-      !picker.channels.some((c) => c.displayName === "DAVIS Main"),
+      !picker.channels.some((c) => c.displayName === "ALPHA Main"),
       "stale TAK/catalog spelling must not override Authentik"
+    );
+
+    const behaviorVariants = picker.channels.filter((c) => c.baseKey === "beta ops");
+    assert.strictEqual(
+      behaviorVariants.length,
+      3,
+      "plain / _READ / _WRITE must remain separate picker rows"
+    );
+    assert.ok(behaviorVariants.some((c) => c.displayName === "Beta Ops_WRITE"));
+    assert.ok(behaviorVariants.some((c) => c.displayName === "Beta Ops_READ"));
+    assert.ok(behaviorVariants.some((c) => c.displayName === "Beta Ops"));
+    assert.strictEqual(
+      picker.channels.find((c) => c.displayName === "Beta Ops_WRITE").name,
+      "tak_Beta Ops_WRITE"
     );
   } finally {
     dataSyncAccess.resolveGroupsForUser = originalResolve;
