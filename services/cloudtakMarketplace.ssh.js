@@ -342,6 +342,15 @@ function isPtyRefusal(err) {
   return /unable to request a pseudo-terminal/i.test(msg);
 }
 
+/** After a host refuses a PTY once, skip PTY on later marketplace SSH in this process. */
+let sshPreferNoPty = false;
+
+function resetSshPtyPreference() {
+  sshPreferNoPty = false;
+}
+
+const PTY_FALLBACK_LOG = "SSH refused a pseudo-terminal; retrying without one";
+
 let activeAbort = null;
 
 function abortActiveCommand() {
@@ -403,12 +412,26 @@ function feedPtyChunk(hold, chunk) {
   return { lines, hold: current };
 }
 
-function execOverSsh(connectConfig, command, timeoutMs = 30000, onChunk, createClient) {
+/**
+ * Run a remote command over SSH. Prefers a wide PTY for progress when the host
+ * allows it. On PTY refusal (#109/#75), tear down and reconnect without a PTY —
+ * same-connection retry is not reliable on PermitTTY no hosts.
+ *
+ * @param {object} connectConfig
+ * @param {string} command
+ * @param {number} [timeoutMs]
+ * @param {((line: string) => void)|null} [onChunk]
+ * @param {(() => import("ssh2").Client)|null} [createClient]
+ * @param {boolean} [forceNoPty] internal: skip PTY (reconnect path / remembered preference)
+ */
+function execOverSsh(connectConfig, command, timeoutMs = 30000, onChunk, createClient, forceNoPty) {
+  const usePty = !(forceNoPty === true || sshPreferNoPty);
   return new Promise((resolve) => {
     const conn = typeof createClient === "function" ? createClient() : new Client();
     let finished = false;
     let cancelled = false;
     let stream = null;
+    let handingOff = false;
     const timers = [];
     const later = (ms, fn) => {
       const id = setTimeout(fn, ms);
@@ -427,7 +450,7 @@ function execOverSsh(connectConfig, command, timeoutMs = 30000, onChunk, createC
       exitCode: null,
     });
     const done = (payload) => {
-      if (finished) return;
+      if (finished || handingOff) return;
       finished = true;
       if (activeAbort === abort) activeAbort = null;
       clearTimeout(t);
@@ -439,7 +462,7 @@ function execOverSsh(connectConfig, command, timeoutMs = 30000, onChunk, createC
       resolve(payload);
     };
     const abort = () => {
-      if (finished) return;
+      if (finished || handingOff) return;
       cancelled = true;
       sendRemoteInterrupt(stream, "INT");
       if (!stream) {
@@ -447,10 +470,10 @@ function execOverSsh(connectConfig, command, timeoutMs = 30000, onChunk, createC
         return;
       }
       later(800, () => {
-        if (finished) return;
+        if (finished || handingOff) return;
         sendRemoteInterrupt(stream, "TERM");
         later(800, () => {
-          if (finished) return;
+          if (finished || handingOff) return;
           sendRemoteInterrupt(stream, "KILL");
           done(cancelledPayload());
         });
@@ -489,6 +512,20 @@ function execOverSsh(connectConfig, command, timeoutMs = 30000, onChunk, createC
       connectOpts.tryKeyboard = true;
     }
 
+    const reconnectWithoutPty = () => {
+      if (finished || cancelled || handingOff) return;
+      handingOff = true;
+      sshPreferNoPty = true;
+      emit(PTY_FALLBACK_LOG);
+      if (activeAbort === abort) activeAbort = null;
+      clearTimeout(t);
+      clearTimers();
+      try {
+        conn.destroy();
+      } catch (_) {}
+      execOverSsh(connectConfig, command, timeoutMs, onChunk, createClient, true).then(resolve);
+    };
+
     conn
       .on("keyboard-interactive", (name, instructions, instructionsLang, prompts, finish) => {
         if (connectConfig && connectConfig.password) {
@@ -502,91 +539,88 @@ function execOverSsh(connectConfig, command, timeoutMs = 30000, onChunk, createC
           done(cancelledPayload());
           return;
         }
-        const beginExec = (usePty) => {
-          if (finished || cancelled) return;
-          const opts = usePty ? ptyExecOptions() : {};
-          try {
-            conn.exec(command, opts, (err, strm) => {
-              if (finished) return;
-              if (err) {
-                // ssh2 closes the session channel and never sends the command
-                // when pty-req fails. Open a new channel without a pty.
-                if (usePty && !cancelled && isPtyRefusal(err)) {
-                  beginExec(false);
-                  return;
-                }
-                if (cancelled) return;
+        if (finished || handingOff) return;
+        const opts = usePty ? ptyExecOptions() : {};
+        try {
+          conn.exec(command, opts, (err, strm) => {
+            if (finished || handingOff) return;
+            if (err) {
+              // ssh2 closes the session channel and never sends the command when
+              // pty-req fails. A same-connection retry is flaky; reconnect fresh.
+              if (usePty && !cancelled && isPtyRefusal(err)) {
+                reconnectWithoutPty();
+                return;
+              }
+              if (cancelled) return;
+              done({
+                ok: false,
+                message: err.message || String(err),
+                stdout: "",
+                stderr: "",
+                exitCode: null,
+              });
+              return;
+            }
+            stream = strm;
+            if (cancelled) {
+              sendRemoteInterrupt(stream, "INT");
+              return;
+            }
+            let stdout = "";
+            let stderr = "";
+            let stdoutHold = "";
+            let stderrHold = "";
+            const takeLines = (hold, chunk) => {
+              const next = feedPtyChunk(hold, chunk);
+              next.lines.forEach((line) => emit(line));
+              return next.hold;
+            };
+            stream.on("data", (data) => {
+              const s = data.toString();
+              stdout += s;
+              stdoutHold = takeLines(stdoutHold, s);
+            });
+            if (stream.stderr && typeof stream.stderr.on === "function") {
+              stream.stderr.on("data", (data) => {
+                const s = data.toString();
+                stderr += s;
+                stderrHold = takeLines(stderrHold, s);
+              });
+            }
+            stream.on("close", (code) => {
+              emit(stripAnsi(stdoutHold).replace(/\s+$/, ""));
+              emit(stripAnsi(stderrHold).replace(/\s+$/, ""));
+              if (cancelled) {
+                done(cancelledPayload());
+                return;
+              }
+              const exitCode = Number.isInteger(code) ? code : null;
+              if (exitCode !== 0) {
                 done({
                   ok: false,
-                  message: err.message || String(err),
-                  stdout: "",
-                  stderr: "",
-                  exitCode: null,
+                  message: stderr.trim() || stdout.trim() || `Exit code ${exitCode}`,
+                  stdout,
+                  stderr,
+                  exitCode,
                 });
                 return;
               }
-              stream = strm;
-              if (cancelled) {
-                sendRemoteInterrupt(stream, "INT");
-                return;
-              }
-              let stdout = "";
-              let stderr = "";
-              let stdoutHold = "";
-              let stderrHold = "";
-              const takeLines = (hold, chunk) => {
-                const next = feedPtyChunk(hold, chunk);
-                next.lines.forEach((line) => emit(line));
-                return next.hold;
-              };
-              stream.on("data", (data) => {
-                const s = data.toString();
-                stdout += s;
-                stdoutHold = takeLines(stdoutHold, s);
-              });
-              if (stream.stderr && typeof stream.stderr.on === "function") {
-                stream.stderr.on("data", (data) => {
-                  const s = data.toString();
-                  stderr += s;
-                  stderrHold = takeLines(stderrHold, s);
-                });
-              }
-              stream.on("close", (code) => {
-                emit(stripAnsi(stdoutHold).replace(/\s+$/, ""));
-                emit(stripAnsi(stderrHold).replace(/\s+$/, ""));
-                if (cancelled) {
-                  done(cancelledPayload());
-                  return;
-                }
-                const exitCode = Number.isInteger(code) ? code : null;
-                if (exitCode !== 0) {
-                  done({
-                    ok: false,
-                    message: stderr.trim() || stdout.trim() || `Exit code ${exitCode}`,
-                    stdout,
-                    stderr,
-                    exitCode,
-                  });
-                  return;
-                }
-                done({ ok: true, stdout, stderr, exitCode: 0 });
-              });
+              done({ ok: true, stdout, stderr, exitCode: 0 });
             });
-          } catch (err) {
-            if (finished || cancelled) return;
-            done({
-              ok: false,
-              message: err.message || String(err),
-              stdout: "",
-              stderr: "",
-              exitCode: null,
-            });
-          }
-        };
-        beginExec(true);
+          });
+        } catch (err) {
+          if (finished || cancelled || handingOff) return;
+          done({
+            ok: false,
+            message: err.message || String(err),
+            stdout: "",
+            stderr: "",
+            exitCode: null,
+          });
+        }
       })
       .on("error", (err) => {
-        if (cancelled) return;
+        if (cancelled || handingOff) return;
         done({
           ok: false,
           message: err.message || String(err),
@@ -945,7 +979,9 @@ module.exports = {
   stripAnsi,
   feedPtyChunk,
   SSH_PTY_COLS,
+  PTY_FALLBACK_LOG,
   isPtyRefusal,
+  resetSshPtyPreference,
   execOverSsh,
   detectCheckout,
   testConnection,

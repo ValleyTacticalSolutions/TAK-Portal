@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file.  Minor qual
 ## Version History
 
 ### v2.0.35 - IN PROGRESS
+🐛 `Bug Fix` - Fixes issue with console sessions failing due to a pseudo-terminal
+
 ### v2.0.34 - 11/12/26
 ✨ `Enhancement` - Agencies - Modifying an agency's prefix/suffix is now allowed via the edit modal<br>
 ✨ `Enhancement` - Data Sync - Allows for multiple groups/channels to be selected for a DS Mission<br>
