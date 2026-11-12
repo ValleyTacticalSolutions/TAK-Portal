@@ -1,0 +1,38 @@
+# Keep the image build context small and cache-friendly.
+# Docker does not honor .gitignore — without this, local node_modules/.git
+# get sent as build context and any server edit busts the map-build layer.
+
+.git
+.cursor
+.vscode
+.idea
+
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+.env
+.env.*
+.env.takportal-preserve
+
+data
+logs
+reports
+*.log
+*.zip
+*.tar
+*.gz
+
+# Generated map outputs (built in the image)
+client/map/ported
+public/dist
+public/vendor/maplibre-gl
+
+# Not needed at runtime inside the image
+tests
+coverage
+*.md
+AGENTS.md
+CLAUDE.md
+takportal

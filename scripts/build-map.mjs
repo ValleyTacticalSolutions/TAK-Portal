@@ -12,6 +12,11 @@ const root = path.resolve(__dirname, "..");
 const distDir = path.join(root, "public", "dist");
 const vendorDir = path.join(root, "public", "vendor", "maplibre-gl");
 const watch = process.argv.includes("--watch");
+// Docker sets NODE_ENV=production; skip .map files to shrink the image layer.
+const sourcemap =
+  watch ||
+  process.env.MAP_SOURCEMAP === "1" ||
+  (process.env.NODE_ENV !== "production" && process.env.MAP_SOURCEMAP !== "0");
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -65,7 +70,7 @@ const shared = {
   bundle: true,
   format: "iife",
   target: ["es2022"],
-  sourcemap: true,
+  sourcemap,
   logLevel: "info",
   define: {
     "process.env.NODE_ENV": watch ? '"development"' : '"production"',

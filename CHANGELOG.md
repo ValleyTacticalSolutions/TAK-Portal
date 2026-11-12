@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 ## Version History
 
 ### v2.0.35 - IN PROGRESS
+✨ `Enhancement` - Faster `./takportal update` image rebuilds: multi-stage Dockerfile caches the map client build and prod `node_modules` so server/view-only changes skip the ~70s map/prune step; add `.dockerignore` to shrink build context<br>
 🐛 `Bug Fix` - Fixes issue with console sessions failing due to a pseudo-terminal
 
 ### v2.0.34 - 11/12/26
