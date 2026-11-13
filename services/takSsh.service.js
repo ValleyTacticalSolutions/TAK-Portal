@@ -22,6 +22,7 @@ const crypto = require("crypto");
 const { Client, utils: sshUtils } = require("ssh2");
 const { getString, getInt, getBool } = require("./env");
 const settingsSvc = require("./settings.service");
+const takMode = require("./takServerMode.service");
 
 const DATA_SSH_DIR = path.join(__dirname, "..", "data", "ssh");
 const DEFAULT_PRIVATE_KEY_PATH = path.join(DATA_SSH_DIR, "tak_ssh_ed25519");
@@ -70,15 +71,24 @@ const MARKETPLACE_HELPER_SOURCE = path.join(__dirname, "..", "host-helpers", "ma
 
 /** Shell checks that match commands granted in /etc/sudoers.d/tak-portal (not bare `sudo true`). */
 function shellProbeNopasswdRootAccess() {
+  if (takMode.isDockerMode()) {
+    return `${getPrivilegeBin()} -n docker exec -i ${takMode.getDockerContainer()} cat ${TAK_CORE_CONFIG_PATH} >/dev/null 2>&1`;
+  }
   return `${getPrivilegeBin()} -n cat ${TAK_CORE_CONFIG_PATH} >/dev/null 2>&1`;
 }
 
 function shellProbeNopasswdAsTakUser() {
+  if (takMode.isDockerMode()) {
+    return `${getPrivilegeBin()} -n docker exec -i -u tak ${takMode.getDockerContainer()} id >/dev/null 2>&1`;
+  }
   return `${getPrivilegeBin()} -n -u tak id >/dev/null 2>&1`;
 }
 
 function shellProbePasswordSudoAccess(password) {
   const safePass = quoteForSingleQuotedShell(password);
+  if (takMode.isDockerMode()) {
+    return `printf '%s\\n' '${safePass}' | ${getPrivilegeBin()} -S -p '' docker exec -i ${takMode.getDockerContainer()} cat ${TAK_CORE_CONFIG_PATH} >/dev/null 2>&1`;
+  }
   return `printf '%s\\n' '${safePass}' | ${getPrivilegeBin()} -S -p '' cat ${TAK_CORE_CONFIG_PATH} >/dev/null 2>&1`;
 }
 
@@ -115,8 +125,15 @@ function assertSafePortalSshUsername(username) {
   return u;
 }
 
-function buildPrivilegedCommand(innerCommand, mode, options = {}) {
-  const runAsUser = String(options.runAsUser || "").trim();
+function buildPrivilegedCommand(origInner, mode, options = {}) {
+  let innerCommand = origInner;
+  let runAsUser = String(options.runAsUser || "").trim();
+  if (takMode.isDockerMode()) {
+    // Docker TAK Server: reach its files/service through the container on the SSH host.
+    const d = takMode.toDockerCommand(innerCommand, runAsUser);
+    innerCommand = d.command;
+    runAsUser = d.runAsUser;
+  }
   const bin = getPrivilegeBin();
   if (!mode || mode.mode === "none") {
     throw new Error(privilegedUnavailableMessage());
@@ -161,7 +178,10 @@ function takCertCommandOptions(connect, extra = {}) {
 
 function buildPrivilegedTeeCommand(remoteAbsolutePath, mode) {
   const safePath = quoteForSingleQuotedShell(String(remoteAbsolutePath || "").trim());
-  const teeInner = `tee '${safePath}' > /dev/null`;
+  const teeInner =
+    takMode.isDockerMode() && /^\/opt\/tak\//.test(String(remoteAbsolutePath || ""))
+      ? takMode.dockerTeeInner(safePath)
+      : `tee '${safePath}' > /dev/null`;
   const bin = getPrivilegeBin();
   if (mode.mode === "root") return teeInner;
   if (mode.mode === "nopasswd") return `${bin} -n ${teeInner}`;
@@ -278,6 +298,19 @@ function readMarketplaceHelperSource() {
   }
 }
 
+/** Docker TAK Server: allow only container exec/restart for the configured container name. */
+function dockerSudoersLines() {
+  const c = takMode.getDockerContainer();
+  return (
+    [
+      `  DOCKER="$(command -v docker)"`,
+      `  echo "$PORTAL_USER ALL=(root) NOPASSWD: $DOCKER exec -i ${c} *"`,
+      `  echo "$PORTAL_USER ALL=(root) NOPASSWD: $DOCKER exec -i -u tak ${c} *"`,
+      `  echo "$PORTAL_USER ALL=(root) NOPASSWD: $DOCKER restart ${c}"`,
+    ].join("\n") + "\n"
+  );
+}
+
 function buildPortalSudoersInstallScript(portalUsername) {
   const user = assertSafePortalSshUsername(portalUsername);
   const repairScript = TAK_PORTAL_CERTS_REPAIR_SCRIPT;
@@ -318,7 +351,7 @@ TMP="$(mktemp)"
   echo "$PORTAL_USER ALL=(root) NOPASSWD: $BASH ${repairScript}"
   echo "$PORTAL_USER ALL=(root) NOPASSWD: $SYSTEMCTL restart takserver"
   echo "$PORTAL_USER ALL=(tak) NOPASSWD: ALL"
-  echo "$PORTAL_USER ALL=(root) NOPASSWD: $TAIL"
+${takMode.isDockerMode() ? dockerSudoersLines() : ""}  echo "$PORTAL_USER ALL=(root) NOPASSWD: $TAIL"
   if [ -n "$REBOOT" ] && [ -x "$REBOOT" ]; then
     echo "$PORTAL_USER ALL=(root) NOPASSWD: $REBOOT"
   fi
@@ -1965,6 +1998,8 @@ async function removeRemoteFilePrivileged(remoteAbsolutePath, timeoutMs = 60000)
 }
 
 module.exports = {
+  buildPrivilegedCommand,
+  buildPrivilegedTeeCommand,
   getPrivilegeBin,
   normalizePrivilegeBin,
   TAK_PORTAL_MARKETPLACE_HELPER,

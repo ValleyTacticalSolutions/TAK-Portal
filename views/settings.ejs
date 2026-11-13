@@ -370,6 +370,9 @@
         "DASHBOARD_TAK_STATS_REFRESH_SECONDS",
 
         "TAK_URL",
+        "TAK_SERVER_MODE",
+        "TAK_DOCKER_CONTAINER",
+        "TAK_ENROLL_HOST",
         "TAK_API_P12_PATH",
         "TAK_API_P12_PASSPHRASE",
         "TAK_CA_PATH",
@@ -667,6 +670,34 @@
         <div class="modalBody settings-body">
           <div class="grid2">
             <% renderField("TAK_URL","TAK URL","Full Marti URL, e.g. https://tak.example.gov:8443/Marti."); %>
+            <%
+              const takServerModeIsDocker =
+                String((settings && settings.TAK_SERVER_MODE) || "").trim().toLowerCase() === "docker";
+            %>
+            <label class="settings-field">
+              <span class="settings-label">
+                <span>TAK Server type</span>
+                <% renderHelpTip("Standard: TAK Server is installed directly on the SSH host (/opt/tak). Docker: TAK Server runs in a container on the SSH host; the portal reaches its certificates, CoreConfig and restart through that container."); %>
+              </span>
+              <select id="takServerModeSelect" name="settings[TAK_SERVER_MODE]">
+                <option value="standard" <%= takServerModeIsDocker ? "" : "selected" %>>Standard server</option>
+                <option value="docker" <%= takServerModeIsDocker ? "selected" : "" %>>Docker server</option>
+              </select>
+            </label>
+            <div id="takDockerFields" style="display:<%= takServerModeIsDocker ? 'contents' : 'none' %>;">
+              <% renderField("TAK_DOCKER_CONTAINER","Docker container name","Name of the TAK Server container on the SSH host (docker ps). Default: takserver."); %>
+              <% renderField("TAK_ENROLL_HOST","External enrollment host","Hostname or IP that devices use to reach TAK Server (QR codes, iTAK/ATAK enrollment). Leave blank to use the host from TAK URL. Use this when TAK URL is an internal Docker hostname."); %>
+            </div>
+            <script>
+              (function () {
+                var sel = document.getElementById("takServerModeSelect");
+                var box = document.getElementById("takDockerFields");
+                if (!sel || !box) return;
+                sel.addEventListener("change", function () {
+                  box.style.display = sel.value === "docker" ? "contents" : "none";
+                });
+              })();
+            </script>
 
         <label class="settings-field">
           <span class="settings-label">
