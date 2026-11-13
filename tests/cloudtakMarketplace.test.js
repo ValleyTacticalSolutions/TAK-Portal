@@ -17,6 +17,13 @@ const normalized = marketplace.normalizeCatalog(raw);
 assert.strictEqual(normalized.version, 1);
 assert.ok(normalized.plugins.length >= 10, "seed catalog should include example plugins");
 
+{
+  const wmd = normalized.plugins.find((p) => p.id === "wmd-plotter");
+  assert.ok(wmd, "wmd-plotter catalog entry present");
+  assert.strictEqual(wmd.web.dest, "wmd-plotter");
+  assert.ok(/cloudtak_wmdplotter_plugin/.test(wmd.repo), "wmd-plotter repo URL");
+}
+
 for (const p of normalized.plugins) {
   assert.ok(p.id, "plugin id");
   assert.ok(p.name, "plugin name");
