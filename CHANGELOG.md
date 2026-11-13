@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 ### v2.0.39 - IN PROGRESS
 🔒 `Security` - Added per-client rate limiting (default 1200 requests/minute, `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` to tune) to all portal routes, resolving CodeQL `js/missing-rate-limiting` (ops #67). `X-Forwarded-For` is only trusted when the peer is loopback/private (or `TRUSTED_PROXIES`)
 ✨ `Enhancement` - Docker TAK Server support: Settings → Connection & Certificates has a TAK Server type switch (Standard server by default, or Docker server) with a container name and an external enrollment host. In Docker mode, integration certs, CoreConfig edits and TAK Server restart go through the container over SSH, and QR/enrollment links use the external host instead of the internal TAK URL (#61, #27)
+🐛 `Bug Fix` - Fixes integration delete failing with `unknown user tak` on Docker TAK Server hosts: the stored-password cert repair and plugin update uploads now go through the container in Docker mode, and the error now says to switch TAK Server mode to Docker
 
 ### v2.0.38 - 11/20/26
 ✨ `Enhancement` - TAK Beacon added to Supported TAK Clients within Settings / Setup My Device<br>
