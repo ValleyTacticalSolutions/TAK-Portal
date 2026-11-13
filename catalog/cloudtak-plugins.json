@@ -303,6 +303,8 @@
       "repo": "https://github.com/dwhit6605-bit/cloudtak_wmdplotter_plugin.git",
       "added": "2026-11-13",
       "maintainer": "dwhit6605-bit",
+      "hidden": true,
+      "notes": "Temporarily hidden: the plugin's models/*.js are UMD files that never set the WMDModels global under CloudTAK's Vite build, so it shows 'WMD models failed to load'. Existing installs are left in place.",
       "web": { "dest": "wmd-plotter" },
       "exclude": ["**/*.md", "**/*.test.mjs"],
       "detect": [

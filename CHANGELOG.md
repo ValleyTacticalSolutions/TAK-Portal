@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 ## Version History
 
 ### v2.0.36 - 11/13/26
+🔌 `Plugin Update` - Temporarily hides the WMD Plotter Hazard Model plugin from the CloudTAK marketplace catalog (shows "WMD models failed to load" in CloudTAK); existing installs are left in place (#118)<br>
 🔌 `Plugin Update` - Adds the WMD Plotter Hazard Model plugin (CBRN plume zones posted to the active Data Sync mission) to the CloudTAK marketplace (#116)<br>
 🐛 `Bug Fix` - Fixes issue with CloudTAK marketplace installs (Replay, Rubber Sheet) hanging at "Aligning marketplace plugins" on infra-TAK hosts because docker commands waited on the open SSH stdin
 
