@@ -50,6 +50,9 @@ assert.strictEqual(
   takSsh.buildPrivilegedCommand("bash -lc 'cd /opt/tak/certs'", { mode: "root" }, asTak),
   "docker exec -i -u tak takserver bash -lc 'cd /opt/tak/certs'"
 );
+// Stored-password repair path (formerly bypassed the rewrite and hit host /opt/tak).
+const repair = takSsh.buildPrivilegedCommand("bash -lc 'chown -R tak:tak /opt/tak/certs'", { mode: "password", password: "pw" });
+assert.ok(repair.includes("-S -p '' docker exec -i takserver bash"), repair);
 // Non-TAK commands are untouched.
 assert.strictEqual(takSsh.buildPrivilegedCommand("reboot", nopass), "sudo -n reboot");
 // CoreConfig write goes into the container.
@@ -69,6 +72,14 @@ assert.ok(sudoers.includes("exec -i -u tak tak-prod_1 *"));
 assert.ok(sudoers.includes("restart tak-prod_1"));
 reset();
 assert.ok(!takSsh.buildPortalSudoersInstallScript("portal").includes("DOCKER"));
+
+// "unknown user tak" on a native-mode config gets a Docker hint (ops #36); Docker mode adds nothing.
+const sudoErr = "sudo: unknown user tak\nsudo: error initializing audit plugin sudoers_audit";
+assert.ok(takSsh.withMissingTakUserHint(sudoErr).includes("TAK Server mode to Docker"));
+assert.strictEqual(takSsh.withMissingTakUserHint("other failure"), "other failure");
+process.env.TAK_SERVER_MODE = "docker";
+assert.strictEqual(takSsh.withMissingTakUserHint(sudoErr), sudoErr);
+reset();
 
 // External enrollment host (#27).
 process.env.TAK_ENROLL_HOST = "tak.example.gov";

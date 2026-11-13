@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ### v2.0.36 - 11/13/26
 ✨ `Enhancement` - Docker TAK Server support: Settings → Connection & Certificates has a TAK Server type switch (Standard server by default, or Docker server) with a container name and an external enrollment host. In Docker mode, integration certs, CoreConfig edits and TAK Server restart go through the container over SSH, and QR/enrollment links use the external host instead of the internal TAK URL (#61, #27)<br>
+🐛 `Bug Fix` - Fixes integration delete failing with `unknown user tak` on Docker TAK Server hosts: the stored-password cert repair and plugin update uploads now go through the container in Docker mode, and the error now says to switch TAK Server mode to Docker<br>
 🐛 `Bug Fix` - Fixes issue with CloudTAK marketplace installs (Replay, Rubber Sheet) hanging at "Aligning marketplace plugins" on infra-TAK hosts because docker commands waited on the open SSH stdin
 
 ### v2.0.35 - 11/12/26

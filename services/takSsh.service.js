@@ -169,6 +169,13 @@ function buildPrivilegedCommand(origInner, mode, options = {}) {
   throw new Error(privilegedUnavailableMessage());
 }
 
+/** A native-mode command on a Docker TAK host fails with "unknown user tak": say how to fix it. */
+function withMissingTakUserHint(message) {
+  const m = String(message || "");
+  if (takMode.isDockerMode() || !/unknown user:?\s+tak\b/i.test(m)) return m;
+  return `${m}\nThe SSH host has no "tak" user. If TAK Server runs in Docker, set TAK Server mode to Docker in Server Settings and re-run Generate Key + Handshake.`;
+}
+
 function takCertCommandOptions(connect, extra = {}) {
   return {
     sshUsername: String(connect?.username || "").trim(),
@@ -428,8 +435,7 @@ async function runTakCertsRepairWithStoredSudoPassword(connect) {
   if (!password) {
     return { ok: false, message: "No stored sudo password for cert repair." };
   }
-  const safePass = quoteForSingleQuotedShell(password);
-  const cmd = `printf '%s\\n' '${safePass}' | ${getPrivilegeBin()} -S -p '' ${buildInlineTakCertsRepairCommand()}`;
+  const cmd = buildPrivilegedCommand(buildInlineTakCertsRepairCommand(), { mode: "password", password });
   return execOverSsh(connect, cmd, 30000);
 }
 
@@ -700,7 +706,7 @@ async function revokeIntegrationCertViaSshScript(username) {
   const result = await execOverSsh(connect, revokeCommand, 45000);
 
   if (!result.ok) {
-    throw new Error(result.message || "Failed to revoke integration cert via SSH script.");
+    throw new Error(withMissingTakUserHint(result.message) || "Failed to revoke integration cert via SSH script.");
   }
 
   // Cleanup integration certificate artifacts after revoke.
@@ -724,7 +730,7 @@ async function revokeIntegrationCertViaSshScript(username) {
     30000
   );
   if (!cleanupResult.ok) {
-    throw new Error(cleanupResult.message || "Certificate revoke succeeded, but cleanup failed.");
+    throw new Error(withMissingTakUserHint(cleanupResult.message) || "Certificate revoke succeeded, but cleanup failed.");
   }
 
   deleteStoredIntegrationCertFiles(un);
@@ -959,8 +965,7 @@ function execOverSshWithStdin(connectConfig, command, stdinUtf8, timeoutMs = 180
             done({ ok: true, stdout, stderr, exitCode: 0 });
           });
 
-          const input = String(stdinUtf8 || "");
-          stream.end(Buffer.from(input, "utf8"));
+          stream.end(Buffer.isBuffer(stdinUtf8) ? stdinUtf8 : Buffer.from(String(stdinUtf8 || ""), "utf8"));
         });
       })
       .on("error", (err) => {
@@ -1039,7 +1044,8 @@ async function runRemotePrivilegedCommand(rootShellCommand, timeoutMs = 30000, o
       mode,
       takCertCommandOptions(connect, options || {})
     );
-    return execOverSsh(connect, cmd, timeoutMs);
+    const res = await execOverSsh(connect, cmd, timeoutMs);
+    return res.ok ? res : { ...res, message: withMissingTakUserHint(res.message) };
   } catch (err) {
     return {
       ok: false,
@@ -1886,6 +1892,31 @@ async function uploadRemoteFilePrivileged({ localPath, remoteAbsolutePath, timeo
 
   const connect = toConnectConfig(cfg);
   const baseName = path.basename(remote);
+  if (takMode.isDockerMode() && /^\/opt\/tak\//.test(remote)) {
+    // The target lives inside the container, so a host /tmp staging file can't be copied there.
+    // Stream the bytes through the container's stdin (tee) instead.
+    try {
+      const mode = await getPrivilegedMode(connect);
+      const mk = await execOverSsh(
+        connect,
+        buildPrivilegedCommand(
+          `mkdir -p '${quoteForSingleQuotedShell(path.posix.dirname(remote))}'`,
+          mode,
+          takCertCommandOptions(connect, { runAsUser: "tak" })
+        ),
+        60000
+      );
+      if (!mk.ok) return mk;
+      return await execOverSshWithStdin(
+        connect,
+        buildPrivilegedTeeCommand(remote, mode),
+        fs.readFileSync(local),
+        Math.max(60000, Math.min(timeoutMs, 120000))
+      );
+    } catch (err) {
+      return { ok: false, message: err?.message || String(err), stdout: "", stderr: "", exitCode: null };
+    }
+  }
   const tmpRemote = `${REMOTE_TMP_SYNC_DIR}/${Date.now()}_${baseName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
   const remoteDir = path.posix.dirname(remote);
 
@@ -1999,6 +2030,7 @@ async function removeRemoteFilePrivileged(remoteAbsolutePath, timeoutMs = 60000)
 
 module.exports = {
   buildPrivilegedCommand,
+  withMissingTakUserHint,
   buildPrivilegedTeeCommand,
   getPrivilegeBin,
   normalizePrivilegeBin,
