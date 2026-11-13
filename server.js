@@ -2098,6 +2098,21 @@ app.post(
         merged[key] = mapBasemapsConfig.normalizeBasemapId(bodySettings[key]);
         return;
       }
+      if (key === "TAK_SERVER_MODE") {
+        merged[key] = require("./services/takServerMode.service").normalizeMode(bodySettings[key]);
+        return;
+      }
+      if (key === "TAK_DOCKER_CONTAINER" || key === "TAK_ENROLL_HOST") {
+        const modeSvc = require("./services/takServerMode.service");
+        const raw = String(bodySettings[key] || "").trim();
+        const ok =
+          key === "TAK_DOCKER_CONTAINER"
+            ? modeSvc.isValidContainerName(raw)
+            : modeSvc.isValidEnrollHost(raw);
+        // Invalid values (spaces, schemes, shell characters) are dropped rather than stored.
+        merged[key] = ok ? raw : "";
+        return;
+      }
       if (key === "TAK_SSH_PRIVILEGE_CMD") {
         merged[key] =
           String(bodySettings[key] || "").trim().toLowerCase() === "dzdo" ? "dzdo" : "sudo";

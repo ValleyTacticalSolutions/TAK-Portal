@@ -207,6 +207,8 @@ function randomPassword(length = 18) {
 }
 
 function getTakHost() {
+  const enrollHost = require("./takServerMode.service").getEnrollHost();
+  if (enrollHost) return enrollHost;
   // Match QR Generator behavior: prefer TAK_URL from settings.json, fall back to env.
   try {
     const settings = settingsSvc.getSettings ? settingsSvc.getSettings() || {} : {};

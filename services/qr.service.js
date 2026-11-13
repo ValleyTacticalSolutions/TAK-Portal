@@ -32,6 +32,9 @@ function getTakUrl() {
 }
 
 function getTakHost() {
+  // Docker/NAT setups: devices need the external host, not the internal API hostname (#27).
+  const enrollHost = require("./takServerMode.service").getEnrollHost();
+  if (enrollHost) return enrollHost;
   const takUrl = getTakUrl();
   if (!takUrl) return null;
   try {
