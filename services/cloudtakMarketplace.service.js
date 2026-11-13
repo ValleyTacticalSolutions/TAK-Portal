@@ -958,9 +958,9 @@ docker_cli() {
   if [ "$CTAK_DOCKER_BIN" = "$CTAK_DOCKER_PASS" ]; then
     printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' docker "$@"
   elif [ "$CTAK_DOCKER_BIN" = "$CTAK_DOCKER_NOPASS" ]; then
-    "$CTAK_PRIV" -n docker "$@"
+    "$CTAK_PRIV" -n docker "$@" </dev/null
   else
-    command docker "$@"
+    command docker "$@" </dev/null
   fi
 }
 

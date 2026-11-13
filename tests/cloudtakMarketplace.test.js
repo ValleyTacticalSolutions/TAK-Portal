@@ -1626,3 +1626,11 @@ assertOnboardValidation()
     console.error(err);
     process.exit(1);
   });
+
+// #75: docker_cli must not inherit the SSH session's open stdin (infra-TAK shim hangs on it).
+{
+  const m = printScript.match(/docker_cli\(\) \{[\s\S]*?\n\}/);
+  assert.ok(m, "docker_cli function present");
+  assert.match(m[0], /-n docker "\$@" <\/dev\/null/, "sudo -n docker path closes stdin");
+  assert.match(m[0], /command docker "\$@" <\/dev\/null/, "plain docker path closes stdin");
+}
