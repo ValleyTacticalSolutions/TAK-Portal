@@ -295,6 +295,20 @@
         "api/web/plugins/measure/index.ts",
         "app/plugins/measure/index.ts"
       ]
+    },
+    {
+      "id": "wmd-plotter",
+      "name": "WMD Plotter Hazard Model",
+      "description": "Compute CBRN hazard plumes in the browser and post the zones to the active Data Sync mission.",
+      "repo": "https://github.com/dwhit6605-bit/cloudtak_wmdplotter_plugin.git",
+      "added": "2026-11-13",
+      "maintainer": "dwhit6605-bit",
+      "web": { "dest": "wmd-plotter" },
+      "exclude": ["**/*.md", "**/*.test.mjs"],
+      "detect": [
+        "api/web/plugins/wmd-plotter/index.ts",
+        "app/plugins/wmd-plotter/index.ts"
+      ]
     }
   ]
 }
