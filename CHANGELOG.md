@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ### v2.0.39 - IN PROGRESS
 🔒 `Security` - Added per-client rate limiting (default 1200 requests/minute, `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` to tune) to all portal routes, resolving CodeQL `js/missing-rate-limiting` (ops #67). `X-Forwarded-For` is only trusted when the peer is loopback/private (or `TRUSTED_PROXIES`)
+✨ `Enhancement` - Docker TAK Server support: Settings → Connection & Certificates has a TAK Server type switch (Standard server by default, or Docker server) with a container name and an external enrollment host. In Docker mode, integration certs, CoreConfig edits and TAK Server restart go through the container over SSH, and QR/enrollment links use the external host instead of the internal TAK URL (#61, #27)
 
 ### v2.0.38 - 11/20/26
 ✨ `Enhancement` - TAK Beacon added to Supported TAK Clients within Settings / Setup My Device<br>
@@ -37,7 +38,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 ### v2.0.36 - 11/15/26
 ✨ `Enhancement` - CloudTAK Marketplace shows a version bubble on plugins that publish a version (latest version for available plugins, installed version, or installed → latest when an update exists); plugins without a version show no bubble (#113)<br>
 ✨ `Enhancement` - Mutual Aid - Enrollment QR modal has a "Show Details" button that shows the host, username, and password in plain text (#121)<br>
-🐛 `Bug Fix` - Fixes issue with CloudTAK marketplace installs (Replay, Rubber Sheet) hanging at "Aligning marketplace plugins" on infra-TAK hosts because docker commands waited on the open SSH
+🐛 `Bug Fix` - Fixes issue with CloudTAK marketplace installs (Replay, Rubber Sheet) hanging at "Aligning marketplace plugins" on infra-TAK hosts because docker commands waited on the open SSH stdin
 
 ### v2.0.35 - 11/12/26
 ✨ `Enhancement` - Faster `./takportal update` image rebuilds: multi-stage Dockerfile caches the map client build and prod `node_modules` so server/view-only changes skip the ~70s map/prune step; add `.dockerignore` to shrink build context<br>
