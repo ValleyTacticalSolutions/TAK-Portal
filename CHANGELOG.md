@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 ## Version History
 
 ### v2.0.36 - 11/13/26
+✨ `Enhancement` - Mutual Aid - Enrollment QR modal has a "Show Details" button that shows the host, username, and password in plain text (#121)<br>
 🐛 `Bug Fix` - Fixes issue with CloudTAK marketplace installs (Replay, Rubber Sheet) hanging at "Aligning marketplace plugins" on infra-TAK hosts because docker commands waited on the open SSH stdin
 
 ### v2.0.35 - 11/12/26
