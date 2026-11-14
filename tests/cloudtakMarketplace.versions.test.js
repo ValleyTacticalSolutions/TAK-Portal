@@ -23,14 +23,24 @@ assert.strictEqual(m.pluginVersionBubble({ installed: false }).label, "");
 assert.strictEqual(m.pluginVersionBubble({ installed: true }).label, "");
 assert.strictEqual(m.pluginVersionBubble({ installed: false, remoteVersion: "1.1.0" }).label, "v1.1.0");
 assert.strictEqual(m.pluginVersionBubble({ installed: true, installedVersion: "1.0.0", remoteVersion: "1.0.0" }).label, "v1.0.0");
+// Update available: Installed pill keeps the installed version (not the remote/target).
 assert.strictEqual(
   m.pluginVersionBubble({ installed: true, installedVersion: "1.0.0", remoteVersion: "1.1.0", updateAvailable: true }).label,
   "v1.0.0"
+);
+assert.strictEqual(
+  m.pluginVersionBubble({ installed: true, installedVersion: "2.0.0", remoteVersion: "2.0.1", updateAvailable: true }).label,
+  "v2.0.0"
 );
 assert.strictEqual(m.pluginVersionBubble({ installed: true, remoteVersion: "1.1.0" }).label, "");
 assert.match(
   m.pluginVersionBubble({ installed: true, installedVersion: "2.0.0", remoteVersion: "2.0.1", updateAvailable: true }).title,
   /latest v2\.0\.1/
+);
+// Same package version with a newer SHA: Update button stays plain "Update" (UI); bubble still shows installed.
+assert.strictEqual(
+  m.pluginVersionBubble({ installed: true, installedVersion: "1.4.0", remoteVersion: "1.4.0", updateAvailable: true }).label,
+  "v1.4.0"
 );
 
 // Scan: reads version from package.json (root or plugin/), blank when none.

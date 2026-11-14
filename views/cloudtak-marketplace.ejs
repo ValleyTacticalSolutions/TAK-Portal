@@ -477,6 +477,15 @@
     });
   }
 
+  /** Normalize a version field or versionLabel into a "vX.Y.Z" token for status pills. */
+  function pluginVerToken(v) {
+    var s = String(v == null ? "" : v).trim();
+    if (!s) return "";
+    if (/^v\d/i.test(s)) return "v" + s.slice(1);
+    if (/^\d/.test(s)) return "v" + s;
+    return s;
+  }
+
   function $(id) { return document.getElementById(id); }
   function setMsg(text, isError) {
     var el = $("mpMsg");
@@ -798,7 +807,10 @@
     list.forEach(function (p) {
       var active = activeJobForPlugin(p);
       var progress = progressLabel(active);
-      var ver = p.versionLabel || "";
+      // Installed pill always uses the on-host version (even when an update exists).
+      // Available/New pills use catalog/remote version.
+      var installedVer = pluginVerToken(p.installedVersion) || (p.installed ? pluginVerToken(p.versionLabel) : "");
+      var availableVer = pluginVerToken(p.versionLabel) || pluginVerToken(p.remoteVersion);
       var pillClass = "";
       var pillLabel = "";
       if (progress) {
@@ -809,19 +821,23 @@
         pillLabel = "Error";
       } else if (p.installed) {
         pillClass = "plugin-version-pill is-installed";
-        pillLabel = ver ? "Installed " + ver : "Installed";
+        pillLabel = installedVer ? "Installed " + installedVer : "Installed";
       } else if (p.isNew) {
         pillClass = "plugin-version-pill is-new";
-        pillLabel = ver ? "New " + ver : "New";
-      } else if (ver) {
+        pillLabel = availableVer ? "New " + availableVer : "New";
+      } else if (availableVer) {
         pillClass = "plugin-version-pill";
-        pillLabel = ver;
+        pillLabel = availableVer;
       }
       var pill = pillClass ? '<span class="' + pillClass + '">' + pillLabel + "</span>" : "";
       var staged = stagedForPlugin(p);
       var actions = "";
       var canReinstall = !!p.error && !p.unknown;
-      var updateLabel = p.remoteVersion ? "Update to v" + p.remoteVersion : "Update";
+      var remoteVer = pluginVerToken(p.remoteVersion);
+      var updateLabel =
+        remoteVer && installedVer && remoteVer.toLowerCase() !== installedVer.toLowerCase()
+          ? "Update to " + remoteVer
+          : "Update";
       if (jobBusy) {
         actions = "";
       } else if (p.unknown) {

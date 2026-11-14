@@ -1790,11 +1790,15 @@ function pluginVersionBubble(row) {
 const REMOTE_VERSION_TTL_MS = 10 * 60 * 1000;
 const remoteVersionCache = new Map();
 
-/** Version string from the plugin repo's package.json at its ref (root, then plugin/). "" if none. */
-async function remoteVersionForPlugin(plugin, now = Date.now()) {
+/**
+ * Version string from the plugin repo's package.json at a ref/SHA (root, then plugin/).
+ * "" if none. Optional `refOverride` is used for installed-commit lookups.
+ */
+async function remoteVersionForPlugin(plugin, now = Date.now(), refOverride) {
   const gh = plugin && parseGitHubRepo(plugin.repo);
   if (!gh) return "";
-  const key = gh.owner + "/" + gh.repo + "@" + (plugin.ref || "main");
+  const ref = String(refOverride || plugin.ref || "main").trim() || "main";
+  const key = gh.owner + "/" + gh.repo + "@" + ref;
   const hit = remoteVersionCache.get(key);
   if (hit && now - hit.at < REMOTE_VERSION_TTL_MS) return hit.version;
   let version = "";
@@ -1802,7 +1806,7 @@ async function remoteVersionForPlugin(plugin, now = Date.now()) {
     try {
       const url =
         "https://raw.githubusercontent.com/" + gh.owner + "/" + gh.repo + "/" +
-        encodeURIComponent(plugin.ref || "main") + "/" + file;
+        encodeURIComponent(ref) + "/" + file;
       const response = await axios.get(url, { timeout: 8000, headers: { "User-Agent": "TAK-Portal" }, responseType: "json" });
       const data = response.data;
       version = cleanPluginVersion(data && typeof data === "object" ? data.version : "");
@@ -1868,6 +1872,11 @@ async function enrichUpdateShas(uiPlugins) {
       next.remoteVersion = await remoteVersionForPlugin(row.catalog);
     }
     next.installedVersion = cleanPluginVersion(row.installedVersion);
+    // Host scan can omit package.json version; resolve from the installed commit so
+    // the Installed pill still shows "Installed vX" when an update is available.
+    if (row.installed && !next.installedVersion && next.installedSha && row.catalog) {
+      next.installedVersion = await remoteVersionForPlugin(row.catalog, Date.now(), next.installedSha);
+    }
     const bubble = pluginVersionBubble(next);
     next.versionLabel = bubble.label;
     next.versionTitle = bubble.title;
@@ -2070,7 +2079,9 @@ function buildUiPlugins(options = {}) {
   const plugins = [...byId.values()]
     .map((row) => {
       const sha = shaById[row.id];
-      const installedVersion = cleanPluginVersion(row.scan && row.scan.version);
+      const installedVersion =
+        cleanPluginVersion(row.scan && row.scan.version) ||
+        cleanPluginVersion(sha && sha.installedVersion);
       const base = sha
         ? {
             ...row,
@@ -2108,6 +2119,7 @@ async function refreshShaCache() {
       installedSha: row.installedSha || "",
       updateAvailable: !!row.updateAvailable,
       remoteVersion: row.remoteVersion || "",
+      installedVersion: row.installedVersion || "",
     };
   }
   store.writeShaCache({ updatedAt: new Date().toISOString(), byId });
