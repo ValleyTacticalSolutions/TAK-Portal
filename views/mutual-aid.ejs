@@ -671,6 +671,19 @@
 .userQrPairActions .btn#qrCopyBtn {
   flex: 1 1 0;
 }
+.userQrPairActions .btn#qrDetailsBtn {
+  flex: 1 1 0;
+}
+.qrDetailsPanel {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  text-align: left;
+  line-height: 1.7;
+  word-break: break-all;
+  user-select: text;
+}
 .qrPacketBtn {
   background: #2e7d32;
   border-color: #2e7d32;
@@ -1228,6 +1241,12 @@ body.noScroll .main {
         <div class="row userQrPairActions">
           <button class="btn success" type="button" id="qrSaveBtn" disabled>Save Image</button>
           <button class="btn" type="button" id="qrCopyBtn" disabled>Copy URL</button>
+          <button class="btn" type="button" id="qrDetailsBtn" disabled>Show Details</button>
+        </div>
+        <div id="qrDetailsPanel" class="qrDetailsPanel" style="display:none;">
+          <div><strong>Host:</strong> <span id="qrDetailHost"></span></div>
+          <div><strong>Username:</strong> <span id="qrDetailUser"></span></div>
+          <div><strong>Password:</strong> <span id="qrDetailPass"></span></div>
         </div>
       </div>
       <div class="maQrPacketFooter">
@@ -1508,6 +1527,7 @@ body.noScroll .main {
   </div>
 </div>
 
+<script src="/enrollDetails.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -2149,6 +2169,13 @@ const qrCopyBtn = document.getElementById("qrCopyBtn");
 const qrSaveBtn = document.getElementById("qrSaveBtn");
 const qrDownloadPacketBtn = document.getElementById("qrDownloadPacketBtn");
 const qrMsg = document.getElementById("qrMsg");
+const qrDetailsBtn = document.getElementById("qrDetailsBtn");
+const qrDetailsPanel = document.getElementById("qrDetailsPanel");
+
+function hideQrDetails() {
+  if (qrDetailsPanel) qrDetailsPanel.style.display = "none";
+  if (qrDetailsBtn) qrDetailsBtn.textContent = "Show Details";
+}
 const emailPacketSendBtn = document.getElementById("emailPacketSendBtn");
 const emailPacketTo = document.getElementById("emailPacketTo");
 
@@ -2190,6 +2217,7 @@ async function ensureEnrollmentQrReady(item) {
 
 function setQrPacketButtonsEnabled(enabled) {
   if (qrCopyBtn) qrCopyBtn.disabled = !enabled;
+  if (qrDetailsBtn) qrDetailsBtn.disabled = !enabled;
   if (qrSaveBtn) qrSaveBtn.disabled = !enabled;
   if (qrDownloadPacketBtn) qrDownloadPacketBtn.disabled = !enabled;
   if (emailPacketSendBtn) emailPacketSendBtn.disabled = !enabled;
@@ -2201,6 +2229,7 @@ function openQrModal(item){
   qrTitle.textContent = `Enrollment QR — ${formatMutualAidTypeLabel(item.type) || item.type} — ${item.title}`;
   qrActiveId = item.id;
   qrActiveItem = item;
+  hideQrDetails();
   if (emailPacketTo) emailPacketTo.value = "";
 
   const cached = enrollmentQrByItemId.get(String(item.id));
@@ -2240,6 +2269,17 @@ qrCopyBtn.onclick = async () => {
   if (!qrEnrollUrl) return;
   await copyToClipboard(qrEnrollUrl);
   setMsg(qrMsg, "Copied!", true);
+};
+qrDetailsBtn.onclick = () => {
+  if (!qrDetailsPanel) return;
+  if (qrDetailsPanel.style.display !== "none") return hideQrDetails();
+  const d = window.EnrollDetails.parseEnrollUrl(qrEnrollUrl);
+  if (!d) return setMsg(qrMsg, "No details available.", false);
+  document.getElementById("qrDetailHost").textContent = d.host;
+  document.getElementById("qrDetailUser").textContent = d.username;
+  document.getElementById("qrDetailPass").textContent = d.password;
+  qrDetailsPanel.style.display = "block";
+  qrDetailsBtn.textContent = "Hide Details";
 };
 qrSaveBtn.onclick = () => {
   if (!qrActiveId) return;
