@@ -24,3 +24,11 @@ test("mutual aid QR modal has a Show Details button after Copy URL", () => {
   assert.match(html, /id="qrDetailsPanel"/);
   assert.match(html, /\/enrollDetails\.js/);
 });
+
+test("QR modal action buttons are never narrower than their text", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "views", "mutual-aid.ejs"), "utf8");
+  const rule = html.match(/\.userQrPairActions \.btn \{[^}]*\}/);
+  assert.ok(rule, "base button rule exists");
+  assert.match(rule[0], /min-width:\s*max-content/);
+  assert.doesNotMatch(html, /\.userQrPairActions \.btn#qr\w+Btn \{\s*flex:\s*\d+ 1 0;/);
+});
