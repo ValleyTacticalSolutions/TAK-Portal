@@ -637,13 +637,18 @@
   filter: brightness(0.95);
 }
 
-.userQrModal {
-  max-width: 480px;
+#qrOverlay .userQrModal {
+  width: min(520px, 96vw);
+  max-width: 520px;
+  /* Grow with details when the viewport allows; no inner scrollbar. */
+  max-height: calc(100dvh - 24px);
+  overflow: hidden;
 }
 .userQrSingleCol {
   text-align: center;
   margin: 0 auto;
-  max-width: 320px;
+  width: 100%;
+  max-width: none;
 }
 .userQrPairImg {
   max-width: 280px;
@@ -652,24 +657,37 @@
   border-radius: 14px;
   display: block;
   margin: 0 auto;
+  transition: max-width 0.15s ease;
+}
+#qrOverlay .userQrModal.qr-details-open .userQrPairImg {
+  max-width: 220px;
 }
 .userQrPairActions {
-  gap: 10px;
+  gap: 8px;
   margin-top: 14px;
   justify-content: stretch;
   flex-wrap: nowrap;
+  width: 100%;
 }
 .userQrPairActions .btn {
+  flex: 1 1 0;
   width: auto;
   min-width: 0;
   max-width: none;
   white-space: nowrap;
+  padding-left: 8px;
+  padding-right: 8px;
+  box-sizing: border-box;
 }
-.userQrPairActions .btn#qrSaveBtn {
-  flex: 2 1 0;
-}
-.userQrPairActions .btn#qrCopyBtn {
-  flex: 1 1 0;
+.qrDetailsPanel {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  text-align: left;
+  line-height: 1.7;
+  word-break: break-all;
+  user-select: text;
 }
 .qrPacketBtn {
   background: #2e7d32;
@@ -1228,6 +1246,12 @@ body.noScroll .main {
         <div class="row userQrPairActions">
           <button class="btn success" type="button" id="qrSaveBtn" disabled>Save Image</button>
           <button class="btn" type="button" id="qrCopyBtn" disabled>Copy URL</button>
+          <button class="btn" type="button" id="qrDetailsBtn" disabled>Show Details</button>
+        </div>
+        <div id="qrDetailsPanel" class="qrDetailsPanel" style="display:none;">
+          <div><strong>Host:</strong> <span id="qrDetailHost"></span></div>
+          <div><strong>Username:</strong> <span id="qrDetailUser"></span></div>
+          <div><strong>Password:</strong> <span id="qrDetailPass"></span></div>
         </div>
       </div>
       <div class="maQrPacketFooter">
@@ -1508,6 +1532,7 @@ body.noScroll .main {
   </div>
 </div>
 
+<script src="/enrollDetails.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -2149,6 +2174,15 @@ const qrCopyBtn = document.getElementById("qrCopyBtn");
 const qrSaveBtn = document.getElementById("qrSaveBtn");
 const qrDownloadPacketBtn = document.getElementById("qrDownloadPacketBtn");
 const qrMsg = document.getElementById("qrMsg");
+const qrDetailsBtn = document.getElementById("qrDetailsBtn");
+const qrDetailsPanel = document.getElementById("qrDetailsPanel");
+
+function hideQrDetails() {
+  if (qrDetailsPanel) qrDetailsPanel.style.display = "none";
+  if (qrDetailsBtn) qrDetailsBtn.textContent = "Show Details";
+  const modal = qrOverlay?.querySelector(".userQrModal");
+  if (modal) modal.classList.remove("qr-details-open");
+}
 const emailPacketSendBtn = document.getElementById("emailPacketSendBtn");
 const emailPacketTo = document.getElementById("emailPacketTo");
 
@@ -2190,6 +2224,7 @@ async function ensureEnrollmentQrReady(item) {
 
 function setQrPacketButtonsEnabled(enabled) {
   if (qrCopyBtn) qrCopyBtn.disabled = !enabled;
+  if (qrDetailsBtn) qrDetailsBtn.disabled = !enabled;
   if (qrSaveBtn) qrSaveBtn.disabled = !enabled;
   if (qrDownloadPacketBtn) qrDownloadPacketBtn.disabled = !enabled;
   if (emailPacketSendBtn) emailPacketSendBtn.disabled = !enabled;
@@ -2201,6 +2236,7 @@ function openQrModal(item){
   qrTitle.textContent = `Enrollment QR — ${formatMutualAidTypeLabel(item.type) || item.type} — ${item.title}`;
   qrActiveId = item.id;
   qrActiveItem = item;
+  hideQrDetails();
   if (emailPacketTo) emailPacketTo.value = "";
 
   const cached = enrollmentQrByItemId.get(String(item.id));
@@ -2240,6 +2276,19 @@ qrCopyBtn.onclick = async () => {
   if (!qrEnrollUrl) return;
   await copyToClipboard(qrEnrollUrl);
   setMsg(qrMsg, "Copied!", true);
+};
+qrDetailsBtn.onclick = () => {
+  if (!qrDetailsPanel) return;
+  if (qrDetailsPanel.style.display !== "none") return hideQrDetails();
+  const d = window.EnrollDetails.parseEnrollUrl(qrEnrollUrl);
+  if (!d) return setMsg(qrMsg, "No details available.", false);
+  document.getElementById("qrDetailHost").textContent = d.host;
+  document.getElementById("qrDetailUser").textContent = d.username;
+  document.getElementById("qrDetailPass").textContent = d.password;
+  qrDetailsPanel.style.display = "block";
+  qrDetailsBtn.textContent = "Hide Details";
+  const modal = qrOverlay?.querySelector(".userQrModal");
+  if (modal) modal.classList.add("qr-details-open");
 };
 qrSaveBtn.onclick = () => {
   if (!qrActiveId) return;
