@@ -220,6 +220,16 @@
     font-size: 0.8rem;
     color: var(--muted);
   }
+  .plugin-cards .plugin-version-tag {
+    margin-left: 8px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: var(--hover-strong);
+    color: var(--muted);
+    white-space: nowrap;
+  }
   .plugin-cards .plugin-version-pill {
     flex-shrink: 0;
     font-size: 0.68rem;
@@ -865,6 +875,13 @@
         '<div class="plugin-actions">' + actions + "</div></div>";
       var titleBlock = el.querySelector(".plugin-title-block");
       titleBlock.querySelector(".plugin-name").textContent = p.name;
+      if (p.versionLabel) {
+        var verEl = document.createElement("span");
+        verEl.className = "plugin-version-tag";
+        verEl.textContent = p.versionLabel;
+        if (p.versionTitle) verEl.title = p.versionTitle;
+        titleBlock.querySelector(".plugin-name").after(verEl);
+      }
       var pillEl = el.querySelector(".plugin-version-pill");
       if (pillEl && p.error && p.errorMessage) pillEl.title = p.errorMessage;
       if (repoHref) {
