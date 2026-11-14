@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 ## Version History
 
 ### v2.0.36 - 11/13/26
+✨ `Enhancement` - CloudTAK Marketplace shows a version bubble on plugins that publish a version (latest version for available plugins, installed version, or installed → latest when an update exists); plugins without a version show no bubble (#113)<br>
 🐛 `Bug Fix` - Fixes issue with CloudTAK marketplace installs (Replay, Rubber Sheet) hanging at "Aligning marketplace plugins" on infra-TAK hosts because docker commands waited on the open SSH stdin
 
 ### v2.0.35 - 11/12/26

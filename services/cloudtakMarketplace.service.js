@@ -1247,7 +1247,7 @@ printf 'SCAN_BEGIN\\n'
 emit_plugin() {
   local p="$1"
   [ -e "$p" ] || return 0
-  local name kind target has_index pkg remote head
+  local name kind target has_index pkg ver remote head
   name=$(basename "$p")
   case "$name" in
     example.ts|example.js|example.tsx|README.md|readme.md|README|LICENSE|LICENSE.md|.gitkeep|.DS_Store|package.json|tsconfig.json) return 0 ;;
@@ -1271,6 +1271,12 @@ emit_plugin() {
   elif [ -f "$p/plugin/package.json" ]; then
     pkg=$(grep -m1 '"name"' "$p/plugin/package.json" | sed 's/.*"name"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/' || true)
   fi
+  ver=""
+  if [ -f "$p/package.json" ]; then
+    ver=$(grep -m1 '"version"' "$p/package.json" | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/' || true)
+  elif [ -f "$p/plugin/package.json" ]; then
+    ver=$(grep -m1 '"version"' "$p/plugin/package.json" | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/' || true)
+  fi
   remote=""
   head=""
   if [ -d "$p/.git" ]; then
@@ -1280,7 +1286,7 @@ emit_plugin() {
     remote=$(git -C "$p/plugin" remote get-url origin 2>/dev/null || true)
     head=$(git -C "$p/plugin" rev-parse HEAD 2>/dev/null || true)
   fi
-  printf 'PLUGIN\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "$name" "$kind" "$has_index" "$pkg" "$remote" "$head" "$target"
+  printf 'PLUGIN\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "$name" "$kind" "$has_index" "$pkg" "$remote" "$head" "$target" "$ver"
 }
 scan_plugin_dir() {
   local dir="$1"
@@ -1361,6 +1367,7 @@ function parseScanStdout(stdout, catalogPlugins) {
       packageName: row.packageName || "",
       gitRemote: row.gitRemote || "",
       gitHead: row.gitHead || "",
+      version: cleanPluginVersion(row.version),
       symlinkTarget: row.symlinkTarget || "",
       routeFiles: [],
       detectHits: [],
@@ -1378,6 +1385,7 @@ function parseScanStdout(stdout, catalogPlugins) {
         gitRemote: parts[5] || "",
         gitHead: parts[6] || "",
         symlinkTarget: parts[7] || "",
+        version: parts[8] || "",
       });
     } else if (t.startsWith("PLUGIN ")) {
       const get = (key) => {
@@ -1392,6 +1400,7 @@ function parseScanStdout(stdout, catalogPlugins) {
         gitRemote: get("remote"),
         gitHead: get("head"),
         symlinkTarget: get("target"),
+        version: get("version"),
       });
     } else if (t.startsWith("DETECT_HIT ")) {
       const hit = t.slice(11).trim();
@@ -1747,6 +1756,62 @@ function githubHeaders() {
   };
 }
 
+/**
+ * Plugin versions come from each plugin's own package.json. Not every plugin has
+ * one, so an empty string means "no version" and the UI shows no version bubble.
+ * Outside text: only a short, plain version token is kept.
+ */
+function cleanPluginVersion(v) {
+  const s = String(v == null ? "" : v).trim().replace(/^v(?=\d)/i, "");
+  return /^[0-9][0-9A-Za-z.+_-]{0,31}$/.test(s) ? s : "";
+}
+
+/** Text for the card's version bubble; empty when the plugin has no known version. */
+function pluginVersionBubble(row) {
+  const installedV = cleanPluginVersion(row && row.installedVersion);
+  const remoteV = cleanPluginVersion(row && row.remoteVersion);
+  if (row && row.installed) {
+    if (installedV) {
+      if (remoteV && remoteV !== installedV && row.updateAvailable) {
+        return { label: "v" + installedV + " \u2192 v" + remoteV, title: "Installed v" + installedV + ", latest v" + remoteV };
+      }
+      return { label: "v" + installedV, title: "Installed version v" + installedV + (remoteV ? ", latest v" + remoteV : "") };
+    }
+    if (remoteV) return { label: "Latest v" + remoteV, title: "Latest available version v" + remoteV };
+    return { label: "", title: "" };
+  }
+  if (remoteV) return { label: "v" + remoteV, title: "Latest available version v" + remoteV };
+  return { label: "", title: "" };
+}
+
+const REMOTE_VERSION_TTL_MS = 10 * 60 * 1000;
+const remoteVersionCache = new Map();
+
+/** Version string from the plugin repo's package.json at its ref (root, then plugin/). "" if none. */
+async function remoteVersionForPlugin(plugin, now = Date.now()) {
+  const gh = plugin && parseGitHubRepo(plugin.repo);
+  if (!gh) return "";
+  const key = gh.owner + "/" + gh.repo + "@" + (plugin.ref || "main");
+  const hit = remoteVersionCache.get(key);
+  if (hit && now - hit.at < REMOTE_VERSION_TTL_MS) return hit.version;
+  let version = "";
+  for (const file of ["package.json", "plugin/package.json"]) {
+    try {
+      const url =
+        "https://raw.githubusercontent.com/" + gh.owner + "/" + gh.repo + "/" +
+        encodeURIComponent(plugin.ref || "main") + "/" + file;
+      const response = await axios.get(url, { timeout: 8000, headers: { "User-Agent": "TAK-Portal" }, responseType: "json" });
+      const data = response.data;
+      version = cleanPluginVersion(data && typeof data === "object" ? data.version : "");
+      if (version) break;
+    } catch (_) {
+      /* no package.json here; try the next location */
+    }
+  }
+  remoteVersionCache.set(key, { at: now, version });
+  return version;
+}
+
 async function remoteShaForPlugin(plugin) {
   const gh = parseGitHubRepo(plugin.repo);
   if (gh) {
@@ -1796,6 +1861,13 @@ async function enrichUpdateShas(uiPlugins) {
     } else {
       next.updateAvailable = false;
     }
+    if (row.catalog) {
+      next.remoteVersion = await remoteVersionForPlugin(row.catalog);
+    }
+    next.installedVersion = cleanPluginVersion(row.installedVersion);
+    const bubble = pluginVersionBubble(next);
+    next.versionLabel = bubble.label;
+    next.versionTitle = bubble.title;
     out.push(next);
   }
   return out;
@@ -1995,13 +2067,19 @@ function buildUiPlugins(options = {}) {
   const plugins = [...byId.values()]
     .map((row) => {
       const sha = shaById[row.id];
-      if (!sha) return { ...row, updateAvailable: false, remoteSha: "", installedSha: "" };
-      return {
-        ...row,
-        updateAvailable: !!sha.updateAvailable,
-        remoteSha: sha.remoteSha || "",
-        installedSha: sha.installedSha || "",
-      };
+      const installedVersion = cleanPluginVersion(row.scan && row.scan.version);
+      const base = sha
+        ? {
+            ...row,
+            updateAvailable: !!sha.updateAvailable,
+            remoteSha: sha.remoteSha || "",
+            installedSha: sha.installedSha || "",
+            remoteVersion: cleanPluginVersion(sha.remoteVersion),
+          }
+        : { ...row, updateAvailable: false, remoteSha: "", installedSha: "", remoteVersion: "" };
+      base.installedVersion = installedVersion;
+      const bubble = pluginVersionBubble(base);
+      return { ...base, versionLabel: bubble.label, versionTitle: bubble.title };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
   return {
@@ -2026,6 +2104,7 @@ async function refreshShaCache() {
       remoteSha: row.remoteSha || "",
       installedSha: row.installedSha || "",
       updateAvailable: !!row.updateAvailable,
+      remoteVersion: row.remoteVersion || "",
     };
   }
   store.writeShaCache({ updatedAt: new Date().toISOString(), byId });
@@ -5190,6 +5269,11 @@ module.exports = {
   pluginDetectPaths,
   detectProbeLines,
   parseScanStdout,
+  cleanPluginVersion,
+  pluginVersionBubble,
+  remoteVersionForPlugin,
+  remoteVersionCache,
+  scanRemoteScript,
   loadCatalog,
   fetchCatalog,
   scanHost,
