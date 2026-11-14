@@ -1766,18 +1766,21 @@ function cleanPluginVersion(v) {
   return /^[0-9][0-9A-Za-z.+_-]{0,31}$/.test(s) ? s : "";
 }
 
-/** Text for the card's version bubble; empty when the plugin has no known version. */
+/**
+ * Version token shown inside the status pill (Installed / New / grey available).
+ * Installed plugins use their on-host version; others use the catalog/remote version.
+ * Update targets are not encoded here — the Update button shows "Update to v…".
+ */
 function pluginVersionBubble(row) {
   const installedV = cleanPluginVersion(row && row.installedVersion);
   const remoteV = cleanPluginVersion(row && row.remoteVersion);
   if (row && row.installed) {
     if (installedV) {
-      if (remoteV && remoteV !== installedV && row.updateAvailable) {
-        return { label: "v" + installedV + " \u2192 v" + remoteV, title: "Installed v" + installedV + ", latest v" + remoteV };
-      }
-      return { label: "v" + installedV, title: "Installed version v" + installedV + (remoteV ? ", latest v" + remoteV : "") };
+      return {
+        label: "v" + installedV,
+        title: "Installed version v" + installedV + (remoteV ? ", latest v" + remoteV : ""),
+      };
     }
-    if (remoteV) return { label: "Latest v" + remoteV, title: "Latest available version v" + remoteV };
     return { label: "", title: "" };
   }
   if (remoteV) return { label: "v" + remoteV, title: "Latest available version v" + remoteV };

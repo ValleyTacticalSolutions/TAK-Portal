@@ -220,16 +220,6 @@
     font-size: 0.8rem;
     color: var(--muted);
   }
-  .plugin-cards .plugin-version-tag {
-    margin-left: 8px;
-    font-size: 0.7rem;
-    font-weight: 600;
-    padding: 2px 7px;
-    border-radius: 999px;
-    background: var(--hover-strong);
-    color: var(--muted);
-    white-space: nowrap;
-  }
   .plugin-cards .plugin-version-pill {
     flex-shrink: 0;
     font-size: 0.68rem;
@@ -808,12 +798,30 @@
     list.forEach(function (p) {
       var active = activeJobForPlugin(p);
       var progress = progressLabel(active);
-      var pillClass = progress ? "plugin-version-pill is-progress" : (p.error ? "plugin-version-pill is-error" : (p.installed ? "plugin-version-pill is-installed" : (p.isNew ? "plugin-version-pill is-new" : "")));
-      var pillLabel = progress || (p.error ? "Error" : (p.installed ? "Installed" : (p.isNew ? "New" : "")));
+      var ver = p.versionLabel || "";
+      var pillClass = "";
+      var pillLabel = "";
+      if (progress) {
+        pillClass = "plugin-version-pill is-progress";
+        pillLabel = progress;
+      } else if (p.error) {
+        pillClass = "plugin-version-pill is-error";
+        pillLabel = "Error";
+      } else if (p.installed) {
+        pillClass = "plugin-version-pill is-installed";
+        pillLabel = ver ? "Installed " + ver : "Installed";
+      } else if (p.isNew) {
+        pillClass = "plugin-version-pill is-new";
+        pillLabel = ver ? "New " + ver : "New";
+      } else if (ver) {
+        pillClass = "plugin-version-pill";
+        pillLabel = ver;
+      }
       var pill = pillClass ? '<span class="' + pillClass + '">' + pillLabel + "</span>" : "";
       var staged = stagedForPlugin(p);
       var actions = "";
       var canReinstall = !!p.error && !p.unknown;
+      var updateLabel = p.remoteVersion ? "Update to v" + p.remoteVersion : "Update";
       if (jobBusy) {
         actions = "";
       } else if (p.unknown) {
@@ -836,7 +844,7 @@
           if (staged && staged.kind === "update") {
             actions += '<button type="button" class="btn" data-unstage="' + encodeURIComponent(staged.id) + '">Queued</button>';
           } else if (!(staged && staged.kind === "uninstall")) {
-            actions += '<button type="button" class="btn qr" data-update="' + encodeURIComponent(p.id) + '">Update</button>';
+            actions += '<button type="button" class="btn qr" data-update="' + encodeURIComponent(p.id) + '">' + updateLabel + "</button>";
           }
         }
         if (staged && staged.kind === "uninstall") {
@@ -875,15 +883,11 @@
         '<div class="plugin-actions">' + actions + "</div></div>";
       var titleBlock = el.querySelector(".plugin-title-block");
       titleBlock.querySelector(".plugin-name").textContent = p.name;
-      if (p.versionLabel) {
-        var verEl = document.createElement("span");
-        verEl.className = "plugin-version-tag";
-        verEl.textContent = p.versionLabel;
-        if (p.versionTitle) verEl.title = p.versionTitle;
-        titleBlock.querySelector(".plugin-name").after(verEl);
-      }
       var pillEl = el.querySelector(".plugin-version-pill");
-      if (pillEl && p.error && p.errorMessage) pillEl.title = p.errorMessage;
+      if (pillEl) {
+        if (p.error && p.errorMessage) pillEl.title = p.errorMessage;
+        else if (p.versionTitle) pillEl.title = p.versionTitle;
+      }
       if (repoHref) {
         var link = document.createElement("a");
         link.className = "plugin-repo-link";

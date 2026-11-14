@@ -18,16 +18,20 @@ assert.strictEqual(m.cleanPluginVersion(undefined), "");
 assert.strictEqual(m.cleanPluginVersion("<script>alert(1)</script>"), "");
 assert.strictEqual(m.cleanPluginVersion({ a: 1 }), "");
 
-// Bubble: nothing without a version.
+// Bubble: status-pill version only (Installed/New/grey). Updates use the button text.
 assert.strictEqual(m.pluginVersionBubble({ installed: false }).label, "");
 assert.strictEqual(m.pluginVersionBubble({ installed: true }).label, "");
 assert.strictEqual(m.pluginVersionBubble({ installed: false, remoteVersion: "1.1.0" }).label, "v1.1.0");
 assert.strictEqual(m.pluginVersionBubble({ installed: true, installedVersion: "1.0.0", remoteVersion: "1.0.0" }).label, "v1.0.0");
 assert.strictEqual(
   m.pluginVersionBubble({ installed: true, installedVersion: "1.0.0", remoteVersion: "1.1.0", updateAvailable: true }).label,
-  "v1.0.0 → v1.1.0"
+  "v1.0.0"
 );
-assert.strictEqual(m.pluginVersionBubble({ installed: true, remoteVersion: "1.1.0" }).label, "Latest v1.1.0");
+assert.strictEqual(m.pluginVersionBubble({ installed: true, remoteVersion: "1.1.0" }).label, "");
+assert.match(
+  m.pluginVersionBubble({ installed: true, installedVersion: "2.0.0", remoteVersion: "2.0.1", updateAvailable: true }).title,
+  /latest v2\.0\.1/
+);
 
 // Scan: reads version from package.json (root or plugin/), blank when none.
 const ct = fs.mkdtempSync(path.join(os.tmpdir(), "ctver-"));
