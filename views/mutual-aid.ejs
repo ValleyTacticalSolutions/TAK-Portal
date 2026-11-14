@@ -639,6 +639,8 @@
 
 .userQrModal {
   max-width: 480px;
+  max-height: calc(100vh - 36px);
+  max-height: calc(100dvh - 36px);
 }
 .userQrSingleCol {
   text-align: center;
@@ -649,6 +651,8 @@
   max-width: 280px;
   width: 100%;
   height: auto;
+  max-height: 30vh;
+  object-fit: contain;
   border-radius: 14px;
   display: block;
   margin: 0 auto;
@@ -679,11 +683,11 @@
 }
 .qrDetailsPanel {
   margin-top: 10px;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   text-align: left;
-  line-height: 1.7;
+  line-height: 1.5;
   word-break: break-all;
   user-select: text;
 }

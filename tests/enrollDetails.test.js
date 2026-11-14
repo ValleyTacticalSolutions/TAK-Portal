@@ -32,3 +32,12 @@ test("QR modal action buttons are never narrower than their text", () => {
   assert.match(rule[0], /min-width:\s*max-content/);
   assert.doesNotMatch(html, /\.userQrPairActions \.btn#qr\w+Btn \{\s*flex:\s*\d+ 1 0;/);
 });
+
+test("QR modal image shrinks with viewport height so Show Details does not force a scroll", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "views", "mutual-aid.ejs"), "utf8");
+  const img = html.match(/\.userQrPairImg \{[^}]*\}/);
+  assert.ok(img, "image rule exists");
+  assert.match(img[0], /max-height:\s*\d+vh/);
+  const modal = html.match(/\.userQrModal \{[^}]*\}/);
+  assert.match(modal[0], /max-height:\s*calc\(100d?vh - 36px\)/);
+});
