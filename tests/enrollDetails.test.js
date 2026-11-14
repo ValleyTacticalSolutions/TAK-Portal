@@ -24,3 +24,27 @@ test("mutual aid QR modal has a Show Details button after Copy URL", () => {
   assert.match(html, /id="qrDetailsPanel"/);
   assert.match(html, /\/enrollDetails\.js/);
 });
+
+test("mutual aid QR modal grows for details without an inner scrollbar", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "views", "mutual-aid.ejs"), "utf8");
+  const cssStart = html.indexOf("#qrOverlay .userQrModal");
+  assert.ok(cssStart > 0, "expected #qrOverlay .userQrModal rules");
+  const cssChunk = html.slice(cssStart, cssStart + 450);
+  assert.match(cssChunk, /max-height:\s*calc\(100dvh\s*-\s*24px\)/);
+  assert.match(cssChunk, /overflow:\s*hidden/);
+  assert.doesNotMatch(cssChunk, /overflow:\s*auto/);
+  assert.match(html, /classList\.add\("qr-details-open"\)/);
+  assert.match(html, /classList\.remove\("qr-details-open"\)/);
+});
+
+test("mutual aid QR action buttons share width so Show Details fits", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "views", "mutual-aid.ejs"), "utf8");
+  const actionsCss = html.indexOf(".userQrPairActions .btn");
+  assert.ok(actionsCss > 0);
+  const chunk = html.slice(actionsCss, actionsCss + 280);
+  assert.match(chunk, /flex:\s*1\s+1\s+0/);
+  assert.doesNotMatch(html, /\.userQrPairActions\s+\.btn#qrSaveBtn\s*\{[^}]*flex:\s*2/);
+  const colCss = html.indexOf(".userQrSingleCol");
+  const colChunk = html.slice(colCss, colCss + 200);
+  assert.match(colChunk, /max-width:\s*none/);
+});

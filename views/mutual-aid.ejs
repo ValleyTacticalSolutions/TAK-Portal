@@ -637,13 +637,18 @@
   filter: brightness(0.95);
 }
 
-.userQrModal {
-  max-width: 480px;
+#qrOverlay .userQrModal {
+  width: min(520px, 96vw);
+  max-width: 520px;
+  /* Grow with details when the viewport allows; no inner scrollbar. */
+  max-height: calc(100dvh - 24px);
+  overflow: hidden;
 }
 .userQrSingleCol {
   text-align: center;
   margin: 0 auto;
-  max-width: 320px;
+  width: 100%;
+  max-width: none;
 }
 .userQrPairImg {
   max-width: 280px;
@@ -652,27 +657,27 @@
   border-radius: 14px;
   display: block;
   margin: 0 auto;
+  transition: max-width 0.15s ease;
+}
+#qrOverlay .userQrModal.qr-details-open .userQrPairImg {
+  max-width: 220px;
 }
 .userQrPairActions {
-  gap: 10px;
+  gap: 8px;
   margin-top: 14px;
   justify-content: stretch;
   flex-wrap: nowrap;
+  width: 100%;
 }
 .userQrPairActions .btn {
+  flex: 1 1 0;
   width: auto;
   min-width: 0;
   max-width: none;
   white-space: nowrap;
-}
-.userQrPairActions .btn#qrSaveBtn {
-  flex: 2 1 0;
-}
-.userQrPairActions .btn#qrCopyBtn {
-  flex: 1 1 0;
-}
-.userQrPairActions .btn#qrDetailsBtn {
-  flex: 1 1 0;
+  padding-left: 8px;
+  padding-right: 8px;
+  box-sizing: border-box;
 }
 .qrDetailsPanel {
   margin-top: 10px;
@@ -2175,6 +2180,8 @@ const qrDetailsPanel = document.getElementById("qrDetailsPanel");
 function hideQrDetails() {
   if (qrDetailsPanel) qrDetailsPanel.style.display = "none";
   if (qrDetailsBtn) qrDetailsBtn.textContent = "Show Details";
+  const modal = qrOverlay?.querySelector(".userQrModal");
+  if (modal) modal.classList.remove("qr-details-open");
 }
 const emailPacketSendBtn = document.getElementById("emailPacketSendBtn");
 const emailPacketTo = document.getElementById("emailPacketTo");
@@ -2280,6 +2287,8 @@ qrDetailsBtn.onclick = () => {
   document.getElementById("qrDetailPass").textContent = d.password;
   qrDetailsPanel.style.display = "block";
   qrDetailsBtn.textContent = "Hide Details";
+  const modal = qrOverlay?.querySelector(".userQrModal");
+  if (modal) modal.classList.add("qr-details-open");
 };
 qrSaveBtn.onclick = () => {
   if (!qrActiveId) return;
