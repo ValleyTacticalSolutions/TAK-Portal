@@ -11,6 +11,11 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.37 - IN PROGRESS
+⬆️ `Dependency Update` - sanitize-html 2.18.1 → 2.18.2 (#126)<br>
+⬆️ `Dependency Update` - proj4 2.22.0 → 2.23.0 (#127)<br>
+⬆️ `Dependency Update` - maplibre-gl 6.16.0 → 6.18.0 (#128)
+
 ### v2.0.36 - 11/15/26
 ✨ `Enhancement` - CloudTAK Marketplace shows a version bubble on plugins that publish a version (latest version for available plugins, installed version, or installed → latest when an update exists); plugins without a version show no bubble (#113)<br>
 ✨ `Enhancement` - Mutual Aid - Enrollment QR modal has a "Show Details" button that shows the host, username, and password in plain text (#121)<br>
