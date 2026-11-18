@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.37 - IN PROGRESS
+🐛 `Bug Fix` - Fixes CloudTAK Marketplace Deploy failing at the API lint step on CloudTAK 13.124.0, where the API lints with OXLint instead of ESLint (#133)
+
 ### v2.0.36 - 11/15/26
 ✨ `Enhancement` - CloudTAK Marketplace shows a version bubble on plugins that publish a version (latest version for available plugins, installed version, or installed → latest when an update exists); plugins without a version show no bubble (#113)<br>
 ✨ `Enhancement` - Mutual Aid - Enrollment QR modal has a "Show Details" button that shows the host, username, and password in plain text (#121)<br>

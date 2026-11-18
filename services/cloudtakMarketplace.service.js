@@ -3472,6 +3472,7 @@ const MARKETPLACE_GIT_RESTORE_PATHS = [
   "app/eslint.config.js",
   "app/tsconfig.json",
   "api/eslint.config.js",
+  "api/.oxlintrc.json",
 ];
 
 /** Pinned to cloudtak-plugin-rubbersheet install.sh (PDF page rendering). */

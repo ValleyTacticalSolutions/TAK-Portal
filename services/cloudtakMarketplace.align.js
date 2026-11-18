@@ -1078,14 +1078,6 @@ function relaxMarketplaceServerRoutes(apiDir) {
     }
   }
   nocheckExtras.sort();
-  const configPath = path.join(apiDir, "eslint.config.js");
-  if (!fs.existsSync(configPath)) return changes;
-  let config = "";
-  try {
-    config = fs.readFileSync(configPath, "utf8");
-  } catch (_) {
-    return changes;
-  }
   // Always ignore Replay (and similar) additive server files — CloudTAK's image
   // lint runs eslint on stateful/stateless/test and will fail the docker build on
   // plugin house-style / optional test copies even when runtime code is fine.
@@ -1104,6 +1096,22 @@ function relaxMarketplaceServerRoutes(apiDir) {
     seenPat.add(p);
     patterns.push(p);
   }
+  changes.push(...relaxApiEslintIgnores(apiDir, patterns));
+  changes.push(...relaxApiOxlintIgnores(apiDir, patterns));
+  return changes;
+}
+
+/** CloudTAK before 13.124: the API lints with ESLint (api/eslint.config.js). */
+function relaxApiEslintIgnores(apiDir, patterns) {
+  const changes = [];
+  const configPath = path.join(apiDir, "eslint.config.js");
+  if (!fs.existsSync(configPath)) return changes;
+  let config = "";
+  try {
+    config = fs.readFileSync(configPath, "utf8");
+  } catch (_) {
+    return changes;
+  }
   const block = routeIgnoreBlock(patterns);
   const blockRe = /[ \t]*\/\* cloudtak-marketplace-routes \*\/\r?\n[ \t]*\{ ignores: \[[^\]]*\] \},/;
   let next = config;
@@ -1117,6 +1125,31 @@ function relaxMarketplaceServerRoutes(apiDir) {
   if (next === config) return changes;
   fs.writeFileSync(configPath, next);
   changes.push("api/eslint.config.js: image lint no longer includes marketplace server routes");
+  return changes;
+}
+
+/**
+ * CloudTAK 13.124 and later: the API lints with OXLint (api/.oxlintrc.json, `ignorePatterns`),
+ * and `npm run lint` fails the image build on ban-ts-comment for files marked `// @ts-nocheck`.
+ * Add the same ignore entries, keeping what is already there (a second run adds nothing).
+ */
+function relaxApiOxlintIgnores(apiDir, patterns) {
+  const changes = [];
+  const configPath = path.join(apiDir, ".oxlintrc.json");
+  if (!fs.existsSync(configPath)) return changes;
+  let config = null;
+  try {
+    config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  } catch (_) {
+    return changes;
+  }
+  if (!config || typeof config !== "object" || Array.isArray(config)) return changes;
+  const have = Array.isArray(config.ignorePatterns) ? config.ignorePatterns : [];
+  const missing = patterns.filter((p) => !have.includes(p));
+  if (!missing.length) return changes;
+  config.ignorePatterns = have.concat(missing);
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 4) + "\n");
+  changes.push("api/.oxlintrc.json: image lint no longer includes marketplace server files");
   return changes;
 }
 
