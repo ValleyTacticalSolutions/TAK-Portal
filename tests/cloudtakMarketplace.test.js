@@ -277,6 +277,11 @@ assert.strictEqual(udashHidden.hidden, true, "udash hidden while upstream repo 4
   assert.ok(!ui.plugins.some((p) => p.id === "udash"), "hidden udash omitted from marketplace list when not installed");
   assert.strictEqual(normalized.plugins.find((p) => p.id === "wmd-plotter").hidden, true, "wmd-plotter hidden from catalog (#118)");
   assert.ok(!ui.plugins.some((p) => p.id === "wmd-plotter"), "hidden wmd-plotter omitted from marketplace list when not installed");
+  const crosstak = normalized.plugins.find((p) => p.id === "crosstak");
+  assert.ok(crosstak, "crosstak catalog entry present (#135)");
+  assert.ok(!crosstak.hidden, "crosstak not hidden");
+  assert.strictEqual(crosstak.repo, "https://github.com/takwerx/cloudtak-crosstak-plugin.git");
+  assert.ok(ui.plugins.some((p) => p.id === "crosstak"), "crosstak listed in marketplace UI (#135)");
   assert.strictEqual(marketplace.stageJob({ kind: "install", pluginId: "wmd-plotter", createdBy: "test" }).ok, false);
   const blockedHello = marketplace.stageJob({ kind: "install", pluginId: "helloworld", createdBy: "test" });
   assert.strictEqual(blockedHello.ok, false);
