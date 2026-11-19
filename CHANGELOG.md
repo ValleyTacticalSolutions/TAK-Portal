@@ -11,11 +11,16 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
-### v2.0.36 - IN PROGRESS
+### v2.0.37 - IN PROGRESS
+🔌 `Plugin Update` - Adds CrossTAK (takwerx) to the CloudTAK Marketplace catalog: see other agencies' TAK Servers on your CloudTAK map with your own account on each (#135)<br>
+🐛 `Bug Fix` - Fixes CloudTAK Marketplace Deploy failing at the API lint step on CloudTAK 13.124.0, where the API lints with OXLint instead of ESLint (#133)<br>
+🐛 `Bug Fix` - Fixes issue with groups and users made while the Authentik sync runs vanishing from the portal for about 30 seconds because the sync cleanup deleted them (#137)<br>
 🐛 `Bug Fix` - Data Sync upload ignores a non-array `req.files` value instead of indexing into it (CodeQL type-confusion alerts, ops #50)<br>
+
+### v2.0.36 - 11/15/26
 ✨ `Enhancement` - CloudTAK Marketplace shows a version bubble on plugins that publish a version (latest version for available plugins, installed version, or installed → latest when an update exists); plugins without a version show no bubble (#113)<br>
 ✨ `Enhancement` - Mutual Aid - Enrollment QR modal has a "Show Details" button that shows the host, username, and password in plain text (#121)<br>
-🐛 `Bug Fix` - Fixes issue with CloudTAK marketplace installs (Replay, Rubber Sheet) hanging at "Aligning marketplace plugins" on infra-TAK hosts because docker commands waited on the open SSH stdin
+🐛 `Bug Fix` - Fixes issue with CloudTAK marketplace installs (Replay, Rubber Sheet) hanging at "Aligning marketplace plugins" on infra-TAK hosts because docker commands waited on the open SSH
 
 ### v2.0.35 - 11/12/26
 ✨ `Enhancement` - Faster `./takportal update` image rebuilds: multi-stage Dockerfile caches the map client build and prod `node_modules` so server/view-only changes skip the ~70s map/prune step; add `.dockerignore` to shrink build context<br>

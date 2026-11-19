@@ -311,6 +311,21 @@
         "api/web/plugins/wmd-plotter/index.ts",
         "app/plugins/wmd-plotter/index.ts"
       ]
+    },
+    {
+      "id": "crosstak",
+      "name": "CrossTAK",
+      "description": "See other agencies' TAK Servers on your CloudTAK map, with your own account on each: live picture, your position, send to people/teams/feeds, Data Sync.",
+      "repo": "https://github.com/takwerx/cloudtak-crosstak-plugin.git",
+      "added": "2026-11-19",
+      "maintainer": "takwerx",
+      "web": { "source": "plugin", "dest": "crosstak" },
+      "routes": { "source": "server" },
+      "exclude": ["**/*.md"],
+      "detect": [
+        "api/web/plugins/crosstak/index.ts",
+        "app/plugins/crosstak/index.ts"
+      ]
     }
   ]
 }
