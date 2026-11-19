@@ -11,7 +11,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
-### v2.0.37 - IN PROGRESS
+### v2.0.37 - 11/18/26
 🔌 `Plugin Update` - Adds CrossTAK (takwerx) to the CloudTAK Marketplace catalog: see other agencies' TAK Servers on your CloudTAK map with your own account on each (#135)<br>
 🐛 `Bug Fix` - Fixes CloudTAK Marketplace Deploy failing at the API lint step on CloudTAK 13.124.0, where the API lints with OXLint instead of ESLint (#133)<br>
 🐛 `Bug Fix` - Fixes issue with groups and users made while the Authentik sync runs vanishing from the portal for about 30 seconds because the sync cleanup deleted them (#137)<br>
