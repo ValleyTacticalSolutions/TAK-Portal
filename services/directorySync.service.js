@@ -660,6 +660,10 @@ async function inboundSnapshot() {
   _snapshotRunning = true;
   await db.query(`UPDATE directory_sync SET last_started_at = now() WHERE id = 1`);
   try {
+    // DB clock before anything is read: rows touched at/after this were made or linked while
+    // the snapshot ran, so the cleanups below must not delete them (#137).
+    const startedRow = await db.query(`SELECT now() AS t`);
+    const snapshotStartedAt = startedRow?.rows?.[0]?.t ?? null;
     const pending = await outbox.pendingEntityKeys();
     let users;
     let groups;
@@ -693,8 +697,9 @@ async function inboundSnapshot() {
            AND pending_delete = false
            AND NOT (authentik_pk = ANY($1::text[]))
            AND id <> ALL($2::uuid[])
-           AND NOT (authentik_pk = ANY($3::text[]))`,
-        [Array.from(seenGroupPks), pendingGroupIds, Array.from(pending.byPk || [])]
+           AND NOT (authentik_pk = ANY($3::text[]))
+           AND ($4::timestamptz IS NULL OR updated_at < $4::timestamptz)`,
+        [Array.from(seenGroupPks), pendingGroupIds, Array.from(pending.byPk || []), snapshotStartedAt]
       );
     }
 
@@ -729,8 +734,9 @@ async function inboundSnapshot() {
            AND NOT (authentik_pk = ANY($1::text[]))
            AND lower(username) <> ALL($2::text[])
            AND id <> ALL($3::uuid[])
-           AND NOT (authentik_pk = ANY($4::text[]))`,
-        [seenArr, Array.from(pendingCreate), pendingUserIds, Array.from(pending.byPk || [])]
+           AND NOT (authentik_pk = ANY($4::text[]))
+           AND ($5::timestamptz IS NULL OR updated_at < $5::timestamptz)`,
+        [seenArr, Array.from(pendingCreate), pendingUserIds, Array.from(pending.byPk || []), snapshotStartedAt]
       );
     }
 

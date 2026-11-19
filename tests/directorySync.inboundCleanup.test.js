@@ -19,6 +19,8 @@ function loadFresh() {
   }
 }
 
+const SNAP_START = new Date("2026-11-18T12:00:00Z");
+
 (async () => {
   loadFresh();
   const sqlCalls = [];
@@ -33,6 +35,7 @@ function loadFresh() {
         ],
       };
     }
+    if (/SELECT now\(\) AS t/.test(sql)) return { rows: [{ t: SNAP_START }] };
     if (/directory_sync/.test(sql)) return { rows: [{ last_error: null, completed: false }] };
     if (/SELECT id, groups_hash FROM users/.test(sql)) return { rows: [] };
     if (/COUNT\(\*\)/.test(sql)) return { rows: [{ n: 0 }] };
@@ -99,9 +102,19 @@ function loadFresh() {
     "group cleanup must only target rows linked to Authentik"
   );
 
+  // #137: rows created/linked at or after snapshot start must survive the cleanup.
+  assert.ok(
+    /updated_at < \$4::timestamptz/.test(groupDelete.sql) && groupDelete.params[3] === SNAP_START,
+    "group cleanup must skip rows updated since the snapshot started"
+  );
+
   const userDelete = sqlCalls.find((c) => /DELETE FROM users/i.test(c.sql));
   assert.ok(userDelete, "inbound snapshot must DELETE users missing from Authentik");
   assert.deepStrictEqual(userDelete.params[0], ["u-live"]);
+  assert.ok(
+    /updated_at < \$5::timestamptz/.test(userDelete.sql) && userDelete.params[4] === SNAP_START,
+    "user cleanup must skip rows updated since the snapshot started"
+  );
   assert.ok(
     !sqlCalls.some((c) => /is_active = false/.test(c.sql) && /authentik_pk IS NOT NULL/.test(c.sql)),
     "missing Authentik users must be deleted, not only deactivated"

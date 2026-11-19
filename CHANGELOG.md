@@ -12,9 +12,14 @@ All notable changes to this project will be documented in this file.  Minor qual
 ## Version History
 
 ### v2.0.37 - IN PROGRESS
+🔌 `Plugin Update` - Adds CrossTAK (takwerx) to the CloudTAK Marketplace catalog: see other agencies' TAK Servers on your CloudTAK map with your own account on each (#135)<br>
+🐛 `Bug Fix` - Fixes CloudTAK Marketplace Deploy failing at the API lint step on CloudTAK 13.124.0, where the API lints with OXLint instead of ESLint (#133)<br>
+🐛 `Bug Fix` - Fixes issue with groups and users made while the Authentik sync runs vanishing from the portal for about 30 seconds because the sync cleanup deleted them (#137)<br>
 ⬆️ `Dependency Update` - sanitize-html 2.18.1 → 2.18.2 (#126)<br>
 ⬆️ `Dependency Update` - proj4 2.22.0 → 2.23.0 (#127)<br>
-⬆️ `Dependency Update` - maplibre-gl 6.16.0 → 6.18.0 (#128)
+⬆️ `Dependency Update` - maplibre-gl 6.16.0 → 6.18.0 (#128)<br>
+⬆️ `Dependency Update` - ejs 3.1.10 → 7.0.2 (#129)<br>
+⬆️ `Dependency Update` - undici 7.30.1 → 8.12.4 (#125)
 
 ### v2.0.36 - 11/15/26
 ✨ `Enhancement` - CloudTAK Marketplace shows a version bubble on plugins that publish a version (latest version for available plugins, installed version, or installed → latest when an update exists); plugins without a version show no bubble (#113)<br>
