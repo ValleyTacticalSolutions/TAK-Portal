@@ -789,7 +789,7 @@ router.post("/sync/upload", upload.any(), async (req, res) => {
   try {
     dataSyncSvc.assertTakAvailable();
     const form = new FormData();
-    const files = req.files || [];
+    const files = Array.isArray(req.files) ? req.files : [];
     if (!files.length) {
       return res.status(400).json({ error: "No file uploaded. Data Sync packages must be a .kml file." });
     }
