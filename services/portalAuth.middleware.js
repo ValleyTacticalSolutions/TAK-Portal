@@ -101,6 +101,8 @@ async function portalAuthMiddlewareAsync(req, res, next) {
     normalizedPath.endsWith("/download");
   const isAtakApkDownloadApi =
     method === "GET" && normalizedPath === "/api/atak/download";
+  const isTakBeaconDownloadApi =
+    method === "GET" && normalizedPath === "/api/tak-beacon/download";
 
   // ============================================================
   // AUTH DISABLED => EVERYTHING WIDE OPEN + BOOTSTRAP ADMIN USER
@@ -222,7 +224,8 @@ async function portalAuthMiddlewareAsync(req, res, next) {
         normalizedPath === "/api/map" ||
         normalizedPath.startsWith("/api/map/") ||
         isPluginDownloadApi ||
-        isAtakApkDownloadApi;
+        isAtakApkDownloadApi ||
+        isTakBeaconDownloadApi;
       if (!isAllowedNonAdminPath) {
         return deny();
       }

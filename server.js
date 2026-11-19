@@ -41,6 +41,7 @@ const locatorForm = require("./services/locatorForm.service");
 const locatorCot = require("./services/locatorCot.service");
 const pluginsSvc = require("./services/plugins.service");
 const atakApkSvc = require("./services/atakApk.service");
+const takBeaconDownloadSvc = require("./services/takBeaconDownload.service");
 const { toSafeApiError } = require("./services/apiErrorPayload.service");
 const {
   USER_AGREEMENT_SESSION_COOKIE,
@@ -426,12 +427,15 @@ app.use((req, res, next) => {
       normalizedPath.startsWith("/api/setup-my-device");
     const isAtakApkDownloadPath =
       normalizedPath === "/api/atak/download";
+    const isTakBeaconDownloadPath =
+      normalizedPath === "/api/tak-beacon/download";
     const isAgreementExemptPath =
       normalizedPath === "/logout" ||
       isAgreementApiPath ||
       (isPortalAdmin && normalizedPath === "/dashboard") ||
       isSetupMyDevicePath ||
-      isAtakApkDownloadPath;
+      isAtakApkDownloadPath ||
+      isTakBeaconDownloadPath;
 
     if (
       !isAgreementTargetUser ||
@@ -699,6 +703,19 @@ app.get("/api/atak/download", (req, res) => sendHostedAtakApk(req, res));
 app.get(atakApkSvc.PUBLIC_DOWNLOAD_PATH, (req, res) =>
   sendHostedAtakApk(req, res, { audit: false })
 );
+
+// Latest standalone TAK Beacon app APK from GitHub Releases (not the ATAK plugin).
+app.get(takBeaconDownloadSvc.DOWNLOAD_PATH, async (req, res) => {
+  try {
+    const apk = await takBeaconDownloadSvc.getLatestStandaloneApk();
+    return res.redirect(302, apk.downloadUrl);
+  } catch (err) {
+    const status = Number(err && err.statusCode) || 502;
+    return res.status(status >= 400 && status < 600 ? status : 502).json({
+      error: toSafeApiError(err),
+    });
+  }
+});
 app.use("/api/audit-log", requirePermission("page.audit_log"), require("./routes/auditLog.routes"));
 app.use("/api/plugins", requirePermission("page.plugin_manager"), require("./routes/plugins.routes"));
 app.use(

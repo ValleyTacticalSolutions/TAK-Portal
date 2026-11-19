@@ -382,16 +382,22 @@
       <h2 class="iosAppGroupTitle">TAK Beacon</h2>
 
       <section class="iosStep">
-        <h3 class="iosStepHeading">Download TAK Beacon</h3>
+        <h3 class="iosStepHeading">Step 1: Download TAK Beacon</h3>
         <a
-          href="https://github.com/cfd2474/TAK_Beacon"
-          target="_blank"
-          rel="noopener noreferrer"
+          href="/api/tak-beacon/download"
           class="btn tile<%= recommendTakBeacon ? ' success' : '' %>"
         >
           <span class="title">Android - TAK Beacon<%= recommendTakBeacon ? ' (Recommended)' : '' %></span>
-          <span class="desc">Download the standalone TAK Beacon app for Android devices.</span>
+          <span class="desc">Download the latest standalone TAK Beacon app APK for Android devices.</span>
         </a>
+      </section>
+
+      <section class="iosStep">
+        <h3 class="iosStepHeading">Step 2: Enroll your device</h3>
+        <button type="button" class="btn tile" id="scanQrBtnTakBeacon">
+          <span class="title">Open In App or Scan QR (Recommended)</span>
+          <span class="desc">Scan an enrollment QR code to automatically connect TAK Beacon.</span>
+        </button>
       </section>
     </div>
       <% } %>
@@ -564,6 +570,7 @@
   const showTakAware = <%- JSON.stringify(showTakAware) %>;
   const showTakTracker = <%- JSON.stringify(showTakTracker) %>;
   const showAtak = <%- JSON.stringify(showAtak) %>;
+  const showTakBeacon = <%- JSON.stringify(showTakBeacon) %>;
   const iosOrder = <%- JSON.stringify(iosOrder) %>;
 
   // --- device selection UI (NO persistence; forgets on reload) ---
@@ -602,7 +609,7 @@
     if (!androidFlow) return;
     hideDeviceFlows();
     androidFlow.style.display = "block";
-    if (showAtak) setScanInstructions("atak");
+    if (showAtak || showTakBeacon) setScanInstructions("atak");
     androidFlow.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -634,6 +641,7 @@
   const scanQrBtnTakAware = document.getElementById("scanQrBtnTakAware");
   const scanQrBtnTakTracker = document.getElementById("scanQrBtnTakTracker");
   const scanQrBtnAtak = document.getElementById("scanQrBtnAtak");
+  const scanQrBtnTakBeacon = document.getElementById("scanQrBtnTakBeacon");
   const scanQrBtnITak = document.getElementById("scanQrBtnITak");
   const manualLoginBtnITak = document.getElementById("manualLoginBtnITak");
   const overlay = document.getElementById("setupQrOverlay");
@@ -1351,6 +1359,7 @@
   if (showTakAware && scanQrBtnTakAware) scanQrBtnTakAware.addEventListener("click", () => handleScanClick("takaware"));
   if (showTakTracker && scanQrBtnTakTracker) scanQrBtnTakTracker.addEventListener("click", () => handleScanClick("taktracker"));
   if (showAtak && scanQrBtnAtak) scanQrBtnAtak.addEventListener("click", () => handleScanClick("atak"));
+  if (showTakBeacon && scanQrBtnTakBeacon) scanQrBtnTakBeacon.addEventListener("click", () => handleScanClick("atak"));
   if (showTakAware && manualLoginBtnTakAware) manualLoginBtnTakAware.addEventListener("click", () => handleManualLoginClick("takaware"));
   if (showTakTracker && manualLoginBtnTakTracker) manualLoginBtnTakTracker.addEventListener("click", () => handleManualLoginClick("taktracker"));
   if (showAtak && manualLoginBtnAtak) manualLoginBtnAtak.addEventListener("click", () => handleManualLoginClick("atak"));

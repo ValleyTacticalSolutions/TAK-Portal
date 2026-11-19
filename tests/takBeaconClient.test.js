@@ -41,16 +41,20 @@ assert.ok(
   "setup-my-device must honor ALLOWED_CLIENT_TAK_BEACON"
 );
 assert.ok(
-  setupSrc.includes("https://github.com/cfd2474/TAK_Beacon"),
-  "setup-my-device must link the standalone TAK Beacon GitHub download"
+  setupSrc.includes('href="/api/tak-beacon/download"'),
+  "setup-my-device must download the latest standalone TAK Beacon APK via portal API"
 );
 assert.ok(
-  setupSrc.includes("Download the standalone TAK Beacon app for Android devices."),
-  "setup-my-device TAK Beacon tile must describe the standalone app"
+  setupSrc.includes("Download the latest standalone TAK Beacon app APK for Android devices."),
+  "setup-my-device TAK Beacon tile must describe the standalone app APK"
 );
 assert.ok(
-  !/tak_beacon[\s\S]{0,800}Step 2: Enroll/.test(setupSrc),
-  "setup-my-device must not list TAK Beacon enrollment instructions"
+  setupSrc.includes('id="scanQrBtnTakBeacon"'),
+  "setup-my-device must offer TAK Beacon enrollment QR (ATAK QR flow)"
+);
+assert.ok(
+  /scanQrBtnTakBeacon[\s\S]{0,200}handleScanClick\("atak"\)/.test(setupSrc),
+  "TAK Beacon enrollment QR must reuse the ATAK enroll QR"
 );
 
 assert.ok(
