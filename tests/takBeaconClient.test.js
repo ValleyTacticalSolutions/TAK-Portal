@@ -20,8 +20,14 @@ assert.ok(
   "settings must persist ALLOWED_CLIENT_TAK_BEACON"
 );
 assert.ok(
-  /tak_beacon:\s*\{\s*key:\s*"ALLOWED_CLIENT_TAK_BEACON"/.test(settingsSrc),
-  "settings Android clients must include TAK Beacon"
+  /tak_beacon:\s*\{\s*key:\s*"ALLOWED_CLIENT_TAK_BEACON",\s*label:\s*"TAK Beacon",\s*defaultOn:\s*"false"/.test(
+    settingsSrc
+  ),
+  "settings Android clients must include TAK Beacon off by default"
+);
+assert.ok(
+  /allowedClientBool\(\s*"ALLOWED_CLIENT_TAK_BEACON",\s*false\s*\)/.test(setupSrc),
+  "setup-my-device must default TAK Beacon off"
 );
 assert.ok(
   /ALLOWED_CLIENT_ORDER_ANDROID[\s\S]{0,80}\["atak",\s*"tak_beacon"\]/.test(
