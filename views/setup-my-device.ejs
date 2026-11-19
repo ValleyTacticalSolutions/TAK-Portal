@@ -30,6 +30,7 @@
     const showTakTracker = allowedClientBool("ALLOWED_CLIENT_TAK_TRACKER", true);
     const showITakLinks = allowedClientBool("SHOW_ITAK_LINKS", false);
     const showAtak = allowedClientBool("ALLOWED_CLIENT_ATAK", true);
+    const showTakBeacon = allowedClientBool("ALLOWED_CLIENT_TAK_BEACON", true);
     const liveMapGloballyEnabled = allowedClientBool("LIVE_MAP_ENABLED", true);
     const showLiveMap =
       liveMapGloballyEnabled && allowedClientBool("ALLOWED_CLIENT_LIVE_MAP", true);
@@ -42,7 +43,7 @@
     const showDataPackage =
       allowedClientBool("ALLOWED_CLIENT_DATA_PACKAGE", false) && sshConfiguredForClients;
     const showIosPlatform = showTakAware || showTakTracker || showITakLinks;
-    const showAndroidPlatform = showAtak;
+    const showAndroidPlatform = showAtak || showTakBeacon;
     const showWebPlatform = showLiveMap || showCloudTak;
     const showPcPlatform = showDataPackage;
     const platformCount =
@@ -62,6 +63,12 @@
     const iosGridClass =
       iosAppCount >= 3 ? "iosSetupGrid--three" :
       iosAppCount === 2 ? "iosSetupGrid--two" :
+      "iosSetupGrid--one";
+    const androidAppCount =
+      (showAtak ? 1 : 0) +
+      (showTakBeacon ? 1 : 0);
+    const androidGridClass =
+      androidAppCount >= 2 ? "iosSetupGrid--two" :
       "iosSetupGrid--one";
     const webAppCount =
       (showLiveMap ? 1 : 0) +
@@ -84,6 +91,7 @@
     const recommendTakTracker = recommendedIos === "tak_tracker";
     const recommendITak = recommendedIos === "itak";
     const recommendAtak = recommendedAndroid === "atak";
+    const recommendTakBeacon = recommendedAndroid === "tak_beacon";
     const recommendLiveMap = recommendedWeb === "live_map";
     const recommendCloudTak = recommendedWeb === "cloudtak";
     const recommendDataPackage = recommendedPc === "data_package";
@@ -93,6 +101,12 @@
         : showLiveMap
           ? "Use TAK Portal Live Map in a web browser."
           : "Use CloudTAK on web browsers.";
+    const androidPlatformDesc =
+      showAtak && showTakBeacon
+        ? "Use ATAK or TAK Beacon on Android devices."
+        : showTakBeacon
+          ? "Use TAK Beacon on Android devices."
+          : "Use ATAK on Android devices.";
 
     function parseClientOrder(key, defaults, insertMissingAtStart) {
       const known = defaults.slice();
@@ -115,8 +129,11 @@
     );
     const androidOrder = parseClientOrder(
       "ALLOWED_CLIENT_ORDER_ANDROID",
-      ["atak"]
-    ).filter((id) => id === "atak" && showAtak);
+      ["atak", "tak_beacon"]
+    ).filter((id) =>
+      (id === "atak" && showAtak) ||
+      (id === "tak_beacon" && showTakBeacon)
+    );
     const webOrder = parseClientOrder(
       "ALLOWED_CLIENT_ORDER_WEB",
       ["live_map", "cloudtak"],
@@ -145,7 +162,7 @@
       <% if (showAndroidPlatform) { %>
       <button type="button" class="btn tile deviceTile deviceTile-android" id="selectAndroid">
         <span class="title">Android (Phone / Tablet)</span>
-        <span class="desc">Use ATAK on Android devices.</span>
+        <span class="desc"><%= androidPlatformDesc %></span>
       </button>
       <% } %>
 
@@ -286,12 +303,13 @@
   </div>
   <% } %>
 
-  <!-- Android flow: ATAK steps stacked vertically (same pattern as iOS) -->
+  <!-- Android flow: one card per app (same pattern as iOS) -->
   <% if (showAndroidPlatform) { %>
   <div id="androidFlow" style="display:none;">
+    <div class="iosSetupGrid <%= androidGridClass %>" style="margin-top: 0.5rem;">
     <% androidOrder.forEach(function (appId) { %>
       <% if (appId === "atak") { %>
-    <div class="card iosAppGroup" style="margin-top: 0.5rem;">
+    <div class="card iosAppGroup">
       <h2 class="iosAppGroupTitle">ATAK</h2>
 
       <section class="iosStep">
@@ -359,8 +377,26 @@
         </a>
       </section>
     </div>
+      <% } else if (appId === "tak_beacon") { %>
+    <div class="card iosAppGroup">
+      <h2 class="iosAppGroupTitle">TAK Beacon</h2>
+
+      <section class="iosStep">
+        <h3 class="iosStepHeading">Download TAK Beacon</h3>
+        <a
+          href="https://github.com/cfd2474/TAK_Beacon"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="btn tile<%= recommendTakBeacon ? ' success' : '' %>"
+        >
+          <span class="title">Android - TAK Beacon<%= recommendTakBeacon ? ' (Recommended)' : '' %></span>
+          <span class="desc">Download the standalone TAK Beacon app for Android devices.</span>
+        </a>
+      </section>
+    </div>
       <% } %>
     <% }); %>
+    </div>
   </div>
   <% } %>
 
@@ -566,7 +602,7 @@
     if (!androidFlow) return;
     hideDeviceFlows();
     androidFlow.style.display = "block";
-    setScanInstructions("atak");
+    if (showAtak) setScanInstructions("atak");
     androidFlow.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 

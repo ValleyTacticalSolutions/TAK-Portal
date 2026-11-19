@@ -219,6 +219,7 @@
         "ALLOWED_CLIENT_TAK_AWARE",
         "ALLOWED_CLIENT_TAK_TRACKER",
         "ALLOWED_CLIENT_ATAK",
+        "ALLOWED_CLIENT_TAK_BEACON",
         "ALLOWED_CLIENT_LIVE_MAP",
         "ALLOWED_CLIENT_CLOUDTAK",
         "ALLOWED_CLIENT_DATA_PACKAGE",
@@ -381,6 +382,7 @@
         "ALLOWED_CLIENT_TAK_AWARE",
         "ALLOWED_CLIENT_TAK_TRACKER",
         "ALLOWED_CLIENT_ATAK",
+        "ALLOWED_CLIENT_TAK_BEACON",
         "ALLOWED_CLIENT_LIVE_MAP",
         "ALLOWED_CLIENT_CLOUDTAK",
         "ALLOWED_CLIENT_DATA_PACKAGE",
@@ -3664,13 +3666,14 @@
             };
             const androidAppDefs = {
               atak: { key: "ALLOWED_CLIENT_ATAK", label: "ATAK", defaultOn: "true" },
+              tak_beacon: { key: "ALLOWED_CLIENT_TAK_BEACON", label: "TAK Beacon", defaultOn: "true" },
             };
             const webAppDefs = {
               live_map: { key: "ALLOWED_CLIENT_LIVE_MAP", label: "TAK Portal Live Map", defaultOn: "true" },
               cloudtak: { key: "ALLOWED_CLIENT_CLOUDTAK", label: "CloudTAK", defaultOn: cloudtakDefaultOn },
             };
             const iosOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_IOS", ["tak_aware", "tak_tracker", "itak"]);
-            const androidOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_ANDROID", ["atak"]);
+            const androidOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_ANDROID", ["atak", "tak_beacon"]);
             const webOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_WEB", ["live_map", "cloudtak"], true);
 
             function renderAllowedClientApp(opts) {
