@@ -1,3 +1,5 @@
+const mouStore = require("./mouStore");
+
 const USER_AGREEMENT_SESSION_COOKIE = "mou_user_agreement_session";
 
 function getCookieValue(req, cookieName) {
@@ -59,9 +61,19 @@ function getAgreementLoginMarker(req) {
   return "";
 }
 
+function agreementUserKey(user) {
+  return String(user?.uid || user?.username || "")
+    .trim()
+    .toLowerCase();
+}
+
+function agreementVersion(agreement) {
+  return Number(agreement?.version || 0) || 0;
+}
+
 function buildAgreementSessionValue(req, user, agreement) {
-  const userKey = String(user?.uid || user?.username || "").trim().toLowerCase();
-  const version = Number(agreement?.version || 0) || 0;
+  const userKey = agreementUserKey(user);
+  const version = agreementVersion(agreement);
   if (!userKey || !version) return "";
   const loginMarker = getAgreementLoginMarker(req);
   return loginMarker
@@ -69,11 +81,56 @@ function buildAgreementSessionValue(req, user, agreement) {
     : `${userKey}:${version}`;
 }
 
+/**
+ * Persistent acceptances for bridge clients (CloudTAK Locator) that cannot
+ * carry the browser session cookie. Stored on the MOU user-agreement payload.
+ */
+function loadAcceptanceMap() {
+  try {
+    mouStore.ensureStorage();
+  } catch (_) {
+    /* ignore */
+  }
+  const data = mouStore.loadUserAgreement() || {};
+  if (!data.acceptances || typeof data.acceptances !== "object" || Array.isArray(data.acceptances)) {
+    data.acceptances = {};
+  }
+  return data;
+}
+
+function hasPersistedAgreementAcceptance(user, agreement) {
+  const userKey = agreementUserKey(user);
+  const version = agreementVersion(agreement);
+  if (!userKey || !version) return false;
+  const data = loadAcceptanceMap();
+  const row = data.acceptances[userKey];
+  return !!(row && Number(row.version) === version);
+}
+
+function recordAgreementAcceptance(user, agreement, meta = {}) {
+  const userKey = agreementUserKey(user);
+  const version = agreementVersion(agreement);
+  if (!userKey || !version) {
+    throw new Error("Cannot record user agreement acceptance without a user and version.");
+  }
+  const data = loadAcceptanceMap();
+  data.acceptances[userKey] = {
+    version,
+    acceptedAt: new Date().toISOString(),
+    username: String(user?.username || "").trim() || null,
+    source: String(meta.source || "api").trim() || "api",
+  };
+  mouStore.saveUserAgreement(data);
+  return data.acceptances[userKey];
+}
+
 function hasAcceptedAgreementForSession(req, user, agreement) {
-  return (
+  const cookieOk =
     getCookieValue(req, USER_AGREEMENT_SESSION_COOKIE) ===
-    buildAgreementSessionValue(req, user, agreement)
-  );
+    buildAgreementSessionValue(req, user, agreement);
+  if (cookieOk) return true;
+  // Bridge / plugin accepts persist without a cookie so later locate API calls pass the gate.
+  return hasPersistedAgreementAcceptance(user, agreement);
 }
 
 module.exports = {
@@ -81,4 +138,8 @@ module.exports = {
   buildAgreementSessionValue,
   getCookieValue,
   hasAcceptedAgreementForSession,
+  hasPersistedAgreementAcceptance,
+  recordAgreementAcceptance,
+  agreementUserKey,
+  agreementVersion,
 };

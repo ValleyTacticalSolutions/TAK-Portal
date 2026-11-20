@@ -13,6 +13,7 @@ const { getBool } = require("../services/env");
 const {
   USER_AGREEMENT_SESSION_COOKIE,
   buildAgreementSessionValue,
+  recordAgreementAcceptance,
 } = require("../services/userAgreementSession.service");
 
 const router = express.Router();
@@ -1555,6 +1556,8 @@ router.post("/api/mou/user-agreement/accept", requireMouEnabled, (req, res) => {
       return res.json({ success: true });
     }
     const agreement = mouService.getCurrentUserAgreement().current;
+    // Persist so CloudTAK bridge / Locator plugin calls (no browser cookie) also clear the gate.
+    recordAgreementAcceptance(req.authentikUser, agreement, { source: "portal-ui" });
     res.cookie(USER_AGREEMENT_SESSION_COOKIE, buildAgreementSessionValue(req, req.authentikUser, agreement), {
       httpOnly: true,
       sameSite: "lax",

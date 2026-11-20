@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ### v2.0.38 - IN PROGRESS
 ✨ `Enhancement` - TAK Beacon added to Supported TAK Clients within Settings / Setup My Device
+✨ `Enhancement` - Locate API exposes `GET/POST /api/locate/user-agreement` so CloudTAK Locator can show and accept the portal user agreement over the existing bridge (acceptance is persisted; MOU browser flow unchanged)
 🔌 `Plugin Update` - Adds Cam Depot (dfndr13) to the CloudTAK Marketplace catalog: public traffic cameras from the TAKWERX Cam Depot catalog on the CloudTAK map
 🔌 `Plugin Update` - Incident Manager marketplace installs pin Git ref `main` (not `ccso`)
 🐛 `Bug Fix` - CloudTAK Marketplace no longer opts plugin API routes out of CloudTAK 13.124+ OXLint (`@ts-nocheck` / ignorePatterns); plugins must ship clean routes with `Auth.security` where needed (#133)

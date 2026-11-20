@@ -12,6 +12,11 @@ const { toSafeApiError } = require("../services/apiErrorPayload.service");
 const smsSvc = require("../services/sms.service");
 const settingsSvc = require("../services/settings.service");
 const { getString } = require("../services/env");
+const mouSvc = require("../services/mouService");
+const {
+  hasAcceptedAgreementForSession,
+  recordAgreementAcceptance,
+} = require("../services/userAgreementSession.service");
 
 const EMAIL_RE = /^\S+@\S+\.[A-Za-z]{2,}$/;
 
@@ -131,6 +136,67 @@ router.get("/meta", async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ ok: false, error: toSafeApiError(err) });
+  }
+});
+
+/**
+ * CloudTAK Locator bridge: show / accept TAK Portal user agreement without a portal browser cookie.
+ * Gate exempts these paths; accept is persisted so later /api/locate/* bridge calls pass the MOU gate.
+ */
+router.get("/user-agreement", (req, res) => {
+  try {
+    const user = req.authentikUser || null;
+    const bundle = mouSvc.getCurrentUserAgreement();
+    const current = bundle.current;
+    const accepted = !!(
+      current && hasAcceptedAgreementForSession(req, user, current)
+    );
+    const required = mouSvc.shouldRequireUserAgreement(user, {
+      acceptedForSession: accepted,
+    });
+    res.json({
+      ok: true,
+      required,
+      enabled: bundle.enabled === true && !!current,
+      accepted,
+      version: current ? Number(current.version) || 0 : 0,
+      title: current ? String(current.title || "") : "",
+      bodyHtml: current ? String(current.bodyHtml || "") : "",
+      bodyMarkdown: current ? String(current.bodyMarkdown || "") : "",
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: toSafeApiError(err) });
+  }
+});
+
+router.post("/user-agreement/accept", (req, res) => {
+  try {
+    const user = req.authentikUser || null;
+    if (!user || !user.username) {
+      return res.status(401).json({ ok: false, error: "Authentication required." });
+    }
+    const bundle = mouSvc.getCurrentUserAgreement();
+    const current = bundle.current;
+    if (!mouSvc.isEnabled() || !bundle.enabled || !current) {
+      return res.json({ ok: true, required: false, accepted: true, version: 0 });
+    }
+    if (user.isGlobalAdmin) {
+      return res.json({
+        ok: true,
+        required: false,
+        accepted: true,
+        version: Number(current.version) || 0,
+      });
+    }
+    recordAgreementAcceptance(user, current, { source: "locate-bridge" });
+    res.json({
+      ok: true,
+      required: false,
+      accepted: true,
+      version: Number(current.version) || 0,
+    });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err?.message || "Failed to accept user agreement." });
   }
 });
 

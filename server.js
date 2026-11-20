@@ -421,7 +421,10 @@ app.use((req, res, next) => {
     const isPortalAdmin = !!(user && (user.isGlobalAdmin || user.isAgencyAdmin));
     const isAgreementApiPath =
       normalizedPath === "/api/mou/user-agreement/accept" ||
-      normalizedPath === "/api/mou/user-agreement/decline";
+      normalizedPath === "/api/mou/user-agreement/decline" ||
+      // CloudTAK Locator bridge: fetch/accept agreement without a portal browser session cookie.
+      normalizedPath === "/api/locate/user-agreement" ||
+      normalizedPath === "/api/locate/user-agreement/accept";
     const isSetupMyDevicePath =
       normalizedPath === "/setup-my-device" ||
       normalizedPath.startsWith("/api/setup-my-device");
