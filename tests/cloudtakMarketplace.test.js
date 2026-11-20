@@ -300,8 +300,8 @@ assert.strictEqual(udashHidden.hidden, true, "udash hidden while upstream repo 4
   assert.strictEqual(terrainDownloader.web.dest, "terrain-data-downloader");
   assert.strictEqual(terrainDownloader.routes && terrainDownloader.routes.source, "server");
   assert.ok(
-    Array.isArray(terrainDownloader.additionalActions) && terrainDownloader.additionalActions.length >= 1,
-    "terrain-data-downloader has post-install actions"
+    !terrainDownloader.additionalActions || terrainDownloader.additionalActions.length === 0,
+    "terrain-data-downloader has no additionalActions (egress/disk/refresh are not required manual steps)"
   );
   assert.ok(
     ui.plugins.some((p) => p.id === "terrain-data-downloader"),
