@@ -27,10 +27,24 @@ async function getGroupByNameUnfiltered(groupName) {
 /**
  * Idempotent: creates the computed AgencyAdmin group when missing.
  * If the name already exists and is owned by this agency, returns created:false.
+ *
+ * Must look up first: createGroup inserts a local row before Authentik sync, and
+ * groups.name has no unique index — create-then-catch left a duplicate pending row
+ * every Agency Admin / agency Save (see #141).
  */
 async function ensureAgencyAdminGroupExists(agency) {
   const name = getAgencyAdminGroupName(agency);
   if (!name) throw new Error("Agency abbreviation / short name is required");
+
+  const existing = await getGroupByNameUnfiltered(name);
+  if (existing && !existing.pending_delete) {
+    if (agenciesStore.isAgencyOwnedGroup(existing, agency)) {
+      return { created: false, name };
+    }
+    // Exact expected admin name already present locally — treat as ensured even if
+    // ownership attrs are incomplete (legacy / partial sync), so assign can proceed.
+    return { created: false, name, existing: true };
+  }
 
   const attributes = markHiddenAttributes({
     created_at: new Date().toISOString(),
@@ -48,13 +62,11 @@ async function ensureAgencyAdminGroupExists(agency) {
     );
     const lower = msg.toLowerCase();
     if (lower.includes("already") || lower.includes("exists") || lower.includes("unique")) {
-      const existing = await getGroupByNameUnfiltered(name);
-      if (existing && agenciesStore.isAgencyOwnedGroup(existing, agency)) {
+      const again = await getGroupByNameUnfiltered(name);
+      if (again && agenciesStore.isAgencyOwnedGroup(again, agency)) {
         return { created: false, name };
       }
-      // Exact expected admin name already present locally — treat as ensured even if
-      // ownership attrs are incomplete (legacy / partial sync), so assign can proceed.
-      if (existing) {
+      if (again) {
         return { created: false, name, existing: true };
       }
       throw new Error(

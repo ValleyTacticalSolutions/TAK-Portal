@@ -361,10 +361,32 @@ async function handleOutboxRow(row) {
       }
     }
     if (row.entity_id) {
-      await db.query(
-        `UPDATE groups SET authentik_pk = $2, sync_status = 'ok', updated_at = now() WHERE id = $1`,
-        [row.entity_id, pk]
-      );
+      // Duplicate local row for a name already synced under another groups row:
+      // adopting the pk hits groups_authentik_pk_key and retried for ~1h (#141).
+      // Drop this orphan and finish the outbox job successfully.
+      try {
+        const owner = await db.query(
+          `SELECT id FROM groups
+           WHERE authentik_pk = $1 AND id <> $2::uuid
+           LIMIT 1`,
+          [String(pk), row.entity_id]
+        );
+        if (owner.rows[0]) {
+          await repo.deleteLocalGroup(row.entity_id);
+          return;
+        }
+        await db.query(
+          `UPDATE groups SET authentik_pk = $2, sync_status = 'ok', updated_at = now() WHERE id = $1`,
+          [row.entity_id, pk]
+        );
+      } catch (err) {
+        const msg = String(err?.message || err || "");
+        if (/groups_authentik_pk_key|unique/i.test(msg)) {
+          await repo.deleteLocalGroup(row.entity_id);
+          return;
+        }
+        throw err;
+      }
     }
     return;
   }

@@ -73,4 +73,18 @@ assert.ok(
   "createUser Agency Admin path must ensure missing AgencyAdmin groups"
 );
 
+const ensureSrc = fs.readFileSync(
+  path.join(__dirname, "..", "services", "agencyAdminGroup.service.js"),
+  "utf8"
+);
+const ensureFn = ensureSrc.slice(
+  ensureSrc.indexOf("async function ensureAgencyAdminGroupExists"),
+  ensureSrc.indexOf("function normalizeSuffix")
+);
+assert.ok(
+  ensureFn.indexOf("getGroupByNameUnfiltered(name)") <
+    ensureFn.indexOf("groupsService.createGroup"),
+  "#141: ensureAgencyAdminGroupExists must look up before createGroup"
+);
+
 console.log("agencyAdminGroupEnsure.test.js: ok");

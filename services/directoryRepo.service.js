@@ -501,8 +501,15 @@ async function getGroupById(id) {
   } else if (/^\d+$/.test(raw)) {
     r = await db.query(`SELECT * FROM groups WHERE authentik_pk = $1 LIMIT 1`, [raw]);
   } else {
+    // Prefer live synced rows when duplicates exist (no unique on name; see #141).
     r = await db.query(
-      `SELECT * FROM groups WHERE lower(name) = lower($1) LIMIT 1`,
+      `SELECT * FROM groups
+       WHERE lower(name) = lower($1)
+       ORDER BY pending_delete ASC,
+                (authentik_pk IS NOT NULL) DESC,
+                (sync_status = 'ok') DESC,
+                updated_at DESC NULLS LAST
+       LIMIT 1`,
       [raw]
     );
   }

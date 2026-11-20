@@ -10,17 +10,9 @@ const templatesStore = require("./templates.service");
 const groupsService = require("./groups.service");
 const accessSvc = require("./access.service");
 const usersService = require("./users.service");
-const { markHiddenAttributes } = require("./portalHidden.util");
+const agencyAdminGroupSvc = require("./agencyAdminGroup.service");
 
-function getAgencyAdminGroupName(agency) {
-  const abbr = agenciesStore.normalizeGroupPrefix(agency?.groupPrefix);
-  const countyAbbrev = String(agency?.countyAbbrev || "").trim().toUpperCase();
-  if (!abbr) return null;
-  if (countyAbbrev) {
-    return `authentik-${countyAbbrev}-${abbr}-AgencyAdmin`;
-  }
-  return `authentik-${abbr}-AgencyAdmin`;
-}
+const { getAgencyAdminGroupName, ensureAgencyAdminGroupExists } = agencyAdminGroupSvc;
 
 function isAgencyAdminGroupName(name) {
   return /-agencyadmin$/i.test(String(name || "").trim());
@@ -30,36 +22,6 @@ async function getGroupByNameUnfiltered(groupName) {
   const name = String(groupName || "").trim();
   if (!name) return null;
   return directoryRepo.getGroupById(name);
-}
-
-async function ensureAgencyAdminGroupExists(agency) {
-  const name = getAgencyAdminGroupName(agency);
-  if (!name) throw new Error("Agency abbreviation / short name is required");
-
-  const attributes = markHiddenAttributes({
-    created_at: new Date().toISOString(),
-    created_type: "Agency",
-    created_type_detail: String(agency?.name || "").trim() || null,
-    description: `Agency admin group for ${String(agency?.name || "").trim()}`,
-  });
-
-  try {
-    await groupsService.createGroup(name, { attributes });
-    return { created: true, name };
-  } catch (err) {
-    const msg = String(err?.response?.data?.detail || err?.response?.data || err?.message || "");
-    const lower = msg.toLowerCase();
-    if (lower.includes("already") || lower.includes("exists") || lower.includes("unique")) {
-      const existing = await getGroupByNameUnfiltered(name);
-      if (existing && agenciesStore.isAgencyOwnedGroup(existing, agency)) {
-        return { created: false, name };
-      }
-      throw new Error(
-        `Authentik group "${name}" already exists and is not owned by this agency`
-      );
-    }
-    throw err;
-  }
 }
 
 function validateNewGroupPrefix(raw) {

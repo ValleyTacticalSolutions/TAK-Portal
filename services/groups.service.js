@@ -670,6 +670,13 @@ async function createGroup(name, opts = {}) {
     payload.attributes = attributes;
   }
 
+  // groups.name has no unique index; refuse before insertLocalGroup so callers
+  // that relied on Authentik "already exists" do not leave orphan pending rows (#141).
+  const existing = await directoryRepo.getGroupById(n);
+  if (existing && !existing.pending_delete) {
+    throw new Error(`Group "${n}" already exists`);
+  }
+
   const outboxId = await db.withTransaction(async (c) => {
     const local = await directoryRepo.insertLocalGroup({ name: n, attributes }, c);
     payload._localId = local.uuid || local.id;
