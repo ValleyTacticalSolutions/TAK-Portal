@@ -307,6 +307,21 @@ assert.strictEqual(udashHidden.hidden, true, "udash hidden while upstream repo 4
     ui.plugins.some((p) => p.id === "terrain-data-downloader"),
     "terrain-data-downloader listed in marketplace UI"
   );
+  const airAware = normalized.plugins.find((p) => p.id === "air-aware");
+  assert.ok(airAware, "air-aware catalog entry present");
+  assert.ok(!airAware.hidden, "air-aware not hidden");
+  assert.strictEqual(
+    airAware.repo,
+    "https://github.com/ValleyTacticalSolutions/cloudtak-plugin-air-aware.git"
+  );
+  assert.strictEqual(airAware.ref, "main");
+  assert.strictEqual(airAware.web.dest, "air-aware");
+  assert.strictEqual(airAware.routes && airAware.routes.source, "server");
+  assert.ok(
+    !airAware.additionalActions || airAware.additionalActions.length === 0,
+    "air-aware has no additionalActions (egress/refresh are not required manual steps)"
+  );
+  assert.ok(ui.plugins.some((p) => p.id === "air-aware"), "air-aware listed in marketplace UI");
   const incidentManager = normalized.plugins.find((p) => p.id === "incident-manager");
   assert.ok(incidentManager, "incident-manager catalog entry present");
   assert.strictEqual(incidentManager.ref, "main", "incident-manager installs from main, not ccso");

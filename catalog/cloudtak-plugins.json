@@ -359,6 +359,22 @@
         "api/web/plugins/terrain-data-downloader/index.ts",
         "app/plugins/terrain-data-downloader/index.ts"
       ]
+    },
+    {
+      "id": "air-aware",
+      "name": "Air Aware",
+      "description": "TFRs, NOTAMs, airspace, UAS ceilings, UAS no-fly zones, obstacles, METARs and a UAS flight planner.",
+      "repo": "https://github.com/ValleyTacticalSolutions/cloudtak-plugin-air-aware.git",
+      "ref": "main",
+      "added": "2026-11-20",
+      "maintainer": "ValleyTacticalSolutions",
+      "web": { "source": "plugin", "dest": "air-aware" },
+      "routes": { "source": "server" },
+      "exclude": ["test", "docs", "**/*.md"],
+      "detect": [
+        "api/web/plugins/air-aware/index.ts",
+        "app/plugins/air-aware/index.ts"
+      ]
     }
   ]
 }
