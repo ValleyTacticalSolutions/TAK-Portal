@@ -1200,28 +1200,44 @@ fs.writeFileSync(path.join(retentionDir, "chat.ts"), "export const chat = 1;\n")
 fs.writeFileSync(path.join(apiLintRoot, "api", ".marketplace-owned-ts"), "api/stateless/lib/retention/replay.ts\n");
 fs.writeFileSync(
   path.join(apiLintRoot, "api", "eslint.config.js"),
-  "export default tseslint.config(\n    eslint.configs.recommended,\n);\n"
+  "export default tseslint.config(\n" +
+    "    /* cloudtak-marketplace-routes */\n" +
+    "    { ignores: ['stateless/routes/plugin-*.ts', 'stateless/routes/replay.ts', 'test/replay*.ts'] },\n" +
+    "    eslint.configs.recommended,\n" +
+    ");\n"
+);
+fs.writeFileSync(
+  path.join(apiLintRoot, "api", ".oxlintrc.json"),
+  JSON.stringify(
+    {
+      ignorePatterns: ["dist/**", "stateless/routes/plugin-*.ts", "stateless/routes/replay.ts", "test/replay*.ts"],
+    },
+    null,
+    4
+  ) + "\n"
 );
 const apiLinted = align.alignInstalledPlugins(apiLintRoot);
-assert.ok(apiLinted.changes.some((line) => line.includes("image lint no longer includes marketplace server routes")));
-assert.ok(apiLinted.changes.some((line) => line.includes("plugin-demo.ts") && line.includes("skips image typecheck")));
+assert.ok(apiLinted.changes.some((line) => line.includes("removed marketplace server-route lint ignores")));
+assert.ok(apiLinted.changes.some((line) => line.includes(".marketplace-owned-ts")));
+assert.ok(!apiLinted.changes.some((line) => line.includes("skips image typecheck")));
 const demoRoute = fs.readFileSync(path.join(routesDir, "plugin-demo.ts"), "utf8");
-assert.match(demoRoute, /^\/\/ @ts-nocheck\n/);
+assert.doesNotMatch(demoRoute, /@ts-nocheck/);
+assert.strictEqual(demoRoute, "export default function demo() { return 1 }\n");
 const helperRoute = fs.readFileSync(path.join(routesDir, "helper-sync.ts"), "utf8");
+assert.match(helperRoute, /^\/\/ @ts-nocheck\n/);
 assert.strictEqual((helperRoute.match(/@ts-nocheck/g) || []).length, 1);
 const videoRoute = fs.readFileSync(path.join(routesDir, "video.ts"), "utf8");
 assert.doesNotMatch(videoRoute, /@ts-nocheck/);
 const retentionFile = fs.readFileSync(path.join(retentionDir, "replay.ts"), "utf8");
-assert.match(retentionFile, /^\/\/ @ts-nocheck\n/);
+assert.doesNotMatch(retentionFile, /@ts-nocheck/);
 assert.doesNotMatch(fs.readFileSync(path.join(retentionDir, "chat.ts"), "utf8"), /@ts-nocheck/);
 assert.ok(!fs.existsSync(path.join(apiLintRoot, "api", ".marketplace-owned-ts")));
 const apiEslint = fs.readFileSync(path.join(apiLintRoot, "api", "eslint.config.js"), "utf8");
-assert.match(apiEslint, /stateless\/routes\/plugin-\*\.ts/);
-assert.match(apiEslint, /stateless\/routes\/replay\.ts/);
-assert.match(apiEslint, /test\/replay\*\.ts/);
-assert.match(apiEslint, /stateless\/routes\/helper-sync\.ts/);
-assert.match(apiEslint, /stateless\/lib\/retention\/replay\.ts/);
-assert.doesNotMatch(apiEslint, /video\.ts/);
+assert.doesNotMatch(apiEslint, /cloudtak-marketplace-routes/);
+assert.doesNotMatch(apiEslint, /plugin-\*\.ts/);
+assert.doesNotMatch(apiEslint, /replay/);
+const apiOxlint = JSON.parse(fs.readFileSync(path.join(apiLintRoot, "api", ".oxlintrc.json"), "utf8"));
+assert.deepStrictEqual(apiOxlint.ignorePatterns, ["dist/**"]);
 const apiLintedAgain = align.alignInstalledPlugins(apiLintRoot);
 assert.deepStrictEqual(apiLintedAgain.changes, []);
 fs.rmSync(apiLintRoot, { recursive: true, force: true });

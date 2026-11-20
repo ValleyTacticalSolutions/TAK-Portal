@@ -839,15 +839,6 @@ function relaxHostPluginCheck(webDir) {
   return changes;
 }
 
-function fileHasTsNoCheck(text) {
-  return /@ts-nocheck\b/.test(String(text || "").slice(0, 4000));
-}
-
-function routeIgnoreBlock(patterns) {
-  const list = patterns.map((p) => "'" + String(p).replace(/'/g, "") + "'").join(", ");
-  return "    /* cloudtak-marketplace-routes */\n    { ignores: [" + list + "] },";
-}
-
 function pluginIgnoreBlock(pluginNames) {
   const patterns = (pluginNames || []).map((n) => "plugins/" + n + "/**");
   const list = patterns.map((p) => "'" + String(p).replace(/'/g, "") + "'").join(", ");
@@ -977,132 +968,44 @@ function shieldAppPluginTsconfig(webDir, pluginNames) {
   return ["app/tsconfig.json: typecheck excludes marketplace plugin dirs"];
 }
 
-function marketplaceOwnedTs(apiDir) {
-  const listPath = path.join(apiDir, ".marketplace-owned-ts");
-  let text = "";
-  try {
-    if (fs.existsSync(listPath)) text = fs.readFileSync(listPath, "utf8");
-  } catch (_) {}
-  try {
-    fs.unlinkSync(listPath);
-  } catch (_) {}
-  const out = [];
-  for (const line of String(text || "").split(/\r?\n/)) {
-    let rel = line.trim().replace(/\\/g, "/");
-    if (rel.startsWith("api/")) rel = rel.slice(4);
-    if (!rel || rel.split("/").includes("..") || !rel.endsWith(".ts")) continue;
-    if (!/^[A-Za-z0-9._/-]+$/.test(rel)) continue;
-    if (!/^(?:stateful|stateless|common|test)\//.test(rel) && rel !== "index.ts") continue;
-    out.push(rel);
-  }
-  return out;
-}
+/** Patterns older marketplace builds injected into API lint configs. Never re-add these. */
+const LEGACY_MARKETPLACE_API_LINT_IGNORES = [
+  "stateless/routes/plugin-*.ts",
+  "stateless/routes/replay.ts",
+  "stateless/lib/replay*.ts",
+  "stateless/lib/retention/replay.ts",
+  "stateful/lib/replay*.ts",
+  "test/replay*.ts",
+];
 
-function walkTsFiles(dir, relBase, out) {
-  if (!dir || !fs.existsSync(dir)) return;
-  let entries = [];
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch (_) {
-    return;
-  }
-  for (const ent of entries) {
-    if (ent.name === "node_modules" || ent.name === "dist") continue;
-    const rel = relBase ? relBase + "/" + ent.name : ent.name;
-    const abs = path.join(dir, ent.name);
-    if (ent.isDirectory()) walkTsFiles(abs, rel, out);
-    else if (ent.isFile() && ent.name.endsWith(".ts")) out.push({ abs, rel });
-  }
-}
+const MARKETPLACE_ROUTES_ESLINT_BLOCK_RE =
+  /[ \t]*\/\* cloudtak-marketplace-routes \*\/\r?\n[ \t]*\{ ignores: \[[^\]]*\] \},?\r?\n?/;
 
-function relaxMarketplaceServerRoutes(apiDir) {
+/**
+ * CloudTAK 13.124+ API routes must pass OXLint as first-class API code.
+ * Marketplace must not inject // @ts-nocheck, eslint-disable, or lint ignorePatterns.
+ * Clear leftovers from older marketplace deploys so plugin server routes stay in the lint set.
+ */
+function clearMarketplaceServerLintSkips(apiDir) {
   const changes = [];
-  const routesDir = path.join(apiDir, "stateless", "routes");
-  const nocheckExtras = [];
-  const owned = new Set(marketplaceOwnedTs(apiDir));
-  for (const rel of owned) {
-    const file = path.join(apiDir, rel);
-    if (!file.startsWith(apiDir + path.sep) && file !== path.join(apiDir, rel)) continue;
-    let text = "";
-    try {
-      if (!fs.existsSync(file)) continue;
-      text = fs.readFileSync(file, "utf8");
-    } catch (_) {
-      continue;
+  const ownedList = path.join(apiDir, ".marketplace-owned-ts");
+  try {
+    if (fs.existsSync(ownedList)) {
+      fs.unlinkSync(ownedList);
+      changes.push("api/.marketplace-owned-ts: removed (marketplace no longer marks API TS for lint skip)");
     }
-    if (fileHasTsNoCheck(text)) continue;
-    fs.writeFileSync(file, "// @ts-nocheck\n" + text);
-    changes.push("api/" + rel + ": marketplace file skips image typecheck");
-  }
-  if (fs.existsSync(routesDir)) {
-    let names = [];
-    try {
-      names = fs.readdirSync(routesDir);
-    } catch (_) {
-      names = [];
-    }
-    for (const name of names) {
-      if (!/^[A-Za-z0-9._-]+\.ts$/.test(name)) continue;
-      const file = path.join(routesDir, name);
-      let text = "";
-      try {
-        text = fs.readFileSync(file, "utf8");
-      } catch (_) {
-        continue;
-      }
-      const pluginRoute = name.startsWith("plugin-");
-      if (pluginRoute && !fileHasTsNoCheck(text)) {
-        fs.writeFileSync(file, "// @ts-nocheck\n" + text);
-        changes.push("api/stateless/routes/" + name + ": marketplace server route skips image typecheck");
-      } else if (!pluginRoute && fileHasTsNoCheck(text)) {
-        nocheckExtras.push("stateless/routes/" + name);
-      }
-    }
-  }
-  const typedDirs = ["stateless/lib", "stateful/lib", "common", "test"];
-  const seenIgnore = new Set(nocheckExtras);
-  for (const dirRel of typedDirs) {
-    const found = [];
-    walkTsFiles(path.join(apiDir, dirRel), dirRel, found);
-    for (const row of found) {
-      if (seenIgnore.has(row.rel)) continue;
-      let text = "";
-      try {
-        text = fs.readFileSync(row.abs, "utf8");
-      } catch (_) {
-        continue;
-      }
-      if (!fileHasTsNoCheck(text)) continue;
-      seenIgnore.add(row.rel);
-      nocheckExtras.push(row.rel);
-    }
-  }
-  nocheckExtras.sort();
-  // Always ignore Replay (and similar) additive server files — CloudTAK's image
-  // lint runs eslint on stateful/stateless/test and will fail the docker build on
-  // plugin house-style / optional test copies even when runtime code is fine.
-  const alwaysIgnore = [
-    "stateless/routes/plugin-*.ts",
-    "stateless/routes/replay.ts",
-    "stateless/lib/replay*.ts",
-    "stateless/lib/retention/replay.ts",
-    "stateful/lib/replay*.ts",
-    "test/replay*.ts",
-  ];
-  const patterns = [];
-  const seenPat = new Set();
-  for (const p of alwaysIgnore.concat(nocheckExtras)) {
-    if (!p || seenPat.has(p)) continue;
-    seenPat.add(p);
-    patterns.push(p);
-  }
-  changes.push(...relaxApiEslintIgnores(apiDir, patterns));
-  changes.push(...relaxApiOxlintIgnores(apiDir, patterns));
+  } catch (_) {}
+  changes.push(...clearApiEslintRouteIgnores(apiDir));
+  changes.push(...clearApiOxlintRouteIgnores(apiDir));
   return changes;
 }
 
-/** CloudTAK before 13.124: the API lints with ESLint (api/eslint.config.js). */
-function relaxApiEslintIgnores(apiDir, patterns) {
+/** @deprecated name kept for callers; clears legacy skips instead of relaxing lint. */
+function relaxMarketplaceServerRoutes(apiDir) {
+  return clearMarketplaceServerLintSkips(apiDir);
+}
+
+function clearApiEslintRouteIgnores(apiDir) {
   const changes = [];
   const configPath = path.join(apiDir, "eslint.config.js");
   if (!fs.existsSync(configPath)) return changes;
@@ -1112,28 +1015,15 @@ function relaxApiEslintIgnores(apiDir, patterns) {
   } catch (_) {
     return changes;
   }
-  const block = routeIgnoreBlock(patterns);
-  const blockRe = /[ \t]*\/\* cloudtak-marketplace-routes \*\/\r?\n[ \t]*\{ ignores: \[[^\]]*\] \},/;
-  let next = config;
-  if (blockRe.test(config)) next = config.replace(blockRe, block);
-  else {
-    const needle = "export default tseslint.config(";
-    const at = config.indexOf(needle);
-    if (at < 0) return changes;
-    next = config.slice(0, at + needle.length) + "\n" + block + config.slice(at + needle.length);
-  }
+  if (!MARKETPLACE_ROUTES_ESLINT_BLOCK_RE.test(config)) return changes;
+  const next = config.replace(MARKETPLACE_ROUTES_ESLINT_BLOCK_RE, "");
   if (next === config) return changes;
   fs.writeFileSync(configPath, next);
-  changes.push("api/eslint.config.js: image lint no longer includes marketplace server routes");
+  changes.push("api/eslint.config.js: removed marketplace server-route lint ignores");
   return changes;
 }
 
-/**
- * CloudTAK 13.124 and later: the API lints with OXLint (api/.oxlintrc.json, `ignorePatterns`),
- * and `npm run lint` fails the image build on ban-ts-comment for files marked `// @ts-nocheck`.
- * Add the same ignore entries, keeping what is already there (a second run adds nothing).
- */
-function relaxApiOxlintIgnores(apiDir, patterns) {
+function clearApiOxlintRouteIgnores(apiDir) {
   const changes = [];
   const configPath = path.join(apiDir, ".oxlintrc.json");
   if (!fs.existsSync(configPath)) return changes;
@@ -1145,11 +1035,13 @@ function relaxApiOxlintIgnores(apiDir, patterns) {
   }
   if (!config || typeof config !== "object" || Array.isArray(config)) return changes;
   const have = Array.isArray(config.ignorePatterns) ? config.ignorePatterns : [];
-  const missing = patterns.filter((p) => !have.includes(p));
-  if (!missing.length) return changes;
-  config.ignorePatterns = have.concat(missing);
+  if (!have.length) return changes;
+  const drop = new Set(LEGACY_MARKETPLACE_API_LINT_IGNORES);
+  const next = have.filter((p) => !drop.has(p));
+  if (next.length === have.length) return changes;
+  config.ignorePatterns = next;
   fs.writeFileSync(configPath, JSON.stringify(config, null, 4) + "\n");
-  changes.push("api/.oxlintrc.json: image lint no longer includes marketplace server files");
+  changes.push("api/.oxlintrc.json: removed marketplace server-route lint ignores");
   return changes;
 }
 
@@ -1898,6 +1790,7 @@ module.exports = {
   rewriteLoadObject,
   relaxHostPluginLint,
   relaxHostPluginCheck,
+  clearMarketplaceServerLintSkips,
   relaxMarketplaceServerRoutes,
   composeServiceNames,
   rewriteComposeDepends,
