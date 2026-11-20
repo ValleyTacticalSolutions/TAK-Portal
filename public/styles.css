@@ -618,7 +618,6 @@ body.stack-health-locked {
 .site-footer {
     margin-top: 28px;
     padding-top: 12px;
-    border-top: 1px solid var(--line);
     font-size: 11px;
     line-height: 1.45;
     color: var(--muted);
