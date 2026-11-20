@@ -104,6 +104,8 @@ async function refreshAppUpdateLocals() {
 app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
+// Rate limit every route below (static assets above are exempt).
+app.use(require("./services/rateLimit").createApiRateLimiter());
 app.use("/branding", express.static(path.join(__dirname, "data", "branding")));
 app.use(
   "/mutual-aid-logos",
