@@ -1,0 +1,23 @@
+<footer class="site-footer" id="siteFooter" hidden>
+  <p>© 2026 Valley Tactical Solutions. Software licensed under GNU AGPL v3.</p>
+</footer>
+<script>
+(function () {
+  function placeSiteFooter() {
+    var footer = document.getElementById("siteFooter");
+    if (!footer) return;
+    var main = document.querySelector("main.main");
+    if (!main || document.body.classList.contains("map-page")) {
+      footer.remove();
+      return;
+    }
+    main.appendChild(footer);
+    footer.hidden = false;
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", placeSiteFooter);
+  } else {
+    placeSiteFooter();
+  }
+})();
+</script>

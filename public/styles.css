@@ -611,6 +611,24 @@ body.stack-health-locked {
     padding: 26px;
 }
 
+/* ======================
+   SITE FOOTER
+   ====================== */
+
+.site-footer {
+    margin-top: 28px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--muted);
+    text-align: center;
+}
+
+.site-footer p {
+    margin: 0;
+}
+
 h1 {
     margin: 0 0 14px 0;
 }
