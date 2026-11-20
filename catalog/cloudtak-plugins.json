@@ -326,6 +326,22 @@
         "api/web/plugins/crosstak/index.ts",
         "app/plugins/crosstak/index.ts"
       ]
+    },
+    {
+      "id": "cam-depot",
+      "name": "Cam Depot",
+      "description": "Public traffic cameras on the CloudTAK map from the TAKWERX Cam Depot catalog: search, favorites, live video, and refreshing stills.",
+      "repo": "https://github.com/dfndr13/cloudtak-plugin-cam-depot.git",
+      "added": "2026-11-20",
+      "maintainer": "dfndr13",
+      "web": { "source": "plugin", "dest": "cam-depot" },
+      "routes": { "source": "server" },
+      "exclude": ["**/*.md"],
+      "detectAliases": ["cloudtak-plugin-cam-depot"],
+      "detect": [
+        "api/web/plugins/cam-depot/index.ts",
+        "app/plugins/cam-depot/index.ts"
+      ]
     }
   ]
 }

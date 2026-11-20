@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ### v2.0.38 - IN PROGRESS
 ✨ `Enhancement` - TAK Beacon added to Supported TAK Clients within Settings / Setup My Device
+🔌 `Plugin Update` - Adds Cam Depot (dfndr13) to the CloudTAK Marketplace catalog: public traffic cameras from the TAKWERX Cam Depot catalog on the CloudTAK map
 🐛 `Bug Fix` - CloudTAK Marketplace no longer opts plugin API routes out of CloudTAK 13.124+ OXLint (`@ts-nocheck` / ignorePatterns); plugins must ship clean routes with `Auth.security` where needed (#133)
 
 ### v2.0.37 - 11/18/26
