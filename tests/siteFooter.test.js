@@ -17,7 +17,11 @@ const footer = fs.readFileSync(
 );
 const styles = fs.readFileSync(path.join(__dirname, "..", "public", "styles.css"), "utf8");
 
-assert.match(sidebar, /site-footer/, "sidebar must include the site-footer partial");
+assert.match(
+  sidebar,
+  /include\(["']\.\/site-footer["']\)/,
+  "sidebar must include ./site-footer (relative to partials/, not partials/site-footer)"
+);
 assert.match(footer, /© 2026 Valley Tactical Solutions/);
 assert.match(footer, /GNU AGPL v3/);
 assert.doesNotMatch(footer, /<a\b/, "footer must not link the AGPL text");
