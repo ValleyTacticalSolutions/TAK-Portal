@@ -289,6 +289,9 @@ assert.strictEqual(udashHidden.hidden, true, "udash hidden while upstream repo 4
   assert.strictEqual(camDepot.web.dest, "cam-depot");
   assert.strictEqual(camDepot.routes && camDepot.routes.source, "server");
   assert.ok(ui.plugins.some((p) => p.id === "cam-depot"), "cam-depot listed in marketplace UI");
+  const incidentManager = normalized.plugins.find((p) => p.id === "incident-manager");
+  assert.ok(incidentManager, "incident-manager catalog entry present");
+  assert.strictEqual(incidentManager.ref, "main", "incident-manager installs from main, not ccso");
   assert.strictEqual(marketplace.stageJob({ kind: "install", pluginId: "wmd-plotter", createdBy: "test" }).ok, false);
   const blockedHello = marketplace.stageJob({ kind: "install", pluginId: "helloworld", createdBy: "test" });
   assert.strictEqual(blockedHello.ok, false);

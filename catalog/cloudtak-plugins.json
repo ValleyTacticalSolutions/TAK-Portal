@@ -145,6 +145,7 @@
       "name": "Incident Manager",
       "description": "Create and track incidents in CloudTAK.",
       "repo": "https://github.com/clptak/cloudtak-plugin-incident-manager.git",
+      "ref": "main",
       "added": "2026-09-20",
       "maintainer": "clptak",
       "web": { "dest": "incident-manager" },
