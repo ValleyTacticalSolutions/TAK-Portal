@@ -289,6 +289,24 @@ assert.strictEqual(udashHidden.hidden, true, "udash hidden while upstream repo 4
   assert.strictEqual(camDepot.web.dest, "cam-depot");
   assert.strictEqual(camDepot.routes && camDepot.routes.source, "server");
   assert.ok(ui.plugins.some((p) => p.id === "cam-depot"), "cam-depot listed in marketplace UI");
+  const terrainDownloader = normalized.plugins.find((p) => p.id === "terrain-data-downloader");
+  assert.ok(terrainDownloader, "terrain-data-downloader catalog entry present");
+  assert.ok(!terrainDownloader.hidden, "terrain-data-downloader not hidden");
+  assert.strictEqual(
+    terrainDownloader.repo,
+    "https://github.com/ValleyTacticalSolutions/cloudtak-plugin-terrain-data-downloader.git"
+  );
+  assert.strictEqual(terrainDownloader.ref, "main");
+  assert.strictEqual(terrainDownloader.web.dest, "terrain-data-downloader");
+  assert.strictEqual(terrainDownloader.routes && terrainDownloader.routes.source, "server");
+  assert.ok(
+    Array.isArray(terrainDownloader.additionalActions) && terrainDownloader.additionalActions.length >= 1,
+    "terrain-data-downloader has post-install actions"
+  );
+  assert.ok(
+    ui.plugins.some((p) => p.id === "terrain-data-downloader"),
+    "terrain-data-downloader listed in marketplace UI"
+  );
   const incidentManager = normalized.plugins.find((p) => p.id === "incident-manager");
   assert.ok(incidentManager, "incident-manager catalog entry present");
   assert.strictEqual(incidentManager.ref, "main", "incident-manager installs from main, not ccso");

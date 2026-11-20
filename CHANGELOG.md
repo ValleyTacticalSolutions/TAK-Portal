@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 ✨ `Enhancement` - TAK Beacon added to Supported TAK Clients within Settings / Setup My Device<br>
 ✨ `Enhancement` - Locate API exposes `GET/POST /api/locate/user-agreement` so CloudTAK Locator can show and accept the portal user agreement over the existing bridge<br>
 🔌 `Plugin Update` - Adds Cam Depot (dfndr13) to the CloudTAK Marketplace catalog: public traffic cameras from the TAKWERX Cam Depot catalog on the CloudTAK map<br>
+🔌 `Plugin Update` - Adds Terrain Data Downloader to the CloudTAK Marketplace catalog: download US state elevation and OSM snapping layers into CloudTAK (admin only)<br>
 🐛 `Bug Fix` - CloudTAK Marketplace no longer opts plugin API routes out of CloudTAK 13.124+ OXLint (`@ts-nocheck` / ignorePatterns); plugins must ship clean routes with `Auth.security` where needed (#133)<br>
 🐛 `Bug Fix` - Agency Admin assign and agency Save no longer insert a duplicate AgencyAdmin group row that failed Authentik sync on `groups_authentik_pk_key` for about an hour (#141)
 

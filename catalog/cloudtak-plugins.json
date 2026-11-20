@@ -343,6 +343,45 @@
         "api/web/plugins/cam-depot/index.ts",
         "app/plugins/cam-depot/index.ts"
       ]
+    },
+    {
+      "id": "terrain-data-downloader",
+      "name": "Terrain Data Downloader",
+      "description": "Download US state terrain (elevation) and customizable OSM snapping data into CloudTAK. Admin only.",
+      "repo": "https://github.com/ValleyTacticalSolutions/cloudtak-plugin-terrain-data-downloader.git",
+      "ref": "main",
+      "added": "2026-11-20",
+      "maintainer": "ValleyTacticalSolutions",
+      "web": { "source": "plugin", "dest": "terrain-data-downloader" },
+      "routes": { "source": "server" },
+      "exclude": ["test"],
+      "additionalActions": [
+        {
+          "title": "Allow outbound HTTPS from the CloudTAK API",
+          "text": "The plugin's API route downloads data server side from two public hosts.",
+          "instructions": [
+            "Make sure the CloudTAK API container can reach https://data.bbbike.org and https://s3.amazonaws.com (firewall, proxy or egress rules).",
+            "No browser CSP or Plugin Proxy changes are needed."
+          ]
+        },
+        {
+          "title": "Provide temporary disk space",
+          "text": "Jobs stage downloads in the API container's /tmp before uploading to the asset bucket.",
+          "instructions": [
+            "Allow about 3x the largest selected state's OSM extract (about 5 GB for California).",
+            "Run a single CloudTAK API instance, because job progress is kept in that process's memory."
+          ]
+        },
+        {
+          "title": "Refresh CloudTAK",
+          "text": "Load the new menu entry.",
+          "instructions": ["After install, open CloudTAK Settings and choose Refresh App."]
+        }
+      ],
+      "detect": [
+        "api/web/plugins/terrain-data-downloader/index.ts",
+        "app/plugins/terrain-data-downloader/index.ts"
+      ]
     }
   ]
 }
