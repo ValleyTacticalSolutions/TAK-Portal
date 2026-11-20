@@ -341,6 +341,19 @@
       "detect": [
         "api/web/plugins/cam-depot/index.ts",
         "app/plugins/cam-depot/index.ts"
+      ],
+      "additionalActions": [
+        {
+          "title": "CloudTAK media must reach the camera stream hosts",
+          "text": "Live video does not need CSP entries. The browser plays a CloudTAK video lease; the media container fetches the catalog stream (often https://cams.takwerx.org:10443/... HLS, then CDN segments on *.skyvdn.com). If videos spin/buffer forever, the lease usually started but segments never arrived.",
+          "instructions": [
+            "Confirm cloudtak-media is running and your reverse proxy exposes /stream/ to the browser (same pattern as other CloudTAK live video).",
+            "Allow outbound HTTPS from the media (and API) containers to cams.takwerx.org on port 10443 — that port is not 443 and is a common firewall miss.",
+            "Also allow outbound HTTPS to the CDN hosts behind the relay (for example *.skyvdn.com / *.us-east-1.skyvdn.com). Catalog still hosts and mapdepot.takwerx.org are fetched by the API for lists/pictures.",
+            "No CloudTAK Admin → Plugin Proxy whitelist is required for Cam Depot video. If you tightened media::proxy::allow, include cams.takwerx.org (and any direct provider hosts you use).",
+            "Quick split test: a New York DOT camera uses classic .ts HLS; many TAKWERX-relay cameras use CMAF (.cmfv). If only one class fails, say which."
+          ]
+        }
       ]
     }
   ]
