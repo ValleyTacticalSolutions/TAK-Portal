@@ -48,6 +48,92 @@ function getMapAccessContext(req) {
   };
 }
 
+/** null = unscoped (global admin); Set = member channel keys (may be empty). */
+function resolveMapScopeKeys(ctx) {
+  return mapMeta.resolveAllowedChannelKeysForUser(
+    ctx.authUser,
+    ctx.userGroups,
+    ctx.scopeMemberGroups
+  );
+}
+
+function markerInMapScope(marker, scopeKeys) {
+  if (scopeKeys == null) return true;
+  return mapRender.markerVisible(marker, { scopeChannelKeys: scopeKeys });
+}
+
+function featureInMapScope(feature, scopeKeys) {
+  if (scopeKeys == null) return true;
+  if (!scopeKeys.size) return false;
+  const raw = String(feature?.properties?.channelKeys || "").trim();
+  if (!raw) return false;
+  const keys = raw.split(",").map((k) => String(k || "").trim().toLowerCase()).filter(Boolean);
+  return keys.some((k) => scopeKeys.has(k));
+}
+
+function filterMarkersForMapScope(markers, scopeKeys) {
+  if (scopeKeys == null) return markers;
+  return (Array.isArray(markers) ? markers : []).filter((m) => markerInMapScope(m, scopeKeys));
+}
+
+function applyForcedScopeToGeoJsonOptions(options, scopeKeys) {
+  const next = options && typeof options === "object" ? options : {};
+  if (scopeKeys != null) {
+    // Never trust client-supplied scopeKeys for non-admins.
+    next.scopeChannelKeys = scopeKeys;
+  }
+  return next;
+}
+
+function filterSseJsonForMapScope(obj, scopeKeys) {
+  if (scopeKeys == null || !obj || typeof obj !== "object") return obj;
+  if (obj.type === "batch") {
+    const updates = filterMarkersForMapScope(obj.updates || [], scopeKeys);
+    const shapeUpdates = (Array.isArray(obj.shapeUpdates) ? obj.shapeUpdates : []).filter((f) =>
+      featureInMapScope(f, scopeKeys)
+    );
+    const shapeRemoves = Array.isArray(obj.shapeRemoves) ? obj.shapeRemoves : [];
+    const removes = Array.isArray(obj.removes) ? obj.removes : [];
+    // Drop empty batches that only carried out-of-scope traffic.
+    if (
+      !updates.length &&
+      !removes.length &&
+      !shapeUpdates.length &&
+      !shapeRemoves.length &&
+      !obj.groupsCatalog
+    ) {
+      return null;
+    }
+    return Object.assign({}, obj, {
+      updates,
+      shapeUpdates: shapeUpdates.length ? shapeUpdates : undefined,
+      shapeRemoves: shapeRemoves.length ? shapeRemoves : undefined,
+    });
+  }
+  if (obj.type === "update" && obj.marker) {
+    return markerInMapScope(obj.marker, scopeKeys) ? obj : null;
+  }
+  if (obj.type === "shapes" && obj.shapes) {
+    const features = (Array.isArray(obj.shapes.features) ? obj.shapes.features : []).filter((f) =>
+      featureInMapScope(f, scopeKeys)
+    );
+    return Object.assign({}, obj, {
+      shapes: { type: "FeatureCollection", features },
+    });
+  }
+  if (obj.type === "snapshot" && obj.state && obj.state.liveShapes) {
+    const features = (
+      Array.isArray(obj.state.liveShapes.features) ? obj.state.liveShapes.features : []
+    ).filter((f) => featureInMapScope(f, scopeKeys));
+    return Object.assign({}, obj, {
+      state: Object.assign({}, obj.state, {
+        liveShapes: { type: "FeatureCollection", features },
+      }),
+    });
+  }
+  return obj;
+}
+
 /** Geofence tools are global-admin only for now. */
 function requireGeofenceGlobalAdmin(req, res, next) {
   if (!req.authentikUser || !req.authentikUser.isGlobalAdmin) {
@@ -78,7 +164,9 @@ router.get("/state", async (req, res) => {
   } catch (err) {
     snapshot.groupsCatalog = [];
     snapshot.channelScope = ctx.scopeMemberGroups ? "member" : "all";
-    snapshot.allowedChannelKeys = ctx.scopeMemberGroups ? [] : null;
+    // Still derive membership keys so a catalog failure does not blank the map.
+    const keys = resolveMapScopeKeys(ctx);
+    snapshot.allowedChannelKeys = keys == null ? null : Array.from(keys);
     snapshot.groupsError = err?.message || String(err);
   }
   return res.json(snapshot);
@@ -86,9 +174,11 @@ router.get("/state", async (req, res) => {
 
 router.get("/markers", (req, res) => {
   cotStream.ensureBridgeStarted();
+  const ctx = getMapAccessContext(req);
+  const scopeKeys = resolveMapScopeKeys(ctx);
   res.setHeader("Cache-Control", "no-cache");
   return res.json({
-    markers: cotStream.getMarkersSlimList(),
+    markers: filterMarkersForMapScope(cotStream.getMarkersSlimList(), scopeKeys),
     revision: cotStream.getMarkerRevision(),
     updatedAt: new Date().toISOString(),
   });
@@ -152,24 +242,33 @@ function buildGeoJsonOptions(req) {
 
 router.get("/geojson", async (req, res) => {
   cotStream.ensureBridgeStarted();
-  const options = buildGeoJsonOptions(req);
+  const ctx = getMapAccessContext(req);
+  const scopeKeys = resolveMapScopeKeys(ctx);
+  const options = applyForcedScopeToGeoJsonOptions(buildGeoJsonOptions(req), scopeKeys);
   const currentRevision = String(cotStream.getMarkerRevision());
+  // Member-scoped responses must not share a bare revision ETag with the unscoped feed.
+  const etag =
+    scopeKeys == null
+      ? currentRevision
+      : currentRevision + ":m:" + Array.from(scopeKeys).sort().join(",");
   const ifNoneMatch = String(req.headers["if-none-match"] || "").trim();
 
-  if (ifNoneMatch && ifNoneMatch === currentRevision) {
-    res.setHeader("ETag", currentRevision);
+  if (ifNoneMatch && ifNoneMatch === etag) {
+    res.setHeader("ETag", etag);
     res.setHeader("Cache-Control", "no-cache");
     return res.status(304).end();
   }
 
   const geojson = cotStream.getMarkersGeoJson(options);
-  res.setHeader("ETag", String(geojson.meta?.revision || currentRevision));
+  res.setHeader("ETag", etag);
   res.setHeader("Cache-Control", "no-cache");
   return res.json(geojson);
 });
 
 router.post("/geojson/viewport", (req, res) => {
   cotStream.ensureBridgeStarted();
+  const ctx = getMapAccessContext(req);
+  const scopeKeys = resolveMapScopeKeys(ctx);
   const body = req.body && typeof req.body === "object" ? req.body : {};
   const query = {
     channels: body.channels,
@@ -186,6 +285,7 @@ router.post("/geojson/viewport", (req, res) => {
       body.allowedChannelKeys.map(String).filter(Boolean)
     );
   }
+  applyForcedScopeToGeoJsonOptions(options, scopeKeys);
   const geojson = cotStream.getMarkersGeoJson(options);
   res.setHeader("Cache-Control", "no-cache");
   return res.json(geojson);
@@ -259,10 +359,11 @@ router.get("/groups", async (req, res) => {
     });
     return res.json(catalog);
   } catch (err) {
+    const keys = resolveMapScopeKeys(ctx);
     return res.status(500).json({
       groups: [],
       channelScope: ctx.scopeMemberGroups ? "member" : "all",
-      allowedChannelKeys: ctx.scopeMemberGroups ? [] : null,
+      allowedChannelKeys: keys == null ? null : Array.from(keys),
       error: err?.message || String(err),
       updatedAt: new Date().toISOString(),
     });
@@ -312,12 +413,29 @@ router.get("/stream", (req, res) => {
   res.setHeader("X-Accel-Buffering", "no");
   if (typeof res.flushHeaders === "function") res.flushHeaders();
 
+  const ctx = getMapAccessContext(req);
+  const scopeKeys = resolveMapScopeKeys(ctx);
+
   const ac = new AbortController();
   const onReqClose = () => ac.abort();
   req.on("close", onReqClose);
 
   const sendLine = (line) => {
     if (ac.signal.aborted) return;
+    if (scopeKeys != null) {
+      const raw = String(line || "");
+      const payloadMatch = raw.match(/^data:\s*(\{[\s\S]*\})\s*$/m);
+      if (payloadMatch) {
+        try {
+          const filtered = filterSseJsonForMapScope(JSON.parse(payloadMatch[1]), scopeKeys);
+          if (!filtered) return;
+          res.write(`data: ${JSON.stringify(filtered)}\n\n`);
+          return;
+        } catch (_) {
+          // Fall through and send the original line if parse fails.
+        }
+      }
+    }
     try {
       res.write(line);
     } catch (_) {}

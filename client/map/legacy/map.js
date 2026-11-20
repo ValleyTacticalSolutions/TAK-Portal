@@ -1291,11 +1291,12 @@
   function featureMatchesChannelFilter(feature) {
     const uid = feature && feature.properties && feature.properties.uid;
     if (!uid) return false;
-    const marker = markersByUid.get(String(uid));
-    if (marker) return markerVisible(marker);
+    // Prefer server channelKeys so a client rematch cannot wipe already-scoped markers.
     if (feature.properties && feature.properties.channelKeys) {
       return featureMatchesChannelKeys(feature);
     }
+    const marker = markersByUid.get(String(uid));
+    if (marker) return markerVisible(marker);
     return !isChannelFilterActive();
   }
 
@@ -4311,8 +4312,16 @@
     return n.toLowerCase().startsWith("tak_") ? n.slice(4) : n;
   }
 
+  function stripLdapDnGroupName(name) {
+    const n = String(name || "").trim();
+    if (!n) return "";
+    const cn = n.match(/^cn\s*=\s*([^,]+)/i);
+    if (cn && cn[1]) return String(cn[1] || "").trim();
+    return n;
+  }
+
   function stripChannelBehaviorSuffix(name) {
-    let n = stripTakPrefix(name);
+    let n = stripTakPrefix(stripLdapDnGroupName(name));
     const lower = n.toLowerCase();
     if (lower.endsWith("_read")) n = n.slice(0, -5);
     else if (lower.endsWith("_write")) n = n.slice(0, -6);
@@ -4320,7 +4329,7 @@
   }
 
   function isMapChannelName(name) {
-    const n = String(name || "").trim();
+    const n = stripLdapDnGroupName(name);
     if (!n.toLowerCase().startsWith("tak_") || n.startsWith("_")) return false;
     const display = stripChannelBehaviorSuffix(n).toLowerCase();
     if (display.startsWith("__")) return false;
@@ -4364,7 +4373,7 @@
   }
 
   function channelGroupKey(name) {
-    const raw = String(name || "").trim();
+    const raw = stripLdapDnGroupName(name);
     if (!raw) return "";
     const lower = raw.toLowerCase();
     if (lower === "unassigned" || lower === "__unassigned__") {
@@ -4373,7 +4382,7 @@
     if (lower === "stale" || lower === "__stale__") {
       return "";
     }
-    const base = stripChannelBehaviorSuffix(name);
+    const base = stripChannelBehaviorSuffix(raw);
     if (!base) return "";
     const baseLower = base.toLowerCase();
     if (baseLower === "unassigned") return "__unassigned__";
@@ -4387,6 +4396,18 @@
   }
 
   function markerChannelKeys(m) {
+    // Prefer server-computed keys (same normalization as GeoJSON) when present.
+    if (m && typeof m.channelKeys === "string" && m.channelKeys.trim()) {
+      return m.channelKeys
+        .split(",")
+        .map(function (part) {
+          return String(part || "")
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, " ");
+        })
+        .filter(Boolean);
+    }
     return markerGroups(m)
       .map((g) => {
         const key = channelGroupKey(g);
@@ -7132,20 +7153,11 @@
   function applySnapshot(state) {
     const snapshotRevision =
       state && state.revision != null ? Number(state.revision) : null;
-    if (
-      snapshotRevision != null &&
-      snapshotRevision === appliedSnapshotRevision &&
-      markersByUid.size > 0
-    ) {
-      return;
-    }
-    if (snapshotRevision != null) {
-      appliedSnapshotRevision = snapshotRevision;
-    }
-
     const hasChannelScope =
       state?.channelScope === "member" || state?.channelScope === "all";
 
+    // Always apply membership scope / catalog even when marker revision is unchanged
+    // (SSE snapshot often arrives first without channelScope).
     if (hasChannelScope) {
       applyMapChannelScope(state.channelScope, state.allowedChannelKeys);
       mergeGroupsCatalog(state?.groupsCatalog || []);
@@ -7157,6 +7169,21 @@
       mergeGroupsCatalog(state.groupsCatalog);
     } else {
       recomputeGroupCounts();
+    }
+
+    if (
+      snapshotRevision != null &&
+      snapshotRevision === appliedSnapshotRevision &&
+      markersByUid.size > 0
+    ) {
+      if (hasChannelScope) {
+        renderLayerList();
+        syncChannelFilterToMap();
+      }
+      return;
+    }
+    if (snapshotRevision != null) {
+      appliedSnapshotRevision = snapshotRevision;
     }
 
     if (state && state.icons && state.icons.defaultIcons) {

@@ -85,7 +85,7 @@ function isSpecialCatalogGroupName(name) {
 }
 
 function channelGroupKey(name) {
-  const n = normalizeGroupName(name).toLowerCase();
+  const n = stripLdapDnGroupName(name).toLowerCase();
   if (!n) return "";
   if (n === UNASSIGNED_GROUP.toLowerCase() || n === UNASSIGNED_CHANNEL_KEY) {
     return UNASSIGNED_CHANNEL_KEY;
@@ -98,7 +98,7 @@ function channelGroupKey(name) {
 
 /** Strip tak_ prefix and _READ/_WRITE behavior suffix for one logical channel. */
 function stripChannelBehaviorSuffix(name) {
-  let n = dataSyncAccess.takDisplayName(name);
+  let n = dataSyncAccess.takDisplayName(stripLdapDnGroupName(name));
   const lower = n.toLowerCase();
   if (lower.endsWith("_read")) return n.slice(0, -5).trim();
   if (lower.endsWith("_write")) return n.slice(0, -6).trim();
@@ -106,7 +106,7 @@ function stripChannelBehaviorSuffix(name) {
 }
 
 function channelBaseKey(name) {
-  const raw = normalizeGroupName(name);
+  const raw = stripLdapDnGroupName(name);
   if (!raw) return "";
   const lower = raw.toLowerCase();
   if (lower === UNASSIGNED_GROUP.toLowerCase() || lower === UNASSIGNED_CHANNEL_KEY) {
@@ -1969,12 +1969,40 @@ function buildGroupsCatalogWithCounts(markers) {
 function getUserMemberChannelBaseKeys(userGroupNames) {
   const keys = new Set();
   for (const raw of userGroupNames || []) {
-    const name = normalizeGroupName(raw);
-    if (!name || !isMapChannelGroupName(name)) continue;
-    const key = channelBaseKey(name);
-    if (key) keys.add(key);
+    const name = stripLdapDnGroupName(raw);
+    if (!name) continue;
+    // Agency-admin / portal roles are not map channels.
+    if (/-AgencyAdmin$/i.test(name)) continue;
+    if (name.startsWith("_") || /authentik/i.test(name)) continue;
+    // Authentik may send tak_* or bare CN; both must map to the same base key.
+    const channelName = isMapChannelGroupName(name)
+      ? name
+      : groupsSvc.ensureTakPrefix(stripChannelBehaviorSuffix(name));
+    if (!isMapChannelGroupName(channelName)) continue;
+    const key = channelBaseKey(channelName);
+    if (key && key !== UNASSIGNED_CHANNEL_KEY) keys.add(key);
   }
   return keys;
+}
+
+/**
+ * Channel base keys the caller may see on Live Map.
+ * null = global admin (unscoped). Empty Set = member with no channel membership.
+ */
+function resolveAllowedChannelKeysForUser(authUser, userGroupNames, scopeMemberGroups) {
+  if (!scopeMemberGroups) return null;
+  const memberKeys = getUserMemberChannelBaseKeys(userGroupNames || []);
+  if (authUser) {
+    const managed = dataSyncAccess.getManagedMutualAidGroupsForUser(authUser);
+    for (const ma of managed) {
+      const displayName = String(ma.takDisplayName || ma.authentikName || "").trim();
+      if (!displayName) continue;
+      const name = groupsSvc.ensureTakPrefix(displayName);
+      const baseKey = channelBaseKey(name);
+      if (baseKey && baseKey !== UNASSIGNED_CHANNEL_KEY) memberKeys.add(baseKey);
+    }
+  }
+  return memberKeys;
 }
 
 function filterMapGroupsForUserMembership(groups, userGroupNames) {
@@ -2045,7 +2073,11 @@ async function getTakGroupCatalog(markers, options = {}) {
   let allowedChannelKeys = null;
 
   if (options.scopeMemberGroups) {
-    const memberKeys = getUserMemberChannelBaseKeys(options.userGroupNames || []);
+    const memberKeys = resolveAllowedChannelKeysForUser(
+      options.authUser || null,
+      options.userGroupNames || [],
+      true
+    );
     groups = filterMapGroupsForUserMembership(groups, options.userGroupNames || []);
     const merged = mergeManagedMutualAidChannels(
       groups,
@@ -2110,6 +2142,7 @@ module.exports = {
   getFederationSubscriptionGroups: () => federationSubscriptionGroups.slice(),
   getTakGroupCatalog,
   getUserMemberChannelBaseKeys,
+  resolveAllowedChannelKeysForUser,
   filterMapGroupsForUserMembership,
   mergeManagedMutualAidChannels,
   refreshGroupCatalog,
