@@ -11,7 +11,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
-### v2.0.38 - IN PROGRESS
+### v2.0.38 - 11/20/26
 ✨ `Enhancement` - TAK Beacon added to Supported TAK Clients within Settings / Setup My Device<br>
 ✨ `Enhancement` - Locate API exposes `GET/POST /api/locate/user-agreement` so CloudTAK Locator can show and accept the portal user agreement over the existing bridge<br>
 🔌 `Plugin Update` - Adds Cam Depot (dfndr13) to the CloudTAK Marketplace catalog: public traffic cameras from the TAKWERX Cam Depot catalog on the CloudTAK map<br>
