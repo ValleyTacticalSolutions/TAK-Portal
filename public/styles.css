@@ -1110,7 +1110,7 @@ label.btn {
 
 .modal {
     width: min(1100px, 96vw);
-    max-height: 92vh;
+    max-height: min(92vh, 100dvh - 24px);
     overflow: auto;
     position: relative;
     isolation: isolate;
@@ -2741,7 +2741,7 @@ a.settings-hub-card:visited {
 
 .settings-modal {
     width: min(960px, 96vw);
-    max-height: 92vh;
+    max-height: min(92vh, 100dvh - 24px);
     display: flex;
     flex-direction: column;
     overflow: visible;
@@ -2749,11 +2749,11 @@ a.settings-hub-card:visited {
 
 #settingsModal-email-templates .settings-modal {
     width: min(1500px, 98vw);
-    max-height: 96vh;
+    max-height: min(96vh, 100dvh - 16px);
 }
 
 #settingsModal-email-templates .modalBody {
-    max-height: calc(96vh - 72px);
+    max-height: calc(min(96vh, 100dvh - 16px) - 72px);
 }
 
 .settings-modal-backup {
@@ -3088,8 +3088,10 @@ a.settings-hub-card:visited {
 .settings-modal .settings-body {
     flex: 1 1 auto;
     min-height: 0;
-    max-height: calc(92vh - 72px);
+    max-height: calc(min(92vh, 100dvh - 24px) - 72px);
     overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
     padding: 14px 16px 20px;
 }
 
@@ -3112,6 +3114,26 @@ a.settings-hub-card:visited {
 
     .settings-hub-card.span-2 {
         grid-column: auto;
+    }
+}
+
+@media (max-height: 900px) and (min-width: 991px) {
+    .settings-modal-overlay {
+        align-items: flex-start;
+        overflow-x: hidden;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+    }
+
+    .settings-modal {
+        margin-block: auto;
+        max-height: none;
+    }
+
+    .settings-modal .modalBody,
+    .settings-modal .settings-body {
+        max-height: none;
     }
 }
 

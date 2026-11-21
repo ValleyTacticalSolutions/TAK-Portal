@@ -3705,7 +3705,7 @@ th.sortable:hover{
   display: flex;
   flex-direction: column;
   width: min(1280px, 100%);
-  max-height: 92vh;
+  max-height: min(92vh, 100dvh - 24px);
   overflow: hidden;
 }
 
@@ -3713,8 +3713,8 @@ th.sortable:hover{
   display: flex;
   flex-direction: column;
   width: min(1280px, 100%);
-  height: min(92vh, 100%);
-  max-height: 100%;
+  height: min(92vh, 100dvh - 24px);
+  max-height: min(92vh, 100dvh - 24px);
   min-height: 0;
   overflow: hidden;
 }
@@ -3745,15 +3745,17 @@ th.sortable:hover{
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 #editGroupOverlay .editGroupForm {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
 }
 
 #editGroupOverlay .editGroupTop {
@@ -3765,8 +3767,13 @@ th.sortable:hover{
   justify-content: flex-end;
   align-items: center;
   gap: 10px;
-  margin-top: 12px;
+  margin-top: auto;
   padding-top: 12px;
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  background: var(--raised);
+  box-shadow: 0 -10px 16px var(--raised);
 }
 
 #editGroupOverlay .editGroupFooter .msg {
@@ -4045,6 +4052,54 @@ th.sortable:hover{
 
 body.noScroll .main {
   overflow: hidden !important;
+}
+
+@media (max-height: 900px) and (min-width: 991px) {
+  #editGroupOverlay,
+  #membersOverlay {
+    align-items: flex-start;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+  #editGroupOverlay .editGroupModal,
+  #membersOverlay .membersModal {
+    flex: 0 0 auto;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    margin-block: auto;
+  }
+  #editGroupOverlay .modalHeader,
+  #membersOverlay .modalHeader {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    background: var(--raised);
+  }
+  #editGroupOverlay .modalBody,
+  #membersOverlay .modalBody,
+  #editGroupOverlay .editGroupForm,
+  #membersOverlay .membersSplit,
+  #membersOverlay .membersSplit.has-mass,
+  #membersOverlay.has-delegate .membersSplit,
+  #membersOverlay .membersSplitPane,
+  #membersOverlay .membersDelegatePane,
+  #membersOverlay.has-delegate .membersDelegatePane {
+    flex: 0 0 auto;
+    min-height: auto;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+  #membersOverlay .membersListBox,
+  #membersOverlay .membersMassListBox,
+  #membersOverlay .membersDelegatePane .membersMassListBox {
+    flex: 0 0 auto;
+    min-height: 8rem;
+    max-height: min(36dvh, 18rem);
+  }
 }
 
 @media (max-width: 990px) {

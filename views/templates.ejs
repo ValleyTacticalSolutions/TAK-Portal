@@ -1425,7 +1425,7 @@ th.sortable:hover{
   display: flex;
   flex-direction: column;
   width: min(1100px, 100%);
-  max-height: 92vh;
+  max-height: min(92vh, 100dvh - 24px);
   overflow: hidden;
 }
 
@@ -1451,16 +1451,18 @@ th.sortable:hover{
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 #editTemplateOverlay .editTemplateGrid {
   flex: 1 1 auto;
-  min-height: 0;
-  height: 100%;
+  min-height: 100%;
+  height: auto;
   display: grid;
   grid-template-rows: auto auto 1fr auto;
-  overflow: hidden;
+  overflow: visible;
 }
 
 #editTemplateOverlay .editTemplateGroupsSection {
@@ -1495,6 +1497,13 @@ th.sortable:hover{
   justify-content: flex-end;
   align-items: center;
   gap: 10px;
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  background: var(--raised);
+  box-shadow: 0 -10px 16px var(--raised);
+  padding-top: 12px;
+  margin-top: 8px;
 }
 
 #editTemplateOverlay .editTemplateFooter .msg {
@@ -1637,6 +1646,43 @@ body.noScroll .main {
 @media (max-width: 400px) {
   .listCardTable .cardActionsRow {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-height: 900px) and (min-width: 991px) {
+  #editTemplateOverlay {
+    align-items: flex-start;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+  #editTemplateOverlay .editTemplateModal {
+    flex: 0 0 auto;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    margin-block: auto;
+  }
+  #editTemplateOverlay .modalHeader {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    background: var(--raised);
+  }
+  #editTemplateOverlay .modalBody,
+  #editTemplateOverlay .editTemplateGrid,
+  #editTemplateOverlay .editTemplateGroupsSection,
+  #editTemplateOverlay .editTemplateGroupsSection > label {
+    flex: 0 0 auto;
+    min-height: auto;
+    height: auto;
+    overflow: visible;
+  }
+  #editTemplateOverlay .editTemplateGroupsSection .groupsBox {
+    flex: 0 0 auto;
+    min-height: 8rem;
+    max-height: min(36dvh, 18rem);
   }
 }
 

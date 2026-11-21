@@ -4203,7 +4203,7 @@ input.readonly {
   display: flex;
   flex-direction: column;
   width: min(1200px, 100%);
-  max-height: 92vh;
+  max-height: min(92vh, 100dvh - 24px);
   overflow: hidden;
 }
 
@@ -4229,15 +4229,17 @@ input.readonly {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 #editAgencyOverlay .editAgencyForm {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
 }
 
 #editAgencyOverlay .editAgencyTop {
@@ -4288,7 +4290,7 @@ input.readonly {
 
 #editAgencyOverlay .editAgencySplit {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 12rem;
   display: grid;
   grid-template-columns: 1fr;
   gap: 16px;
@@ -4414,9 +4416,13 @@ input.readonly {
   justify-content: flex-end;
   align-items: center;
   gap: 10px;
-  margin-top: 12px;
+  margin-top: auto;
   padding-top: 12px;
-  background: transparent;
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  background: var(--raised);
+  box-shadow: 0 -10px 16px var(--raised);
 }
 
 #editAgencyOverlay .editAgencyFooter .msg {
@@ -4438,6 +4444,45 @@ input.readonly {
 
 body.noScroll .main {
   overflow: hidden !important;
+}
+
+/* Short viewports (wide laptops, zoomed browsers): keep two-column layout, scroll the dialog. */
+@media (max-height: 900px) and (min-width: 991px) {
+  #editAgencyOverlay {
+    align-items: flex-start;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+  #editAgencyOverlay .editAgencyModal {
+    flex: 0 0 auto;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    margin-block: auto;
+  }
+  #editAgencyOverlay .modalHeader {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    background: var(--raised);
+  }
+  #editAgencyOverlay .modalBody,
+  #editAgencyOverlay .editAgencyForm,
+  #editAgencyOverlay .editAgencySplit,
+  #editAgencyOverlay .editAgencySplit.has-extra-groups,
+  #editAgencyOverlay .editAgencySplitPane {
+    flex: 0 0 auto;
+    min-height: auto;
+    overflow: visible;
+    height: auto;
+  }
+  #editAgencyOverlay .editAgencyListBox {
+    flex: 0 0 auto;
+    min-height: 8rem;
+    max-height: min(36dvh, 18rem);
+  }
 }
 
 @media (max-width: 990px) {
