@@ -198,7 +198,7 @@
           </label>
         </div>
 
-        <div class="editTemplateFooter row">
+        <div class="modalStickyFooter editTemplateFooter row">
           <span id="editMsg" class="msg"></span>
           <button class="btn success" id="editSubmitBtn" type="submit">Save Changes</button>
         </div>
@@ -1497,12 +1497,6 @@ th.sortable:hover{
   justify-content: flex-end;
   align-items: center;
   gap: 10px;
-  position: sticky;
-  bottom: 0;
-  z-index: 4;
-  background: var(--raised);
-  box-shadow: 0 -10px 16px var(--raised);
-  padding-top: 12px;
   margin-top: 8px;
 }
 
@@ -1773,14 +1767,7 @@ body.noScroll .main {
     column-width: 160px;
   }
   #editTemplateOverlay .editTemplateFooter {
-    position: sticky;
-    bottom: 0;
-    z-index: 4;
-    background: var(--raised);
     margin-top: 12px;
-    padding-top: 12px;
-    padding-bottom: max(12px, env(safe-area-inset-bottom));
-    box-shadow: 0 -10px 16px var(--raised);
     flex-wrap: wrap;
   }
   #editTemplateOverlay .editTemplateFooter .btn {

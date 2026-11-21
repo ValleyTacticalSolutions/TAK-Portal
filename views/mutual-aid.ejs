@@ -983,7 +983,6 @@
   align-items: center;
   gap: 10px;
   margin-top: 12px;
-  padding-top: 12px;
   flex-wrap: wrap;
 }
 #membersOverlay .membersMassFooter .msg {
@@ -1241,14 +1240,7 @@ body.noScroll .main {
     margin-top: 4px;
   }
   #membersOverlay .membersMassFooter {
-    position: sticky;
-    bottom: 0;
-    z-index: 4;
-    background: var(--raised);
     margin-top: 12px;
-    padding-top: 12px;
-    padding-bottom: max(12px, env(safe-area-inset-bottom));
-    box-shadow: 0 -10px 16px var(--raised);
     flex-wrap: wrap;
   }
   #membersOverlay .membersMassFooter .btn {
@@ -1551,7 +1543,7 @@ body.noScroll .main {
             </div>
           </div>
 
-          <div class="membersMassFooter row">
+          <div class="modalStickyFooter membersMassFooter row">
             <span id="massMsg" class="msg"></span>
             <button class="btn" id="massSkipBtn" type="button" style="display:none;">Skip Group Assignment</button>
             <button class="btn success" id="massApplyBtn" type="button">ASSIGN FOR SELECTED AGENCIES</button>

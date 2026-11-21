@@ -270,7 +270,7 @@
           </div>
         </section>
 
-        <div class="editGroupFooter row">
+        <div class="modalStickyFooter editGroupFooter row">
           <span id="editGroupMsg" class="msg"></span>
           <button class="btn success" id="editGroupSaveBtn" type="button">Save Changes</button>
         </div>
@@ -405,7 +405,7 @@
             </div>
           </div>
 
-          <div class="membersMassFooter row">
+          <div class="modalStickyFooter membersMassFooter row">
             <span id="massMsg" class="msg"></span>
             <button class="btn success" id="massApplyBtn" type="button">ASSIGN FOR SELECTED AGENCIES</button>
           </div>
@@ -3768,12 +3768,6 @@ th.sortable:hover{
   align-items: center;
   gap: 10px;
   margin-top: auto;
-  padding-top: 12px;
-  position: sticky;
-  bottom: 0;
-  z-index: 4;
-  background: var(--raised);
-  box-shadow: 0 -10px 16px var(--raised);
 }
 
 #editGroupOverlay .editGroupFooter .msg {
@@ -4042,7 +4036,6 @@ th.sortable:hover{
   align-items: center;
   gap: 10px;
   margin-top: 12px;
-  padding-top: 12px;
   flex-wrap: wrap;
 }
 
@@ -4324,14 +4317,7 @@ body.noScroll .main {
   }
   #editGroupOverlay .editGroupFooter,
   #membersOverlay .membersMassFooter {
-    position: sticky;
-    bottom: 0;
-    z-index: 4;
-    background: var(--raised);
     margin-top: 12px;
-    padding-top: 12px;
-    padding-bottom: max(12px, env(safe-area-inset-bottom));
-    box-shadow: 0 -10px 16px var(--raised);
     flex-wrap: wrap;
   }
   #editGroupOverlay .editGroupFooter .btn,

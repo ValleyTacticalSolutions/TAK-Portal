@@ -243,7 +243,7 @@
           <% } %>
         </section>
 
-        <div class="editAgencyFooter row">
+        <div class="modalStickyFooter editAgencyFooter row">
           <span id="editAgencyMsg" class="msg"></span>
           <button class="btn success" id="editAgencySaveBtn" type="submit">Save Changes</button>
         </div>
@@ -4417,12 +4417,6 @@ input.readonly {
   align-items: center;
   gap: 10px;
   margin-top: auto;
-  padding-top: 12px;
-  position: sticky;
-  bottom: 0;
-  z-index: 4;
-  background: var(--raised);
-  box-shadow: 0 -10px 16px var(--raised);
 }
 
 #editAgencyOverlay .editAgencyFooter .msg {
@@ -4575,14 +4569,7 @@ body.noScroll .main {
     justify-content: center;
   }
   #editAgencyOverlay .editAgencyFooter {
-    position: sticky;
-    bottom: 0;
-    z-index: 4;
-    background: var(--raised);
     margin-top: 12px;
-    padding-top: 12px;
-    padding-bottom: max(12px, env(safe-area-inset-bottom));
-    box-shadow: 0 -10px 16px var(--raised);
     flex-wrap: wrap;
   }
   #editAgencyOverlay .editAgencyFooter .btn {

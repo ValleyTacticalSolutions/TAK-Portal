@@ -1145,6 +1145,24 @@ label.btn {
     justify-content: space-between;
 }
 
+/* Sticky modal action bar — solid edge like .modalHeader.
+   Never use a soft upward box-shadow here; it washes a fake gradient over the last field. */
+.modalStickyFooter {
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+    background: var(--raised);
+    box-shadow: none;
+    border-top: 1px solid var(--line);
+    padding-top: 12px;
+}
+
+@media (max-width: 990px) {
+    .modalStickyFooter {
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+    }
+}
+
 .modalBody {
     padding: 14px;
 }
