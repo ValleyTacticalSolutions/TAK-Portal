@@ -30,25 +30,30 @@
 
   <div class="card" id="mpQueueCard" style="margin-top:16px;display:none;">
     <div class="mp-jobs-header">
-      <div>
+      <div class="mp-jobs-title">
         <h2 style="margin:0;">Queue</h2>
-        <div class="muted" style="margin-top:2px;font-size:0.85rem;">CloudTAK Rebuilds Once When You Deploy.</div>
+        <div class="muted mp-jobs-meta">CloudTAK Rebuilds Once When You Deploy.</div>
       </div>
-      <button type="button" class="btn success" id="mpDeployBtn">Deploy</button>
+      <div class="mp-jobs-actions">
+        <button type="button" class="btn success" id="mpDeployBtn">Deploy</button>
+      </div>
     </div>
     <ul id="mpQueueList" class="mp-queue-list"></ul>
   </div>
 
   <div class="card" id="mpJobsCard" style="margin-top:16px;display:none;">
     <div class="mp-jobs-header">
-      <div>
+      <div class="mp-jobs-title">
         <h2 style="margin:0;">Jobs</h2>
-        <div id="mpJobsMeta" class="muted" style="margin-top:2px;font-size:0.85rem;"></div>
+        <div id="mpJobsMeta" class="muted mp-jobs-meta"></div>
       </div>
       <div class="mp-jobs-actions">
         <button type="button" class="btn" id="mpJobsCopyBtn">Copy</button>
         <button type="button" class="btn" id="mpJobsSaveBtn">Save .txt</button>
-        <button type="button" class="btn danger" id="mpJobsCancelBtn" disabled style="display:none;">Cancel Current Jobs</button>
+        <button type="button" class="btn danger" id="mpJobsCancelBtn" disabled style="display:none;">
+          <span class="mp-btn-label-full">Cancel Current Jobs</span>
+          <span class="mp-btn-label-short">Cancel</span>
+        </button>
       </div>
     </div>
     <pre id="mpJobs" class="mp-job-log"></pre>
@@ -377,22 +382,39 @@
   .mp-job-log {
     max-height: min(70vh, 640px);
     overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
     background: var(--panel, #111827);
     border: 1px solid var(--line);
     border-radius: 8px;
     padding: 12px;
+    margin: 0;
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
     word-break: break-word;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 12px;
     line-height: 1.4;
+    max-width: 100%;
+    box-sizing: border-box;
   }
   .mp-jobs-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 8px;
+  }
+  .mp-jobs-title {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .mp-jobs-meta {
+    margin-top: 2px;
+    font-size: 0.85rem;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: pre-line;
   }
   .mp-jobs-actions {
     display: flex;
@@ -400,6 +422,9 @@
     flex-wrap: wrap;
     gap: 8px;
     flex-shrink: 0;
+  }
+  .mp-btn-label-short {
+    display: none;
   }
   .mp-queue-list {
     list-style: none;
@@ -418,9 +443,19 @@
     border: 1px solid var(--line);
     border-radius: 8px;
     background: var(--bg);
+    min-width: 0;
   }
   .mp-queue-item-label {
     font-weight: 600;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  #mpJobsCard,
+  #mpQueueCard {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
   }
   .mp-wait-btn,
   .plugin-actions .btn:disabled,
@@ -448,6 +483,59 @@
   .mp-banner.warn { border-color: #c80; }
   @media (max-width: 990px) {
     .marketplace-grid { grid-template-columns: minmax(0, 1fr); }
+    .mp-jobs-header {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+    }
+    .mp-jobs-actions {
+      width: 100%;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .mp-jobs-actions .btn {
+      width: 100%;
+      margin: 0;
+      box-sizing: border-box;
+      text-align: center;
+      min-height: 40px;
+    }
+    .mp-jobs-actions .btn.danger,
+    .mp-jobs-actions .btn.success {
+      grid-column: 1 / -1;
+    }
+    .mp-btn-label-full {
+      display: none;
+    }
+    .mp-btn-label-short {
+      display: inline;
+    }
+    .mp-job-log {
+      max-height: min(55vh, 420px);
+      font-size: 11px;
+      padding: 10px;
+      border-radius: 6px;
+    }
+    .mp-queue-item {
+      flex-wrap: wrap;
+      align-items: stretch;
+    }
+    .mp-queue-item .btn {
+      width: 100%;
+      text-align: center;
+      min-height: 40px;
+    }
+  }
+  @media (max-width: 480px) {
+    .mp-jobs-actions {
+      grid-template-columns: 1fr;
+    }
+    .mp-job-log {
+      max-height: min(50vh, 360px);
+      font-size: 10.5px;
+      line-height: 1.35;
+    }
   }
 </style>
 
@@ -1123,9 +1211,12 @@
       var finished = list.filter(function (j) { return j.status === "complete"; });
       var failed = list.filter(function (j) { return j.status === "failed" || j.status === "cancelled"; });
       var still = list.some(function (j) { return j.status === "queued" || j.status === "running"; });
-      var head = list.map(jobLabel).join("  |  ");
+      var narrow = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(max-width: 990px)").matches;
+      var head = list.map(jobLabel).join(narrow ? "\n" : "  |  ");
       if (!still && finished.length && !failed.length) {
-        meta.textContent = "Done. " + finished.length + " job" + (finished.length === 1 ? "" : "s") + " finished. " + head;
+        meta.textContent =
+          "Done. " + finished.length + " job" + (finished.length === 1 ? "" : "s") + " finished." +
+          (narrow ? "\n" : " ") + head;
       } else {
         meta.textContent = head;
       }
