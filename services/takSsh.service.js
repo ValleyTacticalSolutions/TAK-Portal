@@ -22,6 +22,7 @@ const crypto = require("crypto");
 const { Client, utils: sshUtils } = require("ssh2");
 const { getString, getInt, getBool } = require("./env");
 const settingsSvc = require("./settings.service");
+const takMode = require("./takServerMode.service");
 
 const DATA_SSH_DIR = path.join(__dirname, "..", "data", "ssh");
 const DEFAULT_PRIVATE_KEY_PATH = path.join(DATA_SSH_DIR, "tak_ssh_ed25519");
@@ -70,15 +71,24 @@ const MARKETPLACE_HELPER_SOURCE = path.join(__dirname, "..", "host-helpers", "ma
 
 /** Shell checks that match commands granted in /etc/sudoers.d/tak-portal (not bare `sudo true`). */
 function shellProbeNopasswdRootAccess() {
+  if (takMode.isDockerMode()) {
+    return `${getPrivilegeBin()} -n docker exec -i ${takMode.getDockerContainer()} -- cat ${TAK_CORE_CONFIG_PATH} >/dev/null 2>&1`;
+  }
   return `${getPrivilegeBin()} -n cat ${TAK_CORE_CONFIG_PATH} >/dev/null 2>&1`;
 }
 
 function shellProbeNopasswdAsTakUser() {
+  if (takMode.isDockerMode()) {
+    return `${getPrivilegeBin()} -n docker exec -i -u tak ${takMode.getDockerContainer()} -- id >/dev/null 2>&1`;
+  }
   return `${getPrivilegeBin()} -n -u tak id >/dev/null 2>&1`;
 }
 
 function shellProbePasswordSudoAccess(password) {
   const safePass = quoteForSingleQuotedShell(password);
+  if (takMode.isDockerMode()) {
+    return `printf '%s\\n' '${safePass}' | ${getPrivilegeBin()} -S -p '' docker exec -i ${takMode.getDockerContainer()} -- cat ${TAK_CORE_CONFIG_PATH} >/dev/null 2>&1`;
+  }
   return `printf '%s\\n' '${safePass}' | ${getPrivilegeBin()} -S -p '' cat ${TAK_CORE_CONFIG_PATH} >/dev/null 2>&1`;
 }
 
@@ -115,8 +125,15 @@ function assertSafePortalSshUsername(username) {
   return u;
 }
 
-function buildPrivilegedCommand(innerCommand, mode, options = {}) {
-  const runAsUser = String(options.runAsUser || "").trim();
+function buildPrivilegedCommand(origInner, mode, options = {}) {
+  let innerCommand = origInner;
+  let runAsUser = String(options.runAsUser || "").trim();
+  if (takMode.isDockerMode()) {
+    // Docker TAK Server: reach its files/service through the container on the SSH host.
+    const d = takMode.toDockerCommand(innerCommand, runAsUser);
+    innerCommand = d.command;
+    runAsUser = d.runAsUser;
+  }
   const bin = getPrivilegeBin();
   if (!mode || mode.mode === "none") {
     throw new Error(privilegedUnavailableMessage());
@@ -152,6 +169,13 @@ function buildPrivilegedCommand(innerCommand, mode, options = {}) {
   throw new Error(privilegedUnavailableMessage());
 }
 
+/** A native-mode command on a Docker TAK host fails with "unknown user tak": say how to fix it. */
+function withMissingTakUserHint(message) {
+  const m = String(message || "");
+  if (takMode.isDockerMode() || !/unknown user:?\s+tak\b/i.test(m)) return m;
+  return `${m}\nThe SSH host has no "tak" user. If TAK Server runs in Docker, set TAK Server mode to Docker in Server Settings and re-run Generate Key + Handshake.`;
+}
+
 function takCertCommandOptions(connect, extra = {}) {
   return {
     sshUsername: String(connect?.username || "").trim(),
@@ -161,7 +185,10 @@ function takCertCommandOptions(connect, extra = {}) {
 
 function buildPrivilegedTeeCommand(remoteAbsolutePath, mode) {
   const safePath = quoteForSingleQuotedShell(String(remoteAbsolutePath || "").trim());
-  const teeInner = `tee '${safePath}' > /dev/null`;
+  const teeInner =
+    takMode.isDockerMode() && /^\/opt\/tak\//.test(String(remoteAbsolutePath || ""))
+      ? takMode.dockerTeeInner(safePath)
+      : `tee '${safePath}' > /dev/null`;
   const bin = getPrivilegeBin();
   if (mode.mode === "root") return teeInner;
   if (mode.mode === "nopasswd") return `${bin} -n ${teeInner}`;
@@ -278,6 +305,19 @@ function readMarketplaceHelperSource() {
   }
 }
 
+/** Docker TAK Server: allow only container exec/restart for the configured container name. */
+function dockerSudoersLines() {
+  const c = takMode.getDockerContainer();
+  return (
+    [
+      `  DOCKER="$(command -v docker)"`,
+      `  echo "$PORTAL_USER ALL=(root) NOPASSWD: $DOCKER exec -i ${c} *"`,
+      `  echo "$PORTAL_USER ALL=(root) NOPASSWD: $DOCKER exec -i -u tak ${c} *"`,
+      `  echo "$PORTAL_USER ALL=(root) NOPASSWD: $DOCKER restart ${c}"`,
+    ].join("\n") + "\n"
+  );
+}
+
 function buildPortalSudoersInstallScript(portalUsername) {
   const user = assertSafePortalSshUsername(portalUsername);
   const repairScript = TAK_PORTAL_CERTS_REPAIR_SCRIPT;
@@ -318,7 +358,7 @@ TMP="$(mktemp)"
   echo "$PORTAL_USER ALL=(root) NOPASSWD: $BASH ${repairScript}"
   echo "$PORTAL_USER ALL=(root) NOPASSWD: $SYSTEMCTL restart takserver"
   echo "$PORTAL_USER ALL=(tak) NOPASSWD: ALL"
-  echo "$PORTAL_USER ALL=(root) NOPASSWD: $TAIL"
+${takMode.isDockerMode() ? dockerSudoersLines() : ""}  echo "$PORTAL_USER ALL=(root) NOPASSWD: $TAIL"
   if [ -n "$REBOOT" ] && [ -x "$REBOOT" ]; then
     echo "$PORTAL_USER ALL=(root) NOPASSWD: $REBOOT"
   fi
@@ -395,8 +435,7 @@ async function runTakCertsRepairWithStoredSudoPassword(connect) {
   if (!password) {
     return { ok: false, message: "No stored sudo password for cert repair." };
   }
-  const safePass = quoteForSingleQuotedShell(password);
-  const cmd = `printf '%s\\n' '${safePass}' | ${getPrivilegeBin()} -S -p '' ${buildInlineTakCertsRepairCommand()}`;
+  const cmd = buildPrivilegedCommand(buildInlineTakCertsRepairCommand(), { mode: "password", password });
   return execOverSsh(connect, cmd, 30000);
 }
 
@@ -667,7 +706,7 @@ async function revokeIntegrationCertViaSshScript(username) {
   const result = await execOverSsh(connect, revokeCommand, 45000);
 
   if (!result.ok) {
-    throw new Error(result.message || "Failed to revoke integration cert via SSH script.");
+    throw new Error(withMissingTakUserHint(result.message) || "Failed to revoke integration cert via SSH script.");
   }
 
   // Cleanup integration certificate artifacts after revoke.
@@ -691,7 +730,7 @@ async function revokeIntegrationCertViaSshScript(username) {
     30000
   );
   if (!cleanupResult.ok) {
-    throw new Error(cleanupResult.message || "Certificate revoke succeeded, but cleanup failed.");
+    throw new Error(withMissingTakUserHint(cleanupResult.message) || "Certificate revoke succeeded, but cleanup failed.");
   }
 
   deleteStoredIntegrationCertFiles(un);
@@ -926,8 +965,7 @@ function execOverSshWithStdin(connectConfig, command, stdinUtf8, timeoutMs = 180
             done({ ok: true, stdout, stderr, exitCode: 0 });
           });
 
-          const input = String(stdinUtf8 || "");
-          stream.end(Buffer.from(input, "utf8"));
+          stream.end(Buffer.isBuffer(stdinUtf8) ? stdinUtf8 : Buffer.from(String(stdinUtf8 || ""), "utf8"));
         });
       })
       .on("error", (err) => {
@@ -1006,7 +1044,8 @@ async function runRemotePrivilegedCommand(rootShellCommand, timeoutMs = 30000, o
       mode,
       takCertCommandOptions(connect, options || {})
     );
-    return execOverSsh(connect, cmd, timeoutMs);
+    const res = await execOverSsh(connect, cmd, timeoutMs);
+    return res.ok ? res : { ...res, message: withMissingTakUserHint(res.message) };
   } catch (err) {
     return {
       ok: false,
@@ -1853,6 +1892,31 @@ async function uploadRemoteFilePrivileged({ localPath, remoteAbsolutePath, timeo
 
   const connect = toConnectConfig(cfg);
   const baseName = path.basename(remote);
+  if (takMode.isDockerMode() && /^\/opt\/tak\//.test(remote)) {
+    // The target lives inside the container, so a host /tmp staging file can't be copied there.
+    // Stream the bytes through the container's stdin (tee) instead.
+    try {
+      const mode = await getPrivilegedMode(connect);
+      const mk = await execOverSsh(
+        connect,
+        buildPrivilegedCommand(
+          `mkdir -p '${quoteForSingleQuotedShell(path.posix.dirname(remote))}'`,
+          mode,
+          takCertCommandOptions(connect, { runAsUser: "tak" })
+        ),
+        60000
+      );
+      if (!mk.ok) return mk;
+      return await execOverSshWithStdin(
+        connect,
+        buildPrivilegedTeeCommand(remote, mode),
+        fs.readFileSync(local),
+        Math.max(60000, Math.min(timeoutMs, 120000))
+      );
+    } catch (err) {
+      return { ok: false, message: err?.message || String(err), stdout: "", stderr: "", exitCode: null };
+    }
+  }
   const tmpRemote = `${REMOTE_TMP_SYNC_DIR}/${Date.now()}_${baseName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
   const remoteDir = path.posix.dirname(remote);
 
@@ -1965,6 +2029,9 @@ async function removeRemoteFilePrivileged(remoteAbsolutePath, timeoutMs = 60000)
 }
 
 module.exports = {
+  buildPrivilegedCommand,
+  withMissingTakUserHint,
+  buildPrivilegedTeeCommand,
   getPrivilegeBin,
   normalizePrivilegeBin,
   TAK_PORTAL_MARKETPLACE_HELPER,
