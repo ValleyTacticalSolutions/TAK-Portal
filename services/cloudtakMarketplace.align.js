@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const SOURCE_EXT = new Set([".ts", ".tsx", ".js", ".mjs", ".cjs", ".vue"]);
@@ -968,7 +969,11 @@ function shieldAppPluginTsconfig(webDir, pluginNames) {
   return ["app/tsconfig.json: typecheck excludes marketplace plugin dirs"];
 }
 
-/** Patterns older marketplace builds injected into API lint configs. Never re-add these. */
+/**
+ * Patterns older marketplace builds injected into API lint configs.
+ * Cleared for in-range plugins (#133/#144). Re-added only while quarantining
+ * an installed plugin whose declared CloudTAK range does not include this host (#146).
+ */
 const LEGACY_MARKETPLACE_API_LINT_IGNORES = [
   "stateless/routes/plugin-*.ts",
   "stateless/routes/replay.ts",
@@ -1005,19 +1010,180 @@ function stripTsNoCheckText(text) {
   return String(text || "").replace(TS_NOCHECK_LINE_RE, "");
 }
 
+function compareCloudtakVersions(a, b) {
+  const parts = (v) =>
+    String(v || "")
+      .trim()
+      .replace(/^v/i, "")
+      .split(/[-+]/)[0]
+      .split(".")
+      .map((p) => {
+        const n = parseInt(String(p).replace(/[^0-9].*$/, ""), 10);
+        return Number.isFinite(n) ? n : 0;
+      });
+  const aa = parts(a);
+  const bb = parts(b);
+  const n = Math.max(aa.length, bb.length);
+  for (let i = 0; i < n; i += 1) {
+    const da = aa[i] || 0;
+    const db = bb[i] || 0;
+    if (da < db) return -1;
+    if (da > db) return 1;
+  }
+  return 0;
+}
+
+/** "above" | "below" when version is outside range; "" when in range or unknown. */
+function cloudtakRangeMismatch(version, range) {
+  if (!version || !range || !range.min || !range.max) return "";
+  if (compareCloudtakVersions(version, range.min) < 0) return "below";
+  if (compareCloudtakVersions(version, range.max) > 0) return "above";
+  return "";
+}
+
+function parsePluginCloudtakRange(text) {
+  const s = String(text || "");
+  const patterns = [
+    /supported CloudTAK:\s*v?(\d+(?:\.\d+)*)\s+through\s+v?(\d+(?:\.\d+)*)/i,
+    /supports CloudTAK\s+v?(\d+(?:\.\d+)*)\s*-\s*v?(\d+(?:\.\d+)*)/i,
+  ];
+  for (const re of patterns) {
+    const m = s.match(re);
+    if (m) return { min: m[1], max: m[2] };
+  }
+  return null;
+}
+
+function readCloudtakCheckoutVersion(ctRoot) {
+  const root = String(ctRoot || "").trim();
+  if (!root) return "";
+  let found = "";
+  for (const rel of ["package.json", "app/package.json", "api/package.json"]) {
+    const f = path.join(root, rel);
+    if (!fs.existsSync(f)) continue;
+    try {
+      const data = JSON.parse(fs.readFileSync(f, "utf8"));
+      const v = data && typeof data.version === "string" ? data.version.trim() : "";
+      if (!v) continue;
+      if (!found) found = v;
+      else if (found !== v) return "";
+    } catch (_) {}
+  }
+  return found;
+}
+
+/** OXLint ignorePatterns for one installed plugin's copied API files. */
+function pluginApiLintIgnorePatterns(pluginName) {
+  const name = safePluginDirName(pluginName);
+  if (!name) return [];
+  const patterns = [
+    `stateless/routes/${name}.ts`,
+    `stateless/routes/plugin-${name}.ts`,
+    `stateless/lib/${name}*.ts`,
+    `stateless/lib/retention/${name}.ts`,
+    `stateful/lib/${name}*.ts`,
+    `test/${name}*.ts`,
+  ];
+  // Replay also ships retention helpers under the historical LEGACY list.
+  // Do not re-add the blanket plugin-*.ts ignore — that would hide in-range plugins.
+  if (name === "replay") {
+    for (const p of LEGACY_MARKETPLACE_API_LINT_IGNORES) {
+      if (p.includes("plugin-*")) continue;
+      if (!patterns.includes(p)) patterns.push(p);
+    }
+  }
+  return patterns;
+}
+
+function findPluginInstallScript(ctRoot, pluginName) {
+  const name = safePluginDirName(pluginName);
+  if (!name) return "";
+  const home = typeof os.homedir === "function" ? os.homedir() : "";
+  const candidates = [
+    home ? path.join(home, ".cache", "cloudtak-marketplace", name, "install.sh") : "",
+    path.join(ctRoot, "cloudtak-marketplace-plugins", name, "install.sh"),
+    path.join(ctRoot, "app", "plugins", name, "install.sh"),
+    path.join(ctRoot, "api", "web", "plugins", name, "install.sh"),
+  ].filter(Boolean);
+  for (const f of candidates) {
+    if (fs.existsSync(f)) return f;
+  }
+  return "";
+}
+
+/**
+ * Installed plugin dirs whose install.sh CloudTAK range does not include this checkout.
+ * Those plugins must not poison a shared API image rebuild (#146).
+ */
+function listOutOfRangeInstalledPlugins(ctRoot, pluginNames) {
+  const host = readCloudtakCheckoutVersion(ctRoot);
+  if (!host) return [];
+  const names = Array.isArray(pluginNames) ? pluginNames : [];
+  const out = [];
+  for (const name of names) {
+    const sh = findPluginInstallScript(ctRoot, name);
+    if (!sh) continue;
+    let text = "";
+    try {
+      text = fs.readFileSync(sh, "utf8");
+    } catch (_) {
+      continue;
+    }
+    const range = parsePluginCloudtakRange(text);
+    if (!range) continue;
+    const mismatch = cloudtakRangeMismatch(host, range);
+    if (!mismatch) continue;
+    out.push({
+      name: safePluginDirName(name),
+      host,
+      range,
+      mismatch,
+      installSh: sh,
+      patterns: pluginApiLintIgnorePatterns(name),
+    });
+  }
+  return out.filter((row) => row.name);
+}
+
+function relMatchesQuarantine(rel, pluginNames) {
+  const names = (pluginNames || []).map((n) => String(n || "").toLowerCase()).filter(Boolean);
+  if (!names.length) return false;
+  const base = path.basename(String(rel || ""), ".ts").toLowerCase();
+  const full = String(rel || "").replace(/\\/g, "/").toLowerCase();
+  for (const name of names) {
+    if (base === name || base === `plugin-${name}` || base.startsWith(`${name}-`) || base.startsWith(`${name}.`)) {
+      return true;
+    }
+    if (
+      full === `${name}.ts` ||
+      full.endsWith(`/${name}.ts`) ||
+      full.includes(`/${name}/`) ||
+      full.includes(`/${name}-`) ||
+      full.includes(`/plugin-${name}.`)
+    ) {
+      return true;
+    }
+    if (name === "replay" && /(^|\/)replay/.test(full)) return true;
+  }
+  return false;
+}
+
 /**
  * Drop leftover // @ts-nocheck from marketplace-copied API TS.
  * Pre-2.0.38 injected the pragma; some plugins (e.g. d4h) still ship it. Either form
  * trips CloudTAK 13.124+ OXLint ban-ts-comment and blocks every later marketplace job.
+ * Skip files owned by out-of-range quarantined plugins (#146).
  */
-function stripMarketplaceTsNoCheck(apiDir) {
+function stripMarketplaceTsNoCheck(apiDir, opts = {}) {
   const changes = [];
   if (!apiDir || !fs.existsSync(apiDir)) return changes;
+  const skipPlugins = Array.isArray(opts.quarantinePluginNames) ? opts.quarantinePluginNames : [];
   const found = [];
   for (const dirRel of ["stateless/routes", "stateless/lib", "stateful/lib", "common", "test"]) {
     walkTsFiles(path.join(apiDir, dirRel), dirRel, found);
   }
   for (const row of found) {
+    if (relMatchesQuarantine(row.rel, skipPlugins)) continue;
     let text = "";
     try {
       text = fs.readFileSync(row.abs, "utf8");
@@ -1037,13 +1203,44 @@ function stripMarketplaceTsNoCheck(apiDir) {
   return changes;
 }
 
+/** Ensure OXLint ignorePatterns include quarantine entries (idempotent). */
+function ensureOxlintIgnorePatterns(apiDir, patterns) {
+  const changes = [];
+  const want = (patterns || []).filter(Boolean);
+  if (!apiDir || !want.length) return changes;
+  const configPath = path.join(apiDir, ".oxlintrc.json");
+  if (!fs.existsSync(configPath)) return changes;
+  let config = null;
+  try {
+    config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  } catch (_) {
+    return changes;
+  }
+  if (!config || typeof config !== "object" || Array.isArray(config)) return changes;
+  const have = Array.isArray(config.ignorePatterns) ? config.ignorePatterns.slice() : [];
+  let changed = false;
+  for (const p of want) {
+    if (have.includes(p)) continue;
+    have.push(p);
+    changed = true;
+  }
+  if (!changed) return changes;
+  config.ignorePatterns = have;
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 4) + "\n");
+  changes.push(
+    "api/.oxlintrc.json: left out-of-range plugin API files out of image lint (" + want.join(", ") + ")"
+  );
+  return changes;
+}
+
 /**
  * CloudTAK 13.124+ API routes must pass OXLint as first-class API code.
- * Marketplace must not inject // @ts-nocheck, eslint-disable, or lint ignorePatterns.
- * Clear leftovers from older marketplace deploys so plugin server routes stay in the lint set,
- * and strip any remaining @ts-nocheck so ban-ts-comment cannot fail the image build.
+ * Marketplace must not inject // @ts-nocheck, eslint-disable, or lint ignorePatterns for
+ * in-range plugins. Clear leftovers from older marketplace deploys, strip remaining
+ * @ts-nocheck so ban-ts-comment cannot fail the image build, then re-ignore only the
+ * API files of installed plugins whose CloudTAK range does not include this host (#146).
  */
-function clearMarketplaceServerLintSkips(apiDir) {
+function clearMarketplaceServerLintSkips(apiDir, opts = {}) {
   const changes = [];
   const ownedList = path.join(apiDir, ".marketplace-owned-ts");
   try {
@@ -1052,15 +1249,17 @@ function clearMarketplaceServerLintSkips(apiDir) {
       changes.push("api/.marketplace-owned-ts: removed (marketplace no longer marks API TS for lint skip)");
     }
   } catch (_) {}
-  changes.push(...stripMarketplaceTsNoCheck(apiDir));
+  changes.push(...stripMarketplaceTsNoCheck(apiDir, opts));
   changes.push(...clearApiEslintRouteIgnores(apiDir));
-  changes.push(...clearApiOxlintRouteIgnores(apiDir));
+  changes.push(...clearApiOxlintRouteIgnores(apiDir, opts));
+  const quarantinePatterns = Array.isArray(opts.quarantinePatterns) ? opts.quarantinePatterns : [];
+  changes.push(...ensureOxlintIgnorePatterns(apiDir, quarantinePatterns));
   return changes;
 }
 
 /** @deprecated name kept for callers; clears legacy skips instead of relaxing lint. */
-function relaxMarketplaceServerRoutes(apiDir) {
-  return clearMarketplaceServerLintSkips(apiDir);
+function relaxMarketplaceServerRoutes(apiDir, opts) {
+  return clearMarketplaceServerLintSkips(apiDir, opts);
 }
 
 function clearApiEslintRouteIgnores(apiDir) {
@@ -1081,7 +1280,7 @@ function clearApiEslintRouteIgnores(apiDir) {
   return changes;
 }
 
-function clearApiOxlintRouteIgnores(apiDir) {
+function clearApiOxlintRouteIgnores(apiDir, opts = {}) {
   const changes = [];
   const configPath = path.join(apiDir, ".oxlintrc.json");
   if (!fs.existsSync(configPath)) return changes;
@@ -1094,7 +1293,8 @@ function clearApiOxlintRouteIgnores(apiDir) {
   if (!config || typeof config !== "object" || Array.isArray(config)) return changes;
   const have = Array.isArray(config.ignorePatterns) ? config.ignorePatterns : [];
   if (!have.length) return changes;
-  const drop = new Set(LEGACY_MARKETPLACE_API_LINT_IGNORES);
+  const keep = new Set(Array.isArray(opts.quarantinePatterns) ? opts.quarantinePatterns : []);
+  const drop = new Set(LEGACY_MARKETPLACE_API_LINT_IGNORES.filter((p) => !keep.has(p)));
   const next = have.filter((p) => !drop.has(p));
   if (next.length === have.length) return changes;
   config.ignorePatterns = next;
@@ -1702,7 +1902,28 @@ function alignInstalledPlugins(ctRoot) {
     changes.push(...relaxHostPluginLint(web));
     changes.push(...relaxHostPluginCheck(web));
   }
-  changes.push(...relaxMarketplaceServerRoutes(path.join(root, "api")));
+  // #146: out-of-range installed plugins (e.g. Replay through v13.122.8 on a
+  // 13.125 host) must not lose their API lint ignore and then fail every other
+  // marketplace rebuild. Leave their API files out of OXLint; keep stripping
+  // @ts-nocheck / legacy ignores for everything else.
+  const outOfRange = listOutOfRangeInstalledPlugins(root, pluginNames);
+  const quarantinePatterns = [];
+  const quarantinePluginNames = [];
+  for (const row of outOfRange) {
+    quarantinePluginNames.push(row.name);
+    for (const p of row.patterns || []) {
+      if (!quarantinePatterns.includes(p)) quarantinePatterns.push(p);
+    }
+    changes.push(
+      `WARNING: ${row.name} supports CloudTAK v${row.range.min} - v${row.range.max}; this checkout is v${row.host} (${row.mismatch} range). Leaving its API files out of image lint so they cannot block other marketplace jobs. Uninstall ${row.name} or install a release that supports v${row.host}.`
+    );
+  }
+  changes.push(
+    ...relaxMarketplaceServerRoutes(path.join(root, "api"), {
+      quarantinePatterns,
+      quarantinePluginNames,
+    })
+  );
   changes.push(...ensurePluginsInBuildContext(root));
   // Heal Replay hub/index.ts if a prior drifted patch left `replay?: boolean` outside
   // SubmitCotsRequest (breaks API image eslint with Parsing error: Expression expected).
@@ -1948,6 +2169,16 @@ module.exports = {
   stripMarketplaceTsNoCheck,
   stripTsNoCheckText,
   relaxMarketplaceServerRoutes,
+  LEGACY_MARKETPLACE_API_LINT_IGNORES,
+  pluginApiLintIgnorePatterns,
+  listOutOfRangeInstalledPlugins,
+  findPluginInstallScript,
+  readCloudtakCheckoutVersion,
+  parsePluginCloudtakRange,
+  compareCloudtakVersions,
+  cloudtakRangeMismatch,
+  ensureOxlintIgnorePatterns,
+  relMatchesQuarantine,
   composeServiceNames,
   rewriteComposeDepends,
   ensureLoopbackPublish,

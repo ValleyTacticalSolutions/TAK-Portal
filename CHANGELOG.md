@@ -11,6 +11,10 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.40 - IN PROGRESS
+🐛 `Bug Fix` - CloudTAK Marketplace no longer lets an out-of-range installed plugin (e.g. Replay past its supported CloudTAK) poison every other Marketplace install/rebuild: those plugins' API files stay out of OXLint, align snapshots/restores the lint tree on failure, API lint is preflighted before a no-cache rebuild (abort naming the file/plugin), batch CSP updates defer `api` recreate until the shared rebuild, and rebuild failures attribute the culprit plugin instead of failing every job with the same text (#146)<br>
+🐛 `Bug Fix` - CloudTAK Marketplace no longer re-adds host `pdfjs-dist` after Rubber Sheet's install.sh removes it when PDF.js is vendored under `lib/vendor/pdfjs`; leftover host entries are dropped, and only legacy installs without the vendor still get `pdfjs-dist` seeded (#146)<br>
+
 ### v2.0.39 - 11/21/26
 🐛 `Bug Fix` - CloudTAK Marketplace strips leftover `// @ts-nocheck` from plugin API routes during align (so OXLint `ban-ts-comment` no longer blocks every install/update/uninstall after 2.0.38), and uninstall removes every `server/*.ts` route a plugin copied (e.g. `d4h-sync.ts`), not only `plugin-$id.ts` (#144)<br>
 🔒 `Security` - Added per-client rate limiting (default 1200 requests/minute, `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` to tune) to all portal routes, resolving CodeQL `js/missing-rate-limiting` (ops #67). `X-Forwarded-For` is only trusted when the peer is loopback/private (or `TRUSTED_PROXIES`)<br>

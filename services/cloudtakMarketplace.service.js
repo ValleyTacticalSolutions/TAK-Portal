@@ -2624,6 +2624,59 @@ function pullFailureLogLines(message) {
   return out.slice(-12);
 }
 
+/**
+ * Map an API lint path (e.g. api/stateless/lib/retention/replay.ts) to a marketplace
+ * plugin id when the failure clearly belongs to one installed plugin (#146).
+ */
+function pluginIdFromApiLintPath(filePath) {
+  const rel = String(filePath || "")
+    .replace(/\\/g, "/")
+    .replace(/^.*\bapi\//, "")
+    .replace(/^\.\//, "");
+  if (!rel) return "";
+  const base = path.basename(rel, ".ts").toLowerCase();
+  if (/^plugin-/.test(base)) return base.slice(7);
+  if (base === "replay" || /^replay/.test(base) || /\/replay/.test(rel)) return "replay";
+  if (/^[a-z0-9._-]+$/.test(base) && !/^(index|server|app|routes|lib)$/.test(base)) {
+    return base.replace(/-sync$/, "");
+  }
+  return "";
+}
+
+/** Prefer naming the plugin that owns the lint/build failure over a generic rebuild error. */
+function attributeRebuildFailure(message) {
+  const raw = String(message || "");
+  const fileHits = [];
+  const re =
+    /(?:^|[\s"'`(])((?:\/?(?:home|root|opt|var|tmp)\/[^\s:'"`)]+\/)?api\/(?:stateless|stateful|common|test)\/[A-Za-z0-9._\/-]+\.ts)(?::\d+)?/g;
+  let m;
+  while ((m = re.exec(raw))) {
+    const rel = m[1].replace(/^.*\b(api\/(?:stateless|stateful|common|test)\/)/, "$1");
+    if (!fileHits.includes(rel)) fileHits.push(rel);
+  }
+  for (const file of fileHits) {
+    const id = pluginIdFromApiLintPath(file);
+    if (!id) continue;
+    return {
+      pluginId: id,
+      file,
+      summary: `Rebuild blocked by installed plugin "${id}" (API lint failed in ${file}). Uninstall ${id} or install a release that supports this CloudTAK, then retry.`,
+    };
+  }
+  // Align WARNING lines only — do not steal install.sh "This plugin supports CloudTAK" refusals.
+  const named = raw.match(
+    /WARNING:\s+([a-z0-9][a-z0-9._-]*) supports CloudTAK v[\d.]+ - v[\d.]+; this checkout is v/i
+  );
+  if (named) {
+    return {
+      pluginId: named[1],
+      file: "",
+      summary: `Rebuild blocked by installed plugin "${named[1]}" (CloudTAK version outside its supported range). Uninstall ${named[1]} or install a compatible release, then retry.`,
+    };
+  }
+  return null;
+}
+
 function summarizeCommandError(message) {
   const raw = String(message || "");
   const pullKind = classifyDockerPullFailure(raw);
@@ -2648,6 +2701,22 @@ function summarizeCommandError(message) {
       line
     )
   );
+  if (
+    compatLine &&
+    (/cannot write|ask your admin to enable marketplace installs|Direct write failed/i.test(joined) ||
+      /supports CloudTAK|this checkout is v|required plugin patch does not apply|outside the plugin's supported range/i.test(
+        compatLine
+      ))
+  ) {
+    // Prefer the install refusal text; only attribute when the failure is an API lint path.
+    if (!/api\/(?:stateless|stateful|common|test)\//i.test(joined)) {
+      return clip(compatLine.replace(/^ERROR:\s*/i, ""));
+    }
+  }
+  const attributed = attributeRebuildFailure(raw);
+  if (attributed && attributed.summary) {
+    return attributed.summary.length > 220 ? attributed.summary.slice(0, 217) + "..." : attributed.summary;
+  }
   if (
     compatLine &&
     (/cannot write|ask your admin to enable marketplace installs|Direct write failed/i.test(joined) ||
@@ -3051,6 +3120,8 @@ function pluginCspBash() {
     '  local api_svc="${3:-api}"',
     '  local spec_file="$4"',
     '  local remove_only="${5:-}"',
+    // #146: batch installs write the overlay now; recreate api once at rebuild time.
+    '  local skip_recreate="${6:-}"',
     '  [ -n "$plugin_id" ] || return 0',
     "  local d STACK CF STATE OVERRIDE dir src envn csv line had f key val",
     '  STACK=""',
@@ -3208,6 +3279,10 @@ function pluginCspBash() {
     "  fi",
     "  sync_csp_override",
     "  pin_csp_compose_file",
+    '  if [ "$skip_recreate" = "1" ]; then',
+    '    echo "CSP overlay updated; deferring $api_svc recreate until CloudTAK rebuild"',
+    "    return 0",
+    "  fi",
     '  if ! command -v docker >/dev/null 2>&1; then return 0; fi',
     '  echo "Recreating $api_svc so CSP environment applies"',
     '  if [ -f "$OVERRIDE" ]; then',
@@ -3660,22 +3735,99 @@ const MARKETPLACE_GIT_RESTORE_PATHS = [
   "api/.oxlintrc.json",
 ];
 
-/** Pinned to cloudtak-plugin-rubbersheet install.sh (PDF page rendering). */
+/**
+ * Legacy fallback only: pre-vendor Rubber Sheet imported pdfjs-dist from the CloudTAK app.
+ * Current plugin (lib/vendor/pdfjs) must NOT get a host pdfjs-dist re-added (#146).
+ */
 const RUBBER_SHEET_PDFJS_VERSION = "4.10.38";
 
 /**
- * Bash: if Rubber Sheet is on disk, ensure app/package.json lists pdfjs-dist.
- * Does not run npm on the host (lock stays clean); Docker build npm install fetches it.
+ * Bash: Rubber Sheet host dep hygiene for app/package.json.
+ * - Vendored PDF.js (lib/vendor/pdfjs): remove leftover host pdfjs-dist; do not re-add.
+ * - Legacy installs without vendor: keep adding pdfjs-dist so vite still resolves.
+ * Does not run npm on the host (lock stays clean).
  */
 function ensureMarketplaceHostNpmDepsBash() {
   return `
 ensure_marketplace_host_npm_deps() {
   local ct="$1"
   local pkg="$ct/app/package.json"
+  local plugin="$ct/app/plugins/rubber-sheet"
   local version="${RUBBER_SHEET_PDFJS_VERSION}"
   local tmp out
   [ -n "$ct" ] && [ -f "$pkg" ] || return 0
-  [ -d "$ct/app/plugins/rubber-sheet" ] || return 0
+  [ -d "$plugin" ] || return 0
+
+  # Current Rubber Sheet vendors PDF.js; install.sh removes host pdfjs-dist. Do not fight it (#146).
+  if [ -d "$plugin/lib/vendor/pdfjs" ]; then
+    _ctak_drop_pdfjs_dep() {
+      local target="$1"
+      if command -v node >/dev/null 2>&1; then
+        node - "$target" <<'NODE'
+const fs = require("fs");
+const path = process.argv[1];
+const data = JSON.parse(fs.readFileSync(path, "utf8"));
+const deps = data.dependencies || {};
+if (!deps["pdfjs-dist"]) {
+  process.stdout.write("absent");
+  process.exit(0);
+}
+delete deps["pdfjs-dist"];
+if (Object.keys(deps).length) data.dependencies = deps;
+else delete data.dependencies;
+fs.writeFileSync(path, JSON.stringify(data, null, 2) + "\\n");
+process.stdout.write("removed");
+NODE
+        return $?
+      fi
+      if command -v python3 >/dev/null 2>&1; then
+        python3 - "$target" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path) as handle:
+    data = json.load(handle)
+deps = data.get("dependencies") or {}
+if "pdfjs-dist" not in deps:
+    sys.stdout.write("absent")
+    raise SystemExit(0)
+deps.pop("pdfjs-dist", None)
+if deps:
+    data["dependencies"] = deps
+else:
+    data.pop("dependencies", None)
+with open(path, "w") as handle:
+    json.dump(data, handle, indent=2)
+    handle.write("\\n")
+sys.stdout.write("removed")
+PY
+        return $?
+      fi
+      return 1
+    }
+    out="$(_ctak_drop_pdfjs_dep "$pkg" 2>/dev/null)" && {
+      if [ "$out" = "removed" ]; then
+        echo "Removed leftover host pdfjs-dist (Rubber Sheet vendors PDF.js under lib/vendor/pdfjs)"
+      fi
+      return 0
+    }
+    tmp="$(mktemp /tmp/ctak-app-package.XXXXXX)"
+    if ! cp "$pkg" "$tmp" 2>/dev/null; then
+      rm -f "$tmp" || true
+      return 0
+    fi
+    out="$(_ctak_drop_pdfjs_dep "$tmp" 2>/dev/null || true)"
+    if [ "$out" != "removed" ]; then
+      rm -f "$tmp" || true
+      return 0
+    fi
+    if declare -F run_as_writer >/dev/null 2>&1 && run_as_writer "cp $(printf '%q' "$tmp") $(printf '%q' "$pkg")"; then
+      echo "Removed leftover host pdfjs-dist (Rubber Sheet vendors PDF.js under lib/vendor/pdfjs)"
+    elif declare -F elevate_run >/dev/null 2>&1 && elevate_run "cp $(printf '%q' "$tmp") $(printf '%q' "$pkg")"; then
+      echo "Removed leftover host pdfjs-dist (Rubber Sheet vendors PDF.js under lib/vendor/pdfjs)"
+    fi
+    rm -f "$tmp" || true
+    return 0
+  fi
 
   _ctak_write_pdfjs_dep() {
     local target="$1"
@@ -3714,13 +3866,13 @@ sys.stdout.write("added")
 PY
       return $?
     fi
-    echo "WARNING: cannot ensure pdfjs-dist for Rubber Sheet (node/python3 missing)" >&2
+    echo "WARNING: cannot ensure pdfjs-dist for legacy Rubber Sheet (node/python3 missing)" >&2
     return 1
   }
 
   out="$(_ctak_write_pdfjs_dep "$pkg" 2>/dev/null)" && {
     if [ "$out" = "added" ]; then
-      echo "Added pdfjs-dist@\${version} to app/package.json (required by Rubber Sheet)"
+      echo "Added pdfjs-dist@\${version} to app/package.json (legacy Rubber Sheet without vendored PDF.js)"
     fi
     return 0
   }
@@ -3736,11 +3888,11 @@ PY
     return 0
   fi
   if declare -F run_as_writer >/dev/null 2>&1 && run_as_writer "cp $(printf '%q' "$tmp") $(printf '%q' "$pkg")"; then
-    echo "Added pdfjs-dist@\${version} to app/package.json (required by Rubber Sheet)"
+    echo "Added pdfjs-dist@\${version} to app/package.json (legacy Rubber Sheet without vendored PDF.js)"
   elif declare -F elevate_run >/dev/null 2>&1 && elevate_run "cp $(printf '%q' "$tmp") $(printf '%q' "$pkg")"; then
-    echo "Added pdfjs-dist@\${version} to app/package.json (required by Rubber Sheet)"
+    echo "Added pdfjs-dist@\${version} to app/package.json (legacy Rubber Sheet without vendored PDF.js)"
   else
-    echo "WARNING: Rubber Sheet is installed but pdfjs-dist is missing from app/package.json (could not write $pkg)" >&2
+    echo "WARNING: legacy Rubber Sheet is installed but pdfjs-dist is missing from app/package.json (could not write $pkg)" >&2
   fi
   rm -f "$tmp" || true
   return 0
@@ -3827,8 +3979,188 @@ elif [ -f "$ALIGN_JS" ]; then
   echo "WARNING: node not found; skip post-pull align. Run a marketplace rebuild to re-apply shields." >&2
 fi
 
-# Restoring app/package.json above drops Rubber Sheet's pdfjs-dist; put it back.
+# After restoring app/package.json: drop leftover host pdfjs-dist when Rubber Sheet
+# vendors PDF.js, or re-seed it only for legacy installs without lib/vendor/pdfjs.
 ensure_marketplace_host_npm_deps "$CT"
+`.trim();
+}
+
+/**
+ * Snapshot / restore API lint-sensitive files around align + rebuild (#146).
+ * Keeps the first snapshot in a batch so a failed rebuild can put oxlintrc /
+ * @ts-nocheck / plugin API TS back before later CloudTAK updates also fail.
+ */
+function marketplaceApiLintTreeGuardBash() {
+  return `
+marketplace_align_snapshot_dir() {
+  printf '%s\\n' "$1/cloudtak-marketplace-plugins/_host/pre-align-snapshot"
+}
+
+marketplace_snapshot_api_lint_tree() {
+  local ct="$1"
+  local snap list f
+  [ -n "$ct" ] && [ -d "$ct/api" ] || return 0
+  snap=$(marketplace_align_snapshot_dir "$ct")
+  if [ -f "$snap/.complete" ]; then
+    echo "Keeping existing pre-align API lint snapshot"
+    return 0
+  fi
+  rm -rf "$snap"
+  mkdir -p "$snap"
+  list="$snap/files.list"
+  : > "$list"
+  for f in api/.oxlintrc.json api/eslint.config.js; do
+    [ -f "$ct/$f" ] && printf '%s\\n' "$f" >> "$list"
+  done
+  if [ -d "$ct/api/stateless/routes" ] || [ -d "$ct/api/stateless/lib" ] || [ -d "$ct/api/stateful/lib" ] || [ -d "$ct/api/test" ]; then
+    (
+      cd "$ct" || exit 0
+      find api/stateless/routes api/stateless/lib api/stateful/lib api/test -type f -name '*.ts' 2>/dev/null
+    ) | head -n 800 >> "$list" || true
+  fi
+  if [ ! -s "$list" ]; then
+    touch "$snap/.complete"
+    return 0
+  fi
+  if tar -C "$ct" -cf "$snap/tree.tar" -T "$list" 2>/dev/null; then
+    touch "$snap/.complete"
+    echo "Saved pre-align API lint snapshot ($snap)"
+  else
+    echo "WARNING: could not snapshot API lint tree before align" >&2
+    rm -rf "$snap"
+  fi
+  return 0
+}
+
+marketplace_restore_api_lint_tree() {
+  local ct="$1"
+  local snap
+  [ -n "$ct" ] || return 0
+  snap=$(marketplace_align_snapshot_dir "$ct")
+  [ -f "$snap/tree.tar" ] || return 0
+  echo "Restoring API lint tree from pre-align snapshot (so a failed rebuild cannot poison later jobs)"
+  if tar -C "$ct" -xf "$snap/tree.tar" 2>/dev/null; then
+    echo "Restored API lint tree from $snap"
+  elif declare -F elevate_run >/dev/null 2>&1; then
+    elevate_run "tar -C $(printf '%q' "$ct") -xf $(printf '%q' "$snap/tree.tar")" 2>/dev/null \\
+      && echo "Restored API lint tree from $snap (elevated)" \\
+      || echo "WARNING: could not restore API lint snapshot" >&2
+  else
+    echo "WARNING: could not restore API lint snapshot" >&2
+  fi
+  rm -rf "$snap"
+  return 0
+}
+
+marketplace_clear_api_lint_tree_snapshot() {
+  local ct="$1"
+  local snap
+  [ -n "$ct" ] || return 0
+  snap=$(marketplace_align_snapshot_dir "$ct")
+  rm -rf "$snap"
+  return 0
+}
+
+# Run CloudTAK API lint against the aligned host tree before an expensive no-cache
+# rebuild. On failure: name the file/plugin, restore the pre-align snapshot, abort (#146).
+marketplace_api_lint_preflight() {
+  local ct="$1"
+  local svc="\${2:-api}"
+  local log="/tmp/ctak-api-lint-preflight.\$\$.log"
+  local ec=0 hit plugin rel
+  [ -n "$ct" ] && [ -d "$ct/api" ] || return 0
+  echo "=== CloudTAK rebuild: API lint preflight (abort before no-cache build if this fails) ==="
+
+  _ctak_run_api_lint() {
+    local cmd
+    cmd=$(cat <<'EOS'
+set -e
+host_api=/host-api
+for d in stateless stateful common test; do
+  if [ -d "$host_api/$d" ]; then
+    rm -rf "/home/etl/api/$d"
+    cp -a "$host_api/$d" "/home/etl/api/$d"
+  fi
+done
+for f in .oxlintrc.json eslint.config.js package.json; do
+  [ -f "$host_api/$f" ] && cp -a "$host_api/$f" "/home/etl/api/$f"
+done
+cd /home/etl/api && npm run lint
+EOS
+)
+    if declare -F docker_cli >/dev/null 2>&1 && declare -F marketplace_is_infratak >/dev/null 2>&1 && marketplace_is_infratak; then
+      ( cd "$ct" && docker_cli compose run --rm --no-deps -u 0 \\
+        -v "$ct/api:/host-api:ro" \\
+        --entrypoint sh \\
+        "$svc" -c "$cmd" ) >"$log" 2>&1
+      return $?
+    fi
+    if declare -F docker_cli >/dev/null 2>&1; then
+      if ( cd "$ct" && docker_cli compose run --rm --no-deps -u 0 \\
+        -v "$ct/api:/host-api:ro" \\
+        --entrypoint sh \\
+        "$svc" -c "$cmd" ) >"$log" 2>&1; then
+        return 0
+      fi
+      # Fall through to docker run with the built api image if compose run fails.
+    fi
+    if declare -F docker_cli >/dev/null 2>&1; then
+      local img
+      img=$(cd "$ct" && docker_cli compose images -q "$svc" 2>/dev/null | head -n 1 || true)
+      if [ -n "$img" ]; then
+        docker_cli run --rm -u 0 \\
+          -v "$ct/api:/host-api:ro" \\
+          --entrypoint sh \\
+          "$img" -c "$cmd" >"$log" 2>&1
+        return $?
+      fi
+    fi
+    if [ -d "$ct/api/node_modules" ] && command -v npm >/dev/null 2>&1; then
+      ( cd "$ct/api" && npm run lint ) >"$log" 2>&1
+      return $?
+    fi
+    echo "WARNING: could not run API lint preflight (no docker image / host node_modules); continuing to rebuild" >&2
+    rm -f "$log" || true
+    return 0
+  }
+
+  set +e
+  _ctak_run_api_lint
+  ec=$?
+  set -e
+  if [ "$ec" -eq 0 ]; then
+    echo "API lint preflight passed"
+    rm -f "$log" || true
+    return 0
+  fi
+  if [ -f "$log" ]; then
+    cat "$log" || true
+  fi
+  hit=$(grep -Eo 'api/(stateless|stateful|common|test)/[A-Za-z0-9._/-]+\\.ts' "$log" 2>/dev/null | head -n 1 || true)
+  if [ -z "$hit" ]; then
+    hit=$(grep -Eo '(stateless|stateful|common|test)/[A-Za-z0-9._/-]+\\.ts' "$log" 2>/dev/null | head -n 1 || true)
+    [ -n "$hit" ] && hit="api/\$hit"
+  fi
+  plugin=""
+  rel="\${hit#api/}"
+  case "\$rel" in
+    *replay*) plugin="replay" ;;
+    */plugin-*.ts) plugin=\$(basename "\$rel" .ts | sed 's/^plugin-//') ;;
+    *)
+      base=\$(basename "\$rel" .ts)
+      plugin=\$(printf '%s' "\$base" | sed 's/-sync\$//')
+      ;;
+  esac
+  if [ -n "$hit" ] && [ -n "$plugin" ]; then
+    echo "ERROR: API lint preflight failed in \$hit (plugin: \$plugin). Nothing was rebuilt." >&2
+    echo "Uninstall \$plugin or install a release that supports this CloudTAK / passes stock OXLint, then retry." >&2
+  else
+    echo "ERROR: API lint preflight failed. Nothing was rebuilt." >&2
+  fi
+  marketplace_restore_api_lint_tree "$ct" || true
+  rm -f "$log" || true
+  return 1
+}
 `.trim();
 }
 
@@ -3840,6 +4172,7 @@ function pluginMarketplaceGitHygieneBash() {
   }
   return `
 ${ensureMarketplaceHostNpmDepsBash()}
+${marketplaceApiLintTreeGuardBash()}
 
 restore_marketplace_package_lock() {
   local ct="$1"
@@ -3924,7 +4257,7 @@ ${pluginMarketplaceGitHygieneBash()}
 align_plugins_to_host() {
   local ct="$1"
   [ -n "$ct" ] || return 0
-  # Rubber Sheet imports pdfjs-dist from the CloudTAK app; keep it listed before rebuild.
+  # Rubber Sheet: drop host pdfjs-dist when vendored; legacy installs still get it seeded.
   ensure_marketplace_host_npm_deps "$ct"
   if [ -f "$ct/app/package.json" ] && [ -d "$ct/app/src" ] && [ -d "$ct/app/plugins" ]; then
     :
@@ -3940,7 +4273,8 @@ ${js}
 CTAK_PLUGIN_ALIGN_JS
   chmod a+r "$script" 2>/dev/null || true
   # Plugin server routes under api/ must pass CloudTAK 13.124+ OXLint themselves.
-  # Align strips leftover @ts-nocheck and never re-adds lint ignorePatterns.
+  # Align strips leftover @ts-nocheck; out-of-range installed plugins keep OXLint ignores (#146).
+  marketplace_snapshot_api_lint_tree "$ct"
   echo "Aligning marketplace plugins to the installed CloudTAK API"
   if command -v node >/dev/null 2>&1; then
     if declare -F run_as_writer >/dev/null 2>&1; then
@@ -4514,6 +4848,13 @@ reclaim_cloudtak_plugin_paths || true
 # Match plugin calls and imports to this CloudTAK checkout before vue-tsc.
 # Applies to every plugin already on disk, not only the one being installed.
 ${pluginHostAlignRunnerBash()}
+# On failure after align, put API lint files back so later jobs are not poisoned (#146).
+_ctak_install_ok=0
+_ctak_install_cleanup() {
+  if [ "\${_ctak_install_ok:-0}" = "1" ]; then return 0; fi
+  marketplace_restore_api_lint_tree "$CT" || true
+}
+trap '_ctak_install_cleanup' EXIT
 align_plugins_to_host "$CT"
 
 cat <<'RUNTIME' > "$REPO_DIR/.ctak-runtime-plugin.sh"
@@ -4527,8 +4868,11 @@ ${pluginCspBash()}
 cat <<'CSPSPEC' > /tmp/ctak-csp-$ID.spec
 ${cspSpec}
 CSPSPEC
-apply_plugin_csp "$ID" "$CT" "$CT_COMPOSE_SVC" /tmp/ctak-csp-$ID.spec
+# Write CSP overlay now; recreate api once with the deferred CloudTAK rebuild (#146).
+apply_plugin_csp "$ID" "$CT" "$CT_COMPOSE_SVC" /tmp/ctak-csp-$ID.spec "" 1
 rm -f /tmp/ctak-csp-$ID.spec || true
+_ctak_install_ok=1
+trap - EXIT
 printf 'INSTALL_SHA %s\\n' "$SHA"
 `.trim();
 }
@@ -4594,7 +4938,8 @@ remove_plugin_copied_routes() {
 UNINSTALL_FAILED=0
 if [ -n "$ID" ]; then
   cleanup_plugin_runtime "$ID" "$CT" || true
-  apply_plugin_csp "$ID" "$CT" "$CT_COMPOSE_SVC" "" 1 || true
+  # Overlay update only; api recreate happens with the deferred CloudTAK rebuild (#146).
+  apply_plugin_csp "$ID" "$CT" "$CT_COMPOSE_SVC" "" 1 1 || true
   CACHE="$HOME/.cache/cloudtak-marketplace/$ID"
   remove_plugin_copied_routes "$CACHE"
   if [ -f "$CACHE/install.sh" ] && grep -q -- '--remove' "$CACHE/install.sh"; then
@@ -4766,6 +5111,14 @@ ${pluginHostAlignRunnerBash()}
 echo "=== CloudTAK rebuild: aligning marketplace plugins ==="
 align_plugins_to_host "$CT"
 repair_replay_hub_orphan "$CT" || true
+marketplace_rebuild_fail() {
+  echo "CloudTAK rebuild failed; restoring API lint tree so later jobs are not poisoned" >&2
+  marketplace_restore_api_lint_tree "$CT" || true
+  exit 1
+}
+if ! marketplace_api_lint_preflight "$CT" "$SVC"; then
+  marketplace_rebuild_fail
+fi
 echo "=== CloudTAK rebuild: docker compose build --no-cache (live output below) ==="
 if marketplace_helper_run rebuild "$CT" "$SVC"; then
   echo "CloudTAK image build finished (marketplace-helper)."
@@ -4793,10 +5146,11 @@ if marketplace_helper_run rebuild "$CT" "$SVC"; then
     fi
     if [ "$n" -ge 90 ]; then
       echo "Timed out waiting for $SVC to be running" >&2
-      exit 1
+      marketplace_rebuild_fail
     fi
     sleep 2
   done
+  marketplace_clear_api_lint_tree_snapshot "$CT"
   echo REBUILD_OK
   echo "Removing unused Docker images"
   docker image prune -f || true
@@ -4850,10 +5204,22 @@ export DOCKER_BUILDKIT=1
 # (npm install / vue-tsc) instead of looking silenced until the step finishes.
 ${dockerPullRetryBash()}
 set -o pipefail
+set +e
 docker_compose_with_pull_retry docker compose --progress=plain "\${COMPOSE_ARGS[@]}" build --no-cache "$SVC"
+build_ec=$?
+set -e
+if [ "$build_ec" -ne 0 ]; then
+  marketplace_rebuild_fail
+fi
 echo "CloudTAK image build finished."
 echo "=== CloudTAK rebuild: recreating containers ==="
+set +e
 docker_compose_with_pull_retry docker compose --progress=plain "\${COMPOSE_ARGS[@]}" up -d --force-recreate "$SVC"
+up_ec=$?
+set -e
+if [ "$up_ec" -ne 0 ]; then
+  marketplace_rebuild_fail
+fi
 echo "CloudTAK container recreate finished."
 echo "Waiting for $SVC to be running"
 n=0
@@ -4879,10 +5245,11 @@ while [ "$n" -lt 90 ]; do
   fi
   if [ "$n" -ge 90 ]; then
     echo "Timed out waiting for $SVC to be running" >&2
-    exit 1
+    marketplace_rebuild_fail
   fi
   sleep 2
 done
+marketplace_clear_api_lint_tree_snapshot "$CT"
 echo REBUILD_OK
 echo "Removing unused Docker images"
 docker image prune -f || true
@@ -5194,7 +5561,29 @@ async function runChangeBatch(jobs) {
           appendJobLog(j.id, "Cancelled.");
         }
       } else {
-        for (const j of succeeded) recordCommandFailure(j, "Rebuild failed: ", err);
+        const raw = err && err.message ? String(err.message) : String(err || "");
+        const attributed = attributeRebuildFailure(raw);
+        const culpritId = attributed && attributed.pluginId ? attributed.pluginId : "";
+        for (const j of succeeded) {
+          if (culpritId && j.pluginId && j.pluginId === culpritId) {
+            recordCommandFailure(j, "Rebuild failed: ", err);
+            continue;
+          }
+          if (culpritId) {
+            const blocked = `Blocked by installed plugin "${culpritId}" failing the shared CloudTAK API rebuild. ${
+              attributed.summary || summarizeCommandError(raw)
+            }`;
+            updateJob(j.id, {
+              status: "failed",
+              finishedAt: new Date().toISOString(),
+              error: blocked.length > 220 ? blocked.slice(0, 217) + "..." : blocked,
+            });
+            appendJobLog(j.id, `Rebuild failed: ${blocked}`);
+            markJobInstallError(j, blocked);
+            continue;
+          }
+          recordCommandFailure(j, "Rebuild failed: ", err);
+        }
       }
     }
   } else if (succeeded.length) {
@@ -5549,6 +5938,8 @@ module.exports = {
   deployStaged,
   selectLogJobs,
   summarizeCommandError,
+  attributeRebuildFailure,
+  pluginIdFromApiLintPath,
   classifyDockerPullFailure,
   pullFailureLogLines,
   dockerPullRetryBash,
@@ -5556,6 +5947,7 @@ module.exports = {
   parsePluginCloudtakRange,
   compareCloudtakVersions,
   cloudtakRangeMismatch,
+  marketplaceApiLintTreeGuardBash,
   formatRemoteLogLine,
   listJobs,
   clearIdleJobs,
