@@ -1,7 +1,8 @@
 "use strict";
 
 // CloudTAK 13.124+ lints the API with OXLint. Marketplace must not opt plugin
-// server routes out of that lint (no @ts-nocheck injection, no ignorePatterns).
+// server routes out of that lint (no @ts-nocheck injection, no ignorePatterns),
+// and must strip leftover @ts-nocheck so ban-ts-comment cannot fail the image build (#144).
 const assert = require("assert");
 const fs = require("fs");
 const os = require("os");
@@ -40,14 +41,29 @@ try {
       "    eslint.configs.recommended,\n" +
       ");\n"
   );
-  write("stateless/routes/plugin-x.ts", "export {};\n");
-  write("stateless/lib/d4h-sync.ts", "export {};\n");
-  write(".marketplace-owned-ts", "api/stateless/lib/d4h-sync.ts\n");
+  write(
+    "stateless/routes/plugin-x.ts",
+    "// @ts-nocheck\nexport {};\n"
+  );
+  write(
+    "stateless/routes/d4h-sync.ts",
+    "// @ts-nocheck — API route module; typechecked in CloudTAK api\nexport const sync = 1;\n"
+  );
+  write("stateless/lib/helper.ts", "export {};\n");
+  write(".marketplace-owned-ts", "api/stateless/lib/helper.ts\n");
 
   const first = align.clearMarketplaceServerLintSkips(apiDir);
   assert.ok(first.some((c) => c.startsWith("api/.oxlintrc.json")), "clears oxlint marketplace ignores");
   assert.ok(first.some((c) => c.startsWith("api/eslint.config.js")), "clears eslint marketplace ignores");
   assert.ok(first.some((c) => c.includes(".marketplace-owned-ts")), "drops owned-ts marker");
+  assert.ok(
+    first.some((c) => c.includes("plugin-x.ts") && c.includes("stripped @ts-nocheck")),
+    "strips injected @ts-nocheck from plugin routes"
+  );
+  assert.ok(
+    first.some((c) => c.includes("d4h-sync.ts") && c.includes("stripped @ts-nocheck")),
+    "strips plugin-shipped @ts-nocheck helpers (#144)"
+  );
 
   const cfg = JSON.parse(fs.readFileSync(path.join(apiDir, ".oxlintrc.json"), "utf8"));
   assert.deepStrictEqual(cfg.ignorePatterns, ["dist/**", "stateless/lib/d4h-sync.ts"]);
@@ -58,7 +74,12 @@ try {
   assert.doesNotMatch(eslint, /plugin-\*\.ts/);
 
   const route = fs.readFileSync(path.join(apiDir, "stateless", "routes", "plugin-x.ts"), "utf8");
+  assert.strictEqual(route, "export {};\n");
   assert.doesNotMatch(route, /@ts-nocheck/);
+  assert.strictEqual(
+    fs.readFileSync(path.join(apiDir, "stateless", "routes", "d4h-sync.ts"), "utf8"),
+    "export const sync = 1;\n"
+  );
   assert.ok(!fs.existsSync(path.join(apiDir, ".marketplace-owned-ts")));
 
   assert.deepStrictEqual(align.clearMarketplaceServerLintSkips(apiDir), [], "second run changes nothing");

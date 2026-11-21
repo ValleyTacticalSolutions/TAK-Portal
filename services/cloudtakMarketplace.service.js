@@ -3940,7 +3940,7 @@ ${js}
 CTAK_PLUGIN_ALIGN_JS
   chmod a+r "$script" 2>/dev/null || true
   # Plugin server routes under api/ must pass CloudTAK 13.124+ OXLint themselves.
-  # Marketplace must not mark them with @ts-nocheck or lint ignorePatterns.
+  # Align strips leftover @ts-nocheck and never re-adds lint ignorePatterns.
   echo "Aligning marketplace plugins to the installed CloudTAK API"
   if command -v node >/dev/null 2>&1; then
     if declare -F run_as_writer >/dev/null 2>&1; then
@@ -4453,6 +4453,10 @@ EXCL
   if [ -n "$ROUTES_DIR" ]; then
     echo "Copying route files from $ROUTES_DIR"
     run_as_writer "mkdir -p $(printf '%q' "$CT/api/stateless/routes") && cp -a $(printf '%q' "$ROUTES_DIR")/*.ts $(printf '%q' "$CT/api/stateless/routes")/" || true
+    for _rf in "$ROUTES_DIR"/*.ts; do
+      [ -f "$_rf" ] || continue
+      printf 'ROUTE_FILE %s\\n' "$(basename "$_rf")"
+    done
   fi
 fi
 
@@ -4529,14 +4533,29 @@ printf 'INSTALL_SHA %s\\n' "$SHA"
 `.trim();
 }
 
+/** Route basenames a plugin may have copied into api/stateless/routes (beyond plugin-$id.ts). */
+function guessPluginRouteFiles(pluginId, dest, extra) {
+  const files = [];
+  const add = (name) => {
+    const f = String(name || "").trim();
+    if (/^[A-Za-z0-9._-]+\.ts$/.test(f) && !files.includes(f)) files.push(f);
+  };
+  for (const f of extra || []) add(f);
+  const id = String(pluginId || "").trim();
+  const destName = String(dest || "").trim();
+  for (const key of [id, destName]) {
+    if (!key) continue;
+    add(`plugin-${key}.ts`);
+    add(`${key}-sync.ts`);
+    add(`${key}.ts`);
+  }
+  return files;
+}
+
 function uninstallRemoteScript(ct, dest, routeFiles, pluginId, options = {}) {
   const destName = String(dest || "").trim();
-  const files = (routeFiles || []).filter((f) => /^[A-Za-z0-9._-]+\.ts$/.test(f));
   const id = String(pluginId || "").trim();
-  const idForRoutes = id || destName;
-  for (const guess of [`plugin-${destName}.ts`, `plugin-${idForRoutes}.ts`]) {
-    if (guess && /^[A-Za-z0-9._-]+\.ts$/.test(guess) && !files.includes(guess)) files.push(guess);
-  }
+  const files = guessPluginRouteFiles(id || destName, destName, routeFiles);
   const routeRm = files
     .map((f) => `remove_plugin_tree "$CT/api/stateless/routes/${f}" || true`)
     .join("\n");
@@ -4559,11 +4578,25 @@ reclaim_cloudtak_plugin_paths || true
 ${pluginRemoveBash()}
 ${pluginRuntimeCleanupBash()}
 ${pluginCspBash()}
+# Remove every server/*.ts this plugin copied into api/stateless/routes (e.g. d4h-sync.ts),
+# not only plugin-$ID.ts. Read the install cache before it is wiped.
+remove_plugin_copied_routes() {
+  local root="$1"
+  local f base
+  [ -n "$root" ] && [ -d "$root/server" ] || return 0
+  for f in "$root"/server/*.ts; do
+    [ -f "$f" ] || continue
+    base=$(basename "$f")
+    echo "Removing plugin route $base"
+    remove_plugin_tree "$CT/api/stateless/routes/$base" || true
+  done
+}
 UNINSTALL_FAILED=0
 if [ -n "$ID" ]; then
   cleanup_plugin_runtime "$ID" "$CT" || true
   apply_plugin_csp "$ID" "$CT" "$CT_COMPOSE_SVC" "" 1 || true
   CACHE="$HOME/.cache/cloudtak-marketplace/$ID"
+  remove_plugin_copied_routes "$CACHE"
   if [ -f "$CACHE/install.sh" ] && grep -q -- '--remove' "$CACHE/install.sh"; then
     flags="--remove"
     if grep -q -- '--no-build' "$CACHE/install.sh"; then flags="$flags --no-build"; fi
@@ -4956,10 +4989,15 @@ async function performInstall(job, plugin) {
     installRemoteScript(loc.path, plugin, { composeService: loc.composeService }),
     INSTALL_TIMEOUT_MS
   );
-  const shaLine = String(result.stdout || "")
-    .split("\n")
-    .find((l) => l.startsWith("INSTALL_SHA "));
+  const outLines = String(result.stdout || "").split("\n");
+  const shaLine = outLines.find((l) => l.startsWith("INSTALL_SHA "));
   const sha = shaLine ? shaLine.slice(12).trim() : "";
+  const routeFiles = [];
+  for (const line of outLines) {
+    if (!line.startsWith("ROUTE_FILE ")) continue;
+    const name = line.slice(11).trim();
+    if (/^[A-Za-z0-9._-]+\.ts$/.test(name) && !routeFiles.includes(name)) routeFiles.push(name);
+  }
   const rec = store.readInstalled();
   rec.plugins[plugin.id] = {
     sha,
@@ -4967,6 +5005,7 @@ async function performInstall(job, plugin) {
     installedAt: new Date().toISOString(),
     repo: plugin.repo,
     ref: plugin.ref,
+    ...(routeFiles.length ? { routeFiles } : {}),
   };
   store.writeInstalled(rec);
   const out = String(result.stdout || "") + "\n" + String(result.stderr || "");
@@ -4991,15 +5030,13 @@ async function performUninstall(job, dest, plugin) {
       `CloudTAK path ${loc.healedFrom} is not a CloudTAK checkout (${loc.healReason || "invalid"}); using ${loc.path}`
     );
   }
-  const routeGuess = [];
-  if (plugin && plugin.routes) {
-    routeGuess.push(`plugin-${plugin.id}.ts`);
-  }
   const extraRoutes = job && job.extra && Array.isArray(job.extra.routeFiles) ? job.extra.routeFiles : [];
-  for (const f of extraRoutes) {
-    if (/^[A-Za-z0-9._-]+\.ts$/.test(f) && !routeGuess.includes(f)) routeGuess.push(f);
-  }
+  const recBefore = store.readInstalled();
+  const installedRow = plugin && recBefore.plugins[plugin.id];
+  const installedRoutes =
+    installedRow && Array.isArray(installedRow.routeFiles) ? installedRow.routeFiles : [];
   const runtimeId = (plugin && plugin.id) || dest;
+  const routeGuess = guessPluginRouteFiles(runtimeId, dest, [...extraRoutes, ...installedRoutes]);
   appendJobLog(job.id, `Removing ${dest} from the CloudTAK plugins directory`);
   await stageMarketplaceHelperSource(job.id);
   await runLoggedScript(
@@ -5548,6 +5585,7 @@ module.exports = {
   onEnabled,
   normalizeInstallScript,
   installRemoteScript,
+  guessPluginRouteFiles,
   uninstallRemoteScript,
   rebuildRemoteScript,
   rebuildTimeoutMs,

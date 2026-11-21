@@ -11,7 +11,8 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
-### v2.0.39 - IN PROGRESS
+### v2.0.39 - 11/21/26
+🐛 `Bug Fix` - CloudTAK Marketplace strips leftover `// @ts-nocheck` from plugin API routes during align (so OXLint `ban-ts-comment` no longer blocks every install/update/uninstall after 2.0.38), and uninstall removes every `server/*.ts` route a plugin copied (e.g. `d4h-sync.ts`), not only `plugin-$id.ts` (#144)<br>
 🔒 `Security` - Added per-client rate limiting (default 1200 requests/minute, `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` to tune) to all portal routes, resolving CodeQL `js/missing-rate-limiting` (ops #67). `X-Forwarded-For` is only trusted when the peer is loopback/private (or `TRUSTED_PROXIES`)<br>
 ✨ `Enhancement` - Docker TAK Server support: Settings → Connection & Certificates has a TAK Server type switch (Standard server by default, or Docker server) with a container name and an external enrollment host. In Docker mode, integration certs, CoreConfig edits and TAK Server restart go through the container over SSH, and QR/enrollment links use the external host instead of the internal TAK URL (#61, #27)<br>
 ✨ `Enhancement` - Agencies page now requires a domain to be entered before enabling auto-approve access requests<br>

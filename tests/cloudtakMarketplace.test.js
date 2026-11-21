@@ -708,6 +708,33 @@ assert.match(unknownUninstall, /plugin-host-only-plugin\.ts/);
 assert.match(unknownUninstall, /remove_plugin_tree "\$CT\/api\/stateless\/routes\/plugin-host-only-plugin\.ts"/);
 assert.match(unknownUninstall, /cleanup_plugin_runtime/);
 
+// #144: uninstall must remove every server/*.ts the plugin copied (d4h-sync.ts), not only plugin-d4h.ts
+assert.deepStrictEqual(marketplace.guessPluginRouteFiles("d4h", "d4h", []), [
+  "plugin-d4h.ts",
+  "d4h-sync.ts",
+  "d4h.ts",
+]);
+const d4hUninstall = marketplace.uninstallRemoteScript(
+  "/root/CloudTAK",
+  "d4h",
+  marketplace.guessPluginRouteFiles("d4h", "d4h", []),
+  "d4h"
+);
+assert.match(d4hUninstall, /remove_plugin_copied_routes/);
+assert.match(d4hUninstall, /"\$root"\/server\/\*\.ts/);
+assert.match(d4hUninstall, /remove_plugin_copied_routes "\$CACHE"/);
+assert.match(d4hUninstall, /remove_plugin_tree "\$CT\/api\/stateless\/routes\/plugin-d4h\.ts"/);
+assert.match(d4hUninstall, /remove_plugin_tree "\$CT\/api\/stateless\/routes\/d4h-sync\.ts"/);
+const d4hInstall = marketplace.installRemoteScript("/root/CloudTAK", {
+  id: "d4h",
+  repo: "https://github.com/clptak/cloudtak-plugin-d4h.git",
+  ref: "main",
+  web: { dest: "d4h", source: "." },
+  routes: { source: "server" },
+});
+assert.match(d4hInstall, /ROUTE_FILE/);
+assert.match(d4hInstall, /basename "\$_rf"/);
+
 const udash = normalized.plugins.find((p) => p.id === "udash");
 const udashSnippet = udash.additionalActions.find((a) => caddy.isCaddyAction(a)).snippet;
 const printSnippet = print.additionalActions.find((a) => caddy.isCaddyAction(a)).snippet;
@@ -1266,9 +1293,11 @@ assert.ok(!apiLinted.changes.some((line) => line.includes("skips image typecheck
 const demoRoute = fs.readFileSync(path.join(routesDir, "plugin-demo.ts"), "utf8");
 assert.doesNotMatch(demoRoute, /@ts-nocheck/);
 assert.strictEqual(demoRoute, "export default function demo() { return 1 }\n");
+// Leftover / plugin-shipped @ts-nocheck must be stripped (#144) so OXLint ban-ts-comment cannot fail Deploy.
+assert.ok(apiLinted.changes.some((line) => line.includes("helper-sync.ts") && line.includes("stripped @ts-nocheck")));
 const helperRoute = fs.readFileSync(path.join(routesDir, "helper-sync.ts"), "utf8");
-assert.match(helperRoute, /^\/\/ @ts-nocheck\n/);
-assert.strictEqual((helperRoute.match(/@ts-nocheck/g) || []).length, 1);
+assert.doesNotMatch(helperRoute, /@ts-nocheck/);
+assert.strictEqual(helperRoute, "export default function helper() {}\n");
 const videoRoute = fs.readFileSync(path.join(routesDir, "video.ts"), "utf8");
 assert.doesNotMatch(videoRoute, /@ts-nocheck/);
 const retentionFile = fs.readFileSync(path.join(retentionDir, "replay.ts"), "utf8");

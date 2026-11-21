@@ -981,10 +981,67 @@ const LEGACY_MARKETPLACE_API_LINT_IGNORES = [
 const MARKETPLACE_ROUTES_ESLINT_BLOCK_RE =
   /[ \t]*\/\* cloudtak-marketplace-routes \*\/\r?\n[ \t]*\{ ignores: \[[^\]]*\] \},?\r?\n?/;
 
+/** Full-line // @ts-nocheck (optional trailing text). OXLint ban-ts-comment fails the image build. */
+const TS_NOCHECK_LINE_RE = /^[ \t]*\/\/[ \t]*@ts-nocheck\b[^\n]*\r?\n?/gm;
+
+function walkTsFiles(dir, relBase, out) {
+  if (!dir || !fs.existsSync(dir)) return;
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (_) {
+    return;
+  }
+  for (const ent of entries) {
+    if (ent.name === "node_modules" || ent.name === "dist") continue;
+    const rel = relBase ? relBase + "/" + ent.name : ent.name;
+    const abs = path.join(dir, ent.name);
+    if (ent.isDirectory()) walkTsFiles(abs, rel, out);
+    else if (ent.isFile() && ent.name.endsWith(".ts")) out.push({ abs, rel });
+  }
+}
+
+function stripTsNoCheckText(text) {
+  return String(text || "").replace(TS_NOCHECK_LINE_RE, "");
+}
+
+/**
+ * Drop leftover // @ts-nocheck from marketplace-copied API TS.
+ * Pre-2.0.38 injected the pragma; some plugins (e.g. d4h) still ship it. Either form
+ * trips CloudTAK 13.124+ OXLint ban-ts-comment and blocks every later marketplace job.
+ */
+function stripMarketplaceTsNoCheck(apiDir) {
+  const changes = [];
+  if (!apiDir || !fs.existsSync(apiDir)) return changes;
+  const found = [];
+  for (const dirRel of ["stateless/routes", "stateless/lib", "stateful/lib", "common", "test"]) {
+    walkTsFiles(path.join(apiDir, dirRel), dirRel, found);
+  }
+  for (const row of found) {
+    let text = "";
+    try {
+      text = fs.readFileSync(row.abs, "utf8");
+    } catch (_) {
+      continue;
+    }
+    if (!/@ts-nocheck\b/.test(text.slice(0, 4000))) continue;
+    const next = stripTsNoCheckText(text);
+    if (next === text) continue;
+    try {
+      fs.writeFileSync(row.abs, next);
+    } catch (_) {
+      continue;
+    }
+    changes.push("api/" + row.rel + ": stripped @ts-nocheck for CloudTAK OXLint");
+  }
+  return changes;
+}
+
 /**
  * CloudTAK 13.124+ API routes must pass OXLint as first-class API code.
  * Marketplace must not inject // @ts-nocheck, eslint-disable, or lint ignorePatterns.
- * Clear leftovers from older marketplace deploys so plugin server routes stay in the lint set.
+ * Clear leftovers from older marketplace deploys so plugin server routes stay in the lint set,
+ * and strip any remaining @ts-nocheck so ban-ts-comment cannot fail the image build.
  */
 function clearMarketplaceServerLintSkips(apiDir) {
   const changes = [];
@@ -995,6 +1052,7 @@ function clearMarketplaceServerLintSkips(apiDir) {
       changes.push("api/.marketplace-owned-ts: removed (marketplace no longer marks API TS for lint skip)");
     }
   } catch (_) {}
+  changes.push(...stripMarketplaceTsNoCheck(apiDir));
   changes.push(...clearApiEslintRouteIgnores(apiDir));
   changes.push(...clearApiOxlintRouteIgnores(apiDir));
   return changes;
@@ -1887,6 +1945,8 @@ module.exports = {
   relaxHostPluginLint,
   relaxHostPluginCheck,
   clearMarketplaceServerLintSkips,
+  stripMarketplaceTsNoCheck,
+  stripTsNoCheckText,
   relaxMarketplaceServerRoutes,
   composeServiceNames,
   rewriteComposeDepends,
