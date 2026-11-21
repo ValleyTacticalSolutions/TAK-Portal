@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.39 - IN PROGRESS
+🔒 `Security` - Added per-client rate limiting (default 1200 requests/minute, `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` to tune) to all portal routes, resolving CodeQL `js/missing-rate-limiting` (ops #67). `X-Forwarded-For` is only trusted when the peer is loopback/private (or `TRUSTED_PROXIES`)
+
 ### v2.0.38 - 11/20/26
 ✨ `Enhancement` - TAK Beacon added to Supported TAK Clients within Settings / Setup My Device<br>
 ✨ `Enhancement` - Locate API exposes `GET/POST /api/locate/user-agreement` so CloudTAK Locator can show and accept the portal user agreement over the existing bridge<br>
