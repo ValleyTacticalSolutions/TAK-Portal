@@ -41,6 +41,12 @@ function getDockerContainer() {
   return isValidContainerName(v) ? v : DEFAULT_CONTAINER;
 }
 
+/** Never interpolate an unvalidated name into a shell command. */
+function safeContainer(container) {
+  const c = String(container || "").trim();
+  return isValidContainerName(c) ? c : DEFAULT_CONTAINER;
+}
+
 /** External host for QR/enrollment, or "" when unset/invalid. */
 function getEnrollHost() {
   const v = String(getString("TAK_ENROLL_HOST", "") || "").trim();
@@ -56,23 +62,26 @@ function touchesTakServer(innerCommand, runAsUser) {
  * Rewrite a native-install command for Docker TAK Server.
  * Commands that don't touch TAK Server come back unchanged. The caller's wrapper still runs the
  * result with privilege, so runAsUser is cleared when rewritten (the user is set in the container).
+ * Uses `docker exec … --` so the inner command cannot be parsed as docker flags.
  * @returns {{ command: string, runAsUser: string, rewritten: boolean }}
  */
 function toDockerCommand(innerCommand, runAsUser, container = getDockerContainer()) {
+  const c = safeContainer(container);
   const inner = String(innerCommand || "").trim();
   if (/^systemctl\s+restart\s+takserver$/.test(inner)) {
-    return { command: `docker restart ${container}`, runAsUser: "", rewritten: true };
+    return { command: `docker restart ${c}`, runAsUser: "", rewritten: true };
   }
   if (!touchesTakServer(inner, runAsUser)) {
     return { command: inner, runAsUser: String(runAsUser || ""), rewritten: false };
   }
   const user = String(runAsUser || "") === "tak" ? "-u tak " : "";
-  return { command: `docker exec -i ${user}${container} ${inner}`, runAsUser: "", rewritten: true };
+  return { command: `docker exec -i ${user}${c} -- ${inner}`, runAsUser: "", rewritten: true };
 }
 
 /** Unprivileged tee into a file inside the container (CoreConfig.xml etc.). */
 function dockerTeeInner(escapedPath, container = getDockerContainer()) {
-  return `docker exec -i ${container} tee '${escapedPath}' > /dev/null`;
+  const c = safeContainer(container);
+  return `docker exec -i ${c} -- tee '${escapedPath}' > /dev/null`;
 }
 
 module.exports = {
@@ -83,6 +92,7 @@ module.exports = {
   getTakServerMode,
   isDockerMode,
   getDockerContainer,
+  safeContainer,
   getEnrollHost,
   toDockerCommand,
   dockerTeeInner,

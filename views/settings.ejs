@@ -688,8 +688,8 @@
             </label>
             <div id="takDockerFields" style="display:<%= takServerModeIsDocker ? 'contents' : 'none' %>;">
               <% renderField("TAK_DOCKER_CONTAINER","Docker container name","Name of the TAK Server container on the SSH host (docker ps). Default: takserver."); %>
-              <% renderField("TAK_ENROLL_HOST","External enrollment host","Hostname or IP that devices use to reach TAK Server (QR codes, iTAK/ATAK enrollment). Leave blank to use the host from TAK URL. Use this when TAK URL is an internal Docker hostname."); %>
             </div>
+            <% renderField("TAK_ENROLL_HOST","External enrollment host","Hostname or IP that devices use to reach TAK Server (QR codes, iTAK/ATAK enrollment). Leave blank to use the host from TAK URL. Works in Standard or Docker mode (e.g. when TAK URL is an internal hostname)."); %>
             <script>
               (function () {
                 var sel = document.getElementById("takServerModeSelect");

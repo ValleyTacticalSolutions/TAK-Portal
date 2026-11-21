@@ -72,14 +72,14 @@ const MARKETPLACE_HELPER_SOURCE = path.join(__dirname, "..", "host-helpers", "ma
 /** Shell checks that match commands granted in /etc/sudoers.d/tak-portal (not bare `sudo true`). */
 function shellProbeNopasswdRootAccess() {
   if (takMode.isDockerMode()) {
-    return `${getPrivilegeBin()} -n docker exec -i ${takMode.getDockerContainer()} cat ${TAK_CORE_CONFIG_PATH} >/dev/null 2>&1`;
+    return `${getPrivilegeBin()} -n docker exec -i ${takMode.getDockerContainer()} -- cat ${TAK_CORE_CONFIG_PATH} >/dev/null 2>&1`;
   }
   return `${getPrivilegeBin()} -n cat ${TAK_CORE_CONFIG_PATH} >/dev/null 2>&1`;
 }
 
 function shellProbeNopasswdAsTakUser() {
   if (takMode.isDockerMode()) {
-    return `${getPrivilegeBin()} -n docker exec -i -u tak ${takMode.getDockerContainer()} id >/dev/null 2>&1`;
+    return `${getPrivilegeBin()} -n docker exec -i -u tak ${takMode.getDockerContainer()} -- id >/dev/null 2>&1`;
   }
   return `${getPrivilegeBin()} -n -u tak id >/dev/null 2>&1`;
 }
@@ -87,7 +87,7 @@ function shellProbeNopasswdAsTakUser() {
 function shellProbePasswordSudoAccess(password) {
   const safePass = quoteForSingleQuotedShell(password);
   if (takMode.isDockerMode()) {
-    return `printf '%s\\n' '${safePass}' | ${getPrivilegeBin()} -S -p '' docker exec -i ${takMode.getDockerContainer()} cat ${TAK_CORE_CONFIG_PATH} >/dev/null 2>&1`;
+    return `printf '%s\\n' '${safePass}' | ${getPrivilegeBin()} -S -p '' docker exec -i ${takMode.getDockerContainer()} -- cat ${TAK_CORE_CONFIG_PATH} >/dev/null 2>&1`;
   }
   return `printf '%s\\n' '${safePass}' | ${getPrivilegeBin()} -S -p '' cat ${TAK_CORE_CONFIG_PATH} >/dev/null 2>&1`;
 }

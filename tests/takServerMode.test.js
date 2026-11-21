@@ -39,32 +39,38 @@ assert.strictEqual(
 );
 assert.strictEqual(
   takSsh.buildPrivilegedCommand("cat /opt/tak/CoreConfig.xml", nopass),
-  "sudo -n docker exec -i takserver cat /opt/tak/CoreConfig.xml"
+  "sudo -n docker exec -i takserver -- cat /opt/tak/CoreConfig.xml"
 );
 assert.strictEqual(
   takSsh.buildPrivilegedCommand("bash -lc 'cd /opt/tak/certs'", nopass, asTak),
-  "sudo -n docker exec -i -u tak takserver bash -lc 'cd /opt/tak/certs'"
+  "sudo -n docker exec -i -u tak takserver -- bash -lc 'cd /opt/tak/certs'"
 );
 // Root SSH user: no sudo prefix, still goes through the container.
 assert.strictEqual(
   takSsh.buildPrivilegedCommand("bash -lc 'cd /opt/tak/certs'", { mode: "root" }, asTak),
-  "docker exec -i -u tak takserver bash -lc 'cd /opt/tak/certs'"
+  "docker exec -i -u tak takserver -- bash -lc 'cd /opt/tak/certs'"
 );
 // Stored-password repair path (formerly bypassed the rewrite and hit host /opt/tak).
 const repair = takSsh.buildPrivilegedCommand("bash -lc 'chown -R tak:tak /opt/tak/certs'", { mode: "password", password: "pw" });
-assert.ok(repair.includes("-S -p '' docker exec -i takserver bash"), repair);
+assert.ok(repair.includes("-S -p '' docker exec -i takserver -- bash"), repair);
 // Non-TAK commands are untouched.
 assert.strictEqual(takSsh.buildPrivilegedCommand("reboot", nopass), "sudo -n reboot");
 // CoreConfig write goes into the container.
 assert.strictEqual(
   takSsh.buildPrivilegedTeeCommand("/opt/tak/CoreConfig.xml", nopass),
-  "sudo -n docker exec -i takserver tee '/opt/tak/CoreConfig.xml' > /dev/null"
+  "sudo -n docker exec -i takserver -- tee '/opt/tak/CoreConfig.xml' > /dev/null"
 );
 // Custom and invalid container names.
 process.env.TAK_DOCKER_CONTAINER = "tak-prod_1";
 assert.strictEqual(mode.getDockerContainer(), "tak-prod_1");
 process.env.TAK_DOCKER_CONTAINER = "x; rm -rf /";
 assert.strictEqual(mode.getDockerContainer(), "takserver", "unsafe name falls back to default");
+assert.strictEqual(mode.safeContainer("x; rm -rf /"), "takserver");
+assert.strictEqual(
+  mode.toDockerCommand("cat /opt/tak/CoreConfig.xml", "", "evil; id").command,
+  "docker exec -i takserver -- cat /opt/tak/CoreConfig.xml",
+  "unsafe container arg is not interpolated"
+);
 // Sudoers lists only the configured container, and only in Docker mode.
 process.env.TAK_DOCKER_CONTAINER = "tak-prod_1";
 const sudoers = takSsh.buildPortalSudoersInstallScript("portal");
