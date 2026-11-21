@@ -28,7 +28,12 @@ function notifyPluginCatalogChanged(reason) {
   }
 }
 
-/** Serialize plugin catalog mutations so back-to-back adds cannot drop entries. */
+/**
+ * Serialize ALL plugin-manifest.json mutations (plugins catalog + takGovLink).
+ * Token refresh and catalog writes share one lock so a keepalive refresh cannot
+ * overwrite a concurrent plugin add (or vice versa) and lose the rotated refresh token.
+ * That lost-update race was clearing the TAK.gov link (#136).
+ */
 let catalogMutex = Promise.resolve();
 function withCatalogLock(fn) {
   const run = catalogMutex.then(
@@ -41,6 +46,8 @@ function withCatalogLock(fn) {
   );
   return run;
 }
+/** @deprecated Alias — prefer withCatalogLock; same mutex. */
+const withManifestLock = withCatalogLock;
 
 const TAK_GOV_DEVICE_URL = "https://auth.tak.gov/auth/realms/TPC/protocol/openid-connect/auth/device";
 const TAK_GOV_TOKEN_URL = "https://auth.tak.gov/auth/realms/TPC/protocol/openid-connect/token";
@@ -256,27 +263,62 @@ function startTakGovKeepalive() {
   }
 }
 
-function clearStoredTakGovLink(manifest, reason) {
-  const updated = {
-    ...manifest.takGovLink,
-    linked: false,
-    refreshToken: null,
-    linkCode: null,
-    linkCodeExpiry: null,
-    deviceCode: null,
-    deviceCodeExpiry: null,
-    interval: null,
-    verificationUri: null,
-    verificationUriComplete: null,
-    accessTokenExpiresAt: null,
-    lastRefreshAt: null,
-    lastUnlinkReason: String(reason || "").slice(0, 500) || undefined,
-    unlinkedAt: Date.now(),
-  };
-  clearTakGovAccessTokenCache();
-  stopTakGovKeepalive();
-  saveManifest({ ...manifest, takGovLink: updated });
-  return updated;
+/**
+ * Clear stored TAK.gov credentials under the manifest lock (fresh load).
+ * @param {string} reason
+ * @returns {Promise<object>} updated takGovLink
+ */
+function clearStoredTakGovLink(reason) {
+  return withCatalogLock(() => {
+    const manifest = loadManifest();
+    const updated = {
+      ...manifest.takGovLink,
+      linked: false,
+      refreshToken: null,
+      linkCode: null,
+      linkCodeExpiry: null,
+      deviceCode: null,
+      deviceCodeExpiry: null,
+      interval: null,
+      verificationUri: null,
+      verificationUriComplete: null,
+      accessTokenExpiresAt: null,
+      lastRefreshAt: null,
+      lastUnlinkReason: String(reason || "").slice(0, 500) || undefined,
+      unlinkedAt: Date.now(),
+    };
+    clearTakGovAccessTokenCache();
+    stopTakGovKeepalive();
+    saveManifest({ ...manifest, takGovLink: updated });
+    return updated;
+  });
+}
+
+/**
+ * Persist takGovLink fields under the manifest lock so catalog writes cannot
+ * clobber a newly rotated refresh token (and token writes cannot drop plugins).
+ * @param {(currentLink: object, manifest: object) => object} mutator
+ * @returns {Promise<object>} updated takGovLink
+ */
+function persistTakGovLink(mutator) {
+  return withCatalogLock(() => {
+    const manifest = loadManifest();
+    const currentLink = manifest.takGovLink && typeof manifest.takGovLink === "object"
+      ? manifest.takGovLink
+      : { linked: false };
+    const updated = mutator({ ...currentLink }, manifest);
+    saveManifest({ ...manifest, takGovLink: updated });
+    return updated;
+  });
+}
+
+function isRetriableStaleRefreshError(error, description) {
+  const combined = `${error || ""} ${description || ""}`.toLowerCase();
+  return (
+    combined.includes("stale token") ||
+    combined.includes("maximum allowed refresh token reuse") ||
+    combined.includes("token reuse")
+  );
 }
 
 async function refreshTakGovAccessTokenOnce(refreshToken) {
@@ -342,7 +384,7 @@ async function getTakGovAccessToken() {
         if (isTakGovSessionExpiredError(errCode, errDesc)) {
           // Refresh-token rotation race: another request may have already saved a new token.
           manifest = loadManifest();
-          const newest = manifest.takGovLink?.refreshToken;
+          let newest = manifest.takGovLink?.refreshToken;
           if (newest && newest !== refreshToken) {
             try {
               ({ statusCode, data } = await refreshTakGovAccessTokenOnce(newest));
@@ -351,7 +393,7 @@ async function getTakGovAccessToken() {
               } else {
                 const reason = `${errCode || "invalid_grant"}: ${errDesc}`;
                 console.warn("[plugins.service] Clearing TAK.gov link after refresh failure:", reason);
-                clearStoredTakGovLink(manifest, reason);
+                await clearStoredTakGovLink(reason);
                 return {
                   success: false,
                   error:
@@ -362,10 +404,45 @@ async function getTakGovAccessToken() {
             } catch (retryErr) {
               return { success: false, error: retryErr?.message || "Failed to get access token." };
             }
+          } else if (isRetriableStaleRefreshError(errCode, errDesc)) {
+            // Keycloak stale/reuse under concurrent refresh: brief pause, re-read, one more try.
+            await new Promise((r) => setTimeout(r, 150));
+            manifest = loadManifest();
+            newest = manifest.takGovLink?.refreshToken;
+            if (newest) {
+              try {
+                ({ statusCode, data } = await refreshTakGovAccessTokenOnce(newest));
+                if (statusCode === 200 && data.access_token) {
+                  refreshToken = newest;
+                } else {
+                  const reason = `${data?.error || errCode || "invalid_grant"}: ${data?.error_description || errDesc}`;
+                  console.warn("[plugins.service] Clearing TAK.gov link after refresh failure:", reason);
+                  await clearStoredTakGovLink(reason);
+                  return {
+                    success: false,
+                    error:
+                      "Your TAK.gov session has expired. Please unlink and link your account again: click Unlink account, then Get Link Code → enter the code at TAK.gov → Link Account.",
+                    sessionExpired: true,
+                  };
+                }
+              } catch (retryErr) {
+                return { success: false, error: retryErr?.message || "Failed to get access token." };
+              }
+            } else {
+              const reason = `${errCode || "invalid_grant"}: ${errDesc}`;
+              console.warn("[plugins.service] Clearing TAK.gov link after refresh failure:", reason);
+              await clearStoredTakGovLink(reason);
+              return {
+                success: false,
+                error:
+                  "Your TAK.gov session has expired. Please unlink and link your account again: click Unlink account, then Get Link Code → enter the code at TAK.gov → Link Account.",
+                sessionExpired: true,
+              };
+            }
           } else {
             const reason = `${errCode || "invalid_grant"}: ${errDesc}`;
             console.warn("[plugins.service] Clearing TAK.gov link after refresh failure:", reason);
-            clearStoredTakGovLink(manifest, reason);
+            await clearStoredTakGovLink(reason);
             return {
               success: false,
               error:
@@ -382,20 +459,22 @@ async function getTakGovAccessToken() {
       const expiresAt = Date.now() + expiresInSec * 1000;
       takGovAccessTokenCache = { accessToken: data.access_token, expiresAt };
 
-      manifest = loadManifest();
-      const updated = {
-        ...manifest.takGovLink,
-        linked: true,
-        lastRefreshAt: Date.now(),
-        accessTokenExpiresAt: expiresAt,
-      };
-      if (data.refresh_token) {
-        updated.refreshToken = data.refresh_token;
-      }
-      if (data.refresh_expires_in != null) {
-        updated.refreshExpiresIn = Number(data.refresh_expires_in) || null;
-      }
-      saveManifest({ ...manifest, takGovLink: updated });
+      // Persist rotated refresh token under the same lock as catalog writes (#136).
+      await persistTakGovLink((link) => {
+        const updated = {
+          ...link,
+          linked: true,
+          lastRefreshAt: Date.now(),
+          accessTokenExpiresAt: expiresAt,
+        };
+        if (data.refresh_token) {
+          updated.refreshToken = data.refresh_token;
+        }
+        if (data.refresh_expires_in != null) {
+          updated.refreshExpiresIn = Number(data.refresh_expires_in) || null;
+        }
+        return updated;
+      });
       startTakGovKeepalive();
       return { success: true, access_token: data.access_token };
     } finally {
@@ -478,7 +557,13 @@ async function fetchTakGovPluginsWithAccessToken(product, product_version, acces
  */
 async function fetchTakGovPlugins(product, product_version) {
   const token = await getTakGovAccessToken();
-  if (!token.success) return { success: false, error: token.error };
+  if (!token.success) {
+    return {
+      success: false,
+      error: token.error,
+      sessionExpired: !!token.sessionExpired,
+    };
+  }
   return fetchTakGovPluginsWithAccessToken(product, product_version, token.access_token);
 }
 
@@ -495,7 +580,13 @@ async function listTakGovAvailableVersions(product = "ATAK-CIV") {
     return { success: true, versions: cached.versions };
   }
   const token = await getTakGovAccessToken();
-  if (!token.success) return { success: false, error: token.error };
+  if (!token.success) {
+    return {
+      success: false,
+      error: token.error,
+      sessionExpired: !!token.sessionExpired,
+    };
+  }
 
   const candidates = new Set();
   // Probe a rolling window first so newer versions are picked up automatically.
@@ -581,7 +672,13 @@ async function downloadTakGovPlugin(pluginItem) {
     return { success: false, error: "Plugin apk_url is required." };
   }
   const token = await getTakGovAccessToken();
-  if (!token.success) return { success: false, error: token.error };
+  if (!token.success) {
+    return {
+      success: false,
+      error: token.error,
+      sessionExpired: !!token.sessionExpired,
+    };
+  }
 
   ensurePluginsDir();
   const tempPath = path.join(PLUGINS_DIR, `_tmp_${Date.now()}_${Math.random().toString(36).slice(2)}.apk`);
@@ -723,8 +820,8 @@ async function getTakGovLinkState(generateNewCode = false) {
       const verificationUriComplete = typeof data.verification_uri_complete === "string" ? data.verification_uri_complete : null;
       const expiry = Date.now() + expiresIn * 1000;
 
-      const updated = {
-        ...takGovLink,
+      await persistTakGovLink((link) => ({
+        ...link,
         linkCode: userCode,
         linkCodeExpiry: expiry,
         deviceCode,
@@ -732,8 +829,7 @@ async function getTakGovLinkState(generateNewCode = false) {
         interval,
         verificationUri,
         verificationUriComplete: verificationUriComplete || undefined,
-      };
-      saveManifest({ ...manifest, takGovLink: updated });
+      }));
       return {
         linked: !!takGovLink.linked,
         linkCode: userCode,
@@ -795,8 +891,8 @@ async function linkTakGovAccount() {
       if (data.access_token) {
         takGovAccessTokenCache = { accessToken: data.access_token, expiresAt };
       }
-      const updated = {
-        ...takGovLink,
+      await persistTakGovLink((link) => ({
+        ...link,
         linked: true,
         refreshToken,
         linkCode: null,
@@ -813,8 +909,7 @@ async function linkTakGovAccount() {
           data.refresh_expires_in != null ? Number(data.refresh_expires_in) || null : null,
         lastUnlinkReason: null,
         unlinkedAt: null,
-      };
-      saveManifest({ ...manifest, takGovLink: updated });
+      }));
       startTakGovKeepalive();
       return { success: true, message: "TAK.gov account linked successfully." };
     }
@@ -838,9 +933,8 @@ async function linkTakGovAccount() {
 /**
  * Unlink TAK.gov (clears linked state and refresh token; does not remove downloaded plugins).
  */
-function unlinkTakGovAccount() {
-  const manifest = loadManifest();
-  clearStoredTakGovLink(manifest, "manual_unlink");
+async function unlinkTakGovAccount() {
+  await clearStoredTakGovLink("manual_unlink");
   return { success: true };
 }
 
@@ -1079,15 +1173,19 @@ function setPluginFavorite(id, favorite) {
  */
 function updatePluginMetadata(id, updates) {
   if (!updates || (updates.description === undefined && updates.favorite === undefined)) {
-    return { success: false, error: "Provide at least one of description or favorite." };
+    return Promise.resolve({ success: false, error: "Provide at least one of description or favorite." });
   }
-  const manifest = loadManifest();
-  const plugin = manifest.plugins.find((p) => p.id === id);
-  if (!plugin) return { success: false, error: "Plugin not found." };
-  if (updates.description !== undefined) plugin.description = typeof updates.description === "string" ? updates.description : null;
-  if (updates.favorite !== undefined) plugin.favorite = updates.favorite === true;
-  saveManifest(manifest);
-  return { success: true, plugin: { ...plugin } };
+  return withCatalogLock(() => {
+    const manifest = loadManifest();
+    const plugin = manifest.plugins.find((p) => p.id === id);
+    if (!plugin) return { success: false, error: "Plugin not found." };
+    if (updates.description !== undefined) {
+      plugin.description = typeof updates.description === "string" ? updates.description : null;
+    }
+    if (updates.favorite !== undefined) plugin.favorite = updates.favorite === true;
+    saveManifest(manifest);
+    return { success: true, plugin: { ...plugin } };
+  });
 }
 
 /**
@@ -1105,7 +1203,13 @@ async function updatePluginFromTakGov(id) {
   }
   const productVersion = getAtakVersionValue(plugin) || "5.5.0";
   const token = await getTakGovAccessToken();
-  if (!token.success) return { success: false, error: token.error };
+  if (!token.success) {
+    return {
+      success: false,
+      error: token.error,
+      sessionExpired: !!token.sessionExpired,
+    };
+  }
   const listResult = await fetchTakGovPlugins("ATAK-CIV", productVersion);
   if (!listResult.success) return { success: false, error: listResult.error || "Failed to fetch plugin list." };
   const list = listResult.plugins || [];
@@ -1210,6 +1314,8 @@ module.exports = {
   MANIFEST_PATH,
   ensurePluginsDir,
   withCatalogLock,
+  withManifestLock,
+  persistTakGovLink,
   getTakGovLinkState,
   linkTakGovAccount,
   unlinkTakGovAccount,

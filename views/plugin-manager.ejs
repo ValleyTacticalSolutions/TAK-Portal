@@ -598,13 +598,35 @@
     marketplaceMsg.style.color = ok === false ? "var(--danger)" : "";
   }
 
+  /** When TAK.gov clears the link server-side, re-fetch state so Unlink vs Link UI matches disk (#136). */
+  let linkResyncInFlight = false;
+  function resyncTakGovLinkUi(data, errMsg) {
+    const msg = String(errMsg || (data && data.error) || "").toLowerCase();
+    const expired =
+      !!(data && data.sessionExpired) ||
+      msg.includes("session has expired") ||
+      msg.includes("not linked to tak.gov") ||
+      msg.includes("unlink and link");
+    if (expired && !linkResyncInFlight) {
+      linkResyncInFlight = true;
+      Promise.resolve()
+        .then(function () { return loadState(); })
+        .catch(function () {})
+        .then(function () { linkResyncInFlight = false; });
+    }
+    return expired;
+  }
+
   async function loadTakgovVersions() {
     if (!takgovVersion) return;
     const previous = (takgovVersion.value || "").trim();
     try {
       const res = await fetch("/api/plugins/takgov/versions?product=ATAK-CIV");
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load ATAK versions");
+      if (!res.ok) {
+        resyncTakGovLinkUi(data, data.error || "Failed to load ATAK versions");
+        throw new Error(data.error || "Failed to load ATAK versions");
+      }
       const versions = Array.isArray(data.versions) ? data.versions.filter(Boolean) : [];
       if (versions.length === 0) return;
       takgovVersion.innerHTML = versions.map(function (v) {
@@ -693,6 +715,7 @@
             const text = _ref.text;
             const errMsg = (data && data.error) || (typeof text === "string" && text.slice(0, 200)) || "Download failed";
             if (!res.ok) {
+              resyncTakGovLinkUi(data, errMsg);
               setMarketplaceMsg(errMsg, false);
               btn.textContent = isUpdate ? "Update To Latest" : "Add To Server";
               btn.disabled = false;
@@ -716,7 +739,11 @@
     try {
       const res = await fetch("/api/plugins/takgov/plugins?product=ATAK-CIV&product_version=" + encodeURIComponent(version));
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load plugins");
+      if (!res.ok) {
+        const errMsg = data.error || "Failed to load plugins";
+        resyncTakGovLinkUi(data, errMsg);
+        throw new Error(errMsg);
+      }
       takgovPluginsCache = data.plugins || [];
       takgovSearchText = "";
       if (takgovSearch) takgovSearch.value = "";

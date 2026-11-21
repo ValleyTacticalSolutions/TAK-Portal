@@ -155,9 +155,9 @@ router.post("/link", async (req, res) => {
  * POST /api/plugins/unlink
  * Unlink TAK.gov account.
  */
-router.post("/unlink", (req, res) => {
+router.post("/unlink", async (req, res) => {
   try {
-    pluginsSvc.unlinkTakGovAccount();
+    await pluginsSvc.unlinkTakGovAccount();
     const auditUser = req.authentikUser;
     auditSvc.logEvent({
       actor: auditUser,
@@ -198,7 +198,10 @@ router.get("/takgov/versions", async (req, res) => {
     }
     const result = await pluginsSvc.listTakGovAvailableVersions(product);
     if (!result.success) {
-      return res.status(400).json({ error: result.error || "Failed to fetch versions." });
+      return res.status(400).json({
+        error: result.error || "Failed to fetch versions.",
+        sessionExpired: !!result.sessionExpired,
+      });
     }
     return res.json({ success: true, versions: result.versions || [] });
   } catch (err) {
@@ -219,7 +222,10 @@ router.get("/takgov/plugins", async (req, res) => {
     }
     const result = await pluginsSvc.fetchTakGovPlugins(product, product_version);
     if (!result.success) {
-      return res.status(400).json({ error: result.error });
+      return res.status(400).json({
+        error: result.error,
+        sessionExpired: !!result.sessionExpired,
+      });
     }
     res.json({ success: true, plugins: result.plugins || [] });
   } catch (err) {
@@ -237,7 +243,10 @@ router.post("/takgov/download", async (req, res) => {
     const result = await pluginsSvc.downloadTakGovPlugin(pluginItem);
     if (!result.success) {
       console.error("[plugins] TAK.gov download failed:", result.error);
-      return res.status(400).json({ error: result.error });
+      return res.status(400).json({
+        error: result.error,
+        sessionExpired: !!result.sessionExpired,
+      });
     }
     const auditUser = req.authentikUser;
     auditSvc.logEvent({
@@ -392,7 +401,7 @@ router.patch("/:id", async (req, res) => {
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: "Body must include at least one of favorite (boolean) or description (string)." });
     }
-    const result = pluginsSvc.updatePluginMetadata(id, updates);
+    const result = await pluginsSvc.updatePluginMetadata(id, updates);
     if (!result.success) {
       return res.status(404).json({ error: result.error });
     }
