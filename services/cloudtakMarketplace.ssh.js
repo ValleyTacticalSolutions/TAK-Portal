@@ -757,32 +757,132 @@ async function runBashScript(script, timeoutMs = 30000, onChunk) {
   return result;
 }
 
+/**
+ * Shared bash: a directory is a CloudTAK checkout only when api/package.json exists
+ * and a compose file resolves under it (COMPOSE_FILE entries or default compose names).
+ * Portal reclaim never creates api/package.json, so fabricated leftover trees fail.
+ */
+function ctakCheckoutOkBash() {
+  return `
+ctak_checkout_ok() {
+  local ct="\${1:-}" envf current f ct_abs
+  [ -n "\$ct" ] || return 1
+  ct=\${ct%/}
+  [ -f "\$ct/api/package.json" ] || return 1
+  envf="\$ct/.env"
+  if [ -f "\$envf" ]; then
+    current=\$(grep -E '^[[:space:]]*COMPOSE_FILE=' "\$envf" | tail -n 1 | cut -d= -f2- || true)
+    current=\$(printf '%s' "\$current" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*\$//' -e 's/^"//' -e 's/"\$//' -e "s/^'//" -e "s/'\$//")
+    if [ -n "\$current" ]; then
+      ct_abs=\$(cd "\$ct" 2>/dev/null && pwd -P || printf '%s' "\$ct")
+      local IFS=':'
+      for f in \$current; do
+        [ -n "\$f" ] || continue
+        case "\$f" in *..*) continue ;; esac
+        case "\$f" in
+          "\$ct_abs"/*|"\$ct"/*)
+            [ -f "\$f" ] && return 0
+            f=\${f#"\$ct_abs"/}
+            f=\${f#"\$ct"/}
+            [ -f "\$ct/\$f" ] && return 0
+            ;;
+          /*) continue ;;
+          *)
+            [ -f "\$ct/\$f" ] && return 0
+            ;;
+        esac
+      done
+    fi
+  fi
+  [ -f "\$ct/docker-compose.yml" ] \\
+    || [ -f "\$ct/docker-compose.yaml" ] \\
+    || [ -f "\$ct/compose.yml" ] \\
+    || [ -f "\$ct/compose.yaml" ]
+}
+
+ctak_checkout_reason() {
+  local ct="\${1:-}"
+  [ -n "\$ct" ] || { printf '%s' "empty path"; return 0; }
+  ct=\${ct%/}
+  if [ ! -d "\$ct" ]; then
+    printf '%s' "directory missing"
+    return 0
+  fi
+  if [ ! -f "\$ct/api/package.json" ]; then
+    printf '%s' "missing api/package.json"
+    return 0
+  fi
+  if ! ctak_checkout_ok "\$ct"; then
+    printf '%s' "no compose file under checkout"
+    return 0
+  fi
+  printf '%s' "ok"
+  return 0
+}
+
+ctak_package_looks_like_cloudtak() {
+  local pkg="\${1:-}/api/package.json"
+  [ -f "\$pkg" ] || return 1
+  grep -qiE 'cloudtak|@tak-ps' "\$pkg"
+}
+`.trim();
+}
+
 function detectScript() {
+  const wantSvc = String(getString("CLOUDTAK_MARKETPLACE_COMPOSE_SERVICE", "")).trim() || "api";
   return `
 set -eu
-is_ct() {
-  [ -n "\$1" ] && [ -d "\$1/api" ]
-}
+# infra-TAK: broker PATH shims so docker works for non-root takwerx.
+if [ -d /opt/infratak/.shims ]; then
+  case ":\${PATH:-}:" in
+    *:/opt/infratak/.shims:*) ;;
+    *) export PATH="/opt/infratak/.shims:\${PATH:-/usr/bin:/bin}" ;;
+  esac
+fi
+${ctakCheckoutOkBash()}
 consider() {
   local d="\$1"
   [ -n "\$d" ] || return 1
   d=\${d%/}
-  if is_ct "\$d"; then
+  if ctak_checkout_ok "\$d"; then
     found="\$d"
     return 0
   fi
   return 1
 }
 found=""
-if [ -n "\${CLOUDTAK:-}" ]; then consider "\$CLOUDTAK" || true; fi
-for d in \\
-  "\$HOME/CloudTAK" "\$HOME/cloudtak" "\$HOME/src/CloudTAK" "\$HOME/git/CloudTAK" "\$HOME/apps/CloudTAK" \\
-  /home/takwerx/CloudTAK /home/tak/CloudTAK /opt/CloudTAK /opt/cloudtak \\
-  /root/CloudTAK /root/cloudtak /usr/local/CloudTAK /var/lib/CloudTAK
-do
-  [ -z "\$found" ] || break
-  consider "\$d" || true
-done
+# Prefer the running CloudTAK compose project's working_dir when Docker is available.
+if command -v docker >/dev/null 2>&1; then
+  while IFS= read -r c; do
+    [ -n "\$c" ] || continue
+    svc=\$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "\$c" 2>/dev/null || true)
+    case "\$svc" in
+      api|cloudtak-api|${wantSvc.replace(/[^a-zA-Z0-9._-]/g, "")}) ;;
+      *) continue ;;
+    esac
+    wd=\$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "\$c" 2>/dev/null || true)
+    [ -n "\$wd" ] || continue
+    if ctak_checkout_ok "\$wd" && ctak_package_looks_like_cloudtak "\$wd"; then
+      found="\$wd"
+      break
+    fi
+  done <<CONTAINERS
+\$(docker ps --format '{{.Names}}' 2>/dev/null || true)
+CONTAINERS
+fi
+if [ -z "\$found" ]; then
+  if [ -n "\${CLOUDTAK:-}" ]; then consider "\$CLOUDTAK" || true; fi
+fi
+if [ -z "\$found" ]; then
+  for d in \\
+    "\$HOME/CloudTAK" "\$HOME/cloudtak" "\$HOME/src/CloudTAK" "\$HOME/git/CloudTAK" "\$HOME/apps/CloudTAK" \\
+    /home/takwerx/CloudTAK /home/tak/CloudTAK /opt/CloudTAK /opt/cloudtak \\
+    /root/CloudTAK /root/cloudtak /usr/local/CloudTAK /var/lib/CloudTAK
+  do
+    [ -z "\$found" ] || break
+    consider "\$d" || true
+  done
+fi
 if [ -z "\$found" ]; then
   for d in /home/*/CloudTAK /home/*/cloudtak /opt/*/CloudTAK; do
     [ -z "\$found" ] || break
@@ -835,7 +935,7 @@ MOUNTS
 CONTAINERS
 fi
 if [ -z "\$found" ]; then
-  echo "DETECT_FAIL no CloudTAK checkout with api/"
+  echo "DETECT_FAIL no CloudTAK checkout with api/package.json and a compose file"
   exit 1
 fi
 compose=""
@@ -845,18 +945,79 @@ elif [ -f "\$found/docker-compose.yaml" ]; then compose="docker-compose.yaml"
 elif [ -f "\$found/compose.yml" ]; then compose="compose.yml"
 elif [ -f "\$found/compose.yaml" ]; then compose="compose.yaml"
 fi
+if [ -z "\$compose" ] && [ -f "\$found/.env" ]; then
+  _cf=\$(grep -E '^[[:space:]]*COMPOSE_FILE=' "\$found/.env" | tail -n 1 | cut -d= -f2- || true)
+  _cf=\$(printf '%s' "\$_cf" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*\$//' -e 's/^"//' -e 's/"\$//' -e "s/^'//" -e "s/'\$//")
+  _ct_abs=\$(cd "\$found" 2>/dev/null && pwd -P || printf '%s' "\$found")
+  IFS=':' read -r -a _cffiles <<< "\$_cf"
+  for _f in "\${_cffiles[@]}"; do
+    [ -n "\$_f" ] || continue
+    case "\$_f" in
+      "\$_ct_abs"/*) _f="\${_f#\$_ct_abs/}" ;;
+      "\$found"/*) _f="\${_f#\$found/}" ;;
+    esac
+    case "\$_f" in /*) continue ;; esac
+    if [ -f "\$found/\$_f" ]; then compose="\$_f"; break; fi
+  done
+fi
 if [ -n "\$compose" ]; then
   cf="\$found/\$compose"
   if grep -Eq '^[[:space:]]*cloudtak-api:' "\$cf"; then svc="cloudtak-api"
   elif grep -Eq '^[[:space:]]*api:' "\$cf"; then svc="api"
   elif grep -q 'build:[[:space:]]*\\./api' "\$cf"; then
-    svc=$(awk '
-      /^[[:space:]]*[A-Za-z0-9._-]+:[[:space:]]*$/ { cur=$1; sub(":","",cur) }
+    svc=\$(awk '
+      /^[[:space:]]*[A-Za-z0-9._-]+:[[:space:]]*$/ { cur=\$1; sub(":","",cur) }
       /build:[[:space:]]*\\.\\/api/ { print cur; exit }
     ' "\$cf")
   fi
 fi
 printf 'DETECT_OK path=%s compose=%s service=%s\\n' "\$found" "\$compose" "\${svc:-api}"
+`.trim();
+}
+
+/** Probe a specific path: CHECKOUT_OK / CHECKOUT_INVALID reason=... / optionally RUNNING_DIR=... */
+function probeCheckoutScript(ctPath) {
+  const wantSvc = String(getString("CLOUDTAK_MARKETPLACE_COMPOSE_SERVICE", "")).trim() || "api";
+  return `
+set -eu
+if [ -d /opt/infratak/.shims ]; then
+  case ":\${PATH:-}:" in
+    *:/opt/infratak/.shims:*) ;;
+    *) export PATH="/opt/infratak/.shims:\${PATH:-/usr/bin:/bin}" ;;
+  esac
+fi
+${ctakCheckoutOkBash()}
+CT=${shellQuote(ctPath)}
+reason=\$(ctak_checkout_reason "\$CT")
+running=""
+if command -v docker >/dev/null 2>&1; then
+  while IFS= read -r c; do
+    [ -n "\$c" ] || continue
+    svc=\$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "\$c" 2>/dev/null || true)
+    case "\$svc" in
+      api|cloudtak-api|${wantSvc.replace(/[^a-zA-Z0-9._-]/g, "")}) ;;
+      *) continue ;;
+    esac
+    wd=\$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "\$c" 2>/dev/null || true)
+    [ -n "\$wd" ] || continue
+    if ctak_checkout_ok "\$wd" && ctak_package_looks_like_cloudtak "\$wd"; then
+      running="\$wd"
+      break
+    fi
+  done <<CONTAINERS
+\$(docker ps --format '{{.Names}}' 2>/dev/null || true)
+CONTAINERS
+fi
+if [ "\$reason" = "ok" ]; then
+  if [ -n "\$running" ] && [ "\$running" != "\$CT" ] && [ "\$(cd "\$CT" 2>/dev/null && pwd -P)" != "\$(cd "\$running" 2>/dev/null && pwd -P)" ]; then
+    printf 'CHECKOUT_OK path=%s RUNNING_DIR=%s\\n' "\$CT" "\$running"
+  else
+    printf 'CHECKOUT_OK path=%s\\n' "\$CT"
+  fi
+  exit 0
+fi
+printf 'CHECKOUT_INVALID path=%s reason=%s\\n' "\$CT" "\$reason"
+exit 0
 `.trim();
 }
 
@@ -905,19 +1066,24 @@ async function testConnection() {
   let detected = null;
   if (override) {
     const check = await runCommand(
-      `test -d ${shellQuote(override + "/api")} && echo PATH_OK || echo PATH_MISSING`,
-      15000
+      `bash -lc ${shellQuote(probeCheckoutScript(override))}`,
+      40000
     );
-    const okPath = String(check.stdout || "").includes("PATH_OK");
+    const out = String(check.stdout || "");
+    const okPath = /CHECKOUT_OK/.test(out);
+    const reasonMatch = out.match(/reason=(.+)$/m);
     detected = {
       path: override,
       composeService: String(getString("CLOUDTAK_MARKETPLACE_COMPOSE_SERVICE", "")).trim() || "api",
       pathOk: okPath,
+      reason: reasonMatch ? reasonMatch[1].trim() : "",
     };
     if (!okPath) {
       return {
         ok: false,
-        message: `Connected, but CloudTAK path ${override} has no api/ directory.`,
+        message: check.ok
+          ? `Connected, but CloudTAK path ${override} is not a checkout (${detected.reason || "missing api/package.json or compose"}).`
+          : `Connected, but could not verify CloudTAK path ${override}: ${check.message || "probe failed"}`,
         host: cfg.host,
         username: cfg.username,
         source: cfg.source,
@@ -983,6 +1149,9 @@ module.exports = {
   isPtyRefusal,
   resetSshPtyPreference,
   execOverSsh,
+  ctakCheckoutOkBash,
+  detectScript,
+  probeCheckoutScript,
   detectCheckout,
   testConnection,
   shellQuote,

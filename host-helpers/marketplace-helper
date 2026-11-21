@@ -4,12 +4,20 @@
 # Do not add shell/eval; validate every argument.
 set -euo pipefail
 
-HELPER_VERSION=4
+HELPER_VERSION=5
 CADDY_SITES_D="${TAK_PORTAL_CADDY_SITES_D:-/etc/caddy/sites.d}"
 
 die() {
   echo "marketplace-helper: $*" >&2
   exit 1
+}
+
+# Refuse fabricated leftover trees (Portal reclaim used to mkdir api/ without package.json).
+require_checkout_package_json() {
+  local ct="${1:-}"
+  [ -n "$ct" ] || die "cloudtak path missing"
+  [ -d "$ct" ] || die "cloudtak path missing: $ct"
+  [ -f "$ct/api/package.json" ] || die "not a CloudTAK checkout (missing api/package.json): $ct"
 }
 
 usage() {
@@ -72,7 +80,7 @@ cmd_reclaim() {
   is_abs_no_dotdot "$ct" || die "invalid cloudtak path"
   is_safe_user "$user" || die "invalid user"
   is_safe_user "$group" || die "invalid group"
-  [ -d "$ct" ] || die "cloudtak path missing: $ct"
+  require_checkout_package_json "$ct"
 
   mkdir -p \
     "$ct/app/plugins" "$ct/api/web/plugins" \
@@ -240,7 +248,7 @@ cmd_rebuild() {
   local ct="${1:-}" svc="${2:-api}"
   is_abs_no_dotdot "$ct" || die "invalid cloudtak path"
   is_safe_id "$svc" || die "invalid compose service"
-  [ -d "$ct" ] || die "cloudtak path missing: $ct"
+  require_checkout_package_json "$ct"
   command -v docker >/dev/null 2>&1 || die "docker not found"
 
   cd "$ct"
@@ -404,7 +412,7 @@ cmd_rm_plugin() {
   local ct="${1:-}" dest="${2:-}"
   is_abs_no_dotdot "$ct" || die "invalid cloudtak path"
   is_safe_dest "$dest" || die "invalid plugin dest"
-  [ -d "$ct" ] || die "cloudtak path missing: $ct"
+  require_checkout_package_json "$ct"
   local target
   for target in \
     "$ct/app/plugins/$dest" \
@@ -427,7 +435,7 @@ cmd_install_plugin() {
   is_safe_id "$plugin_id" || die "invalid plugin id"
   is_safe_dest "$dest" || die "invalid plugin dest"
   is_abs_no_dotdot "$staging" || die "invalid staging path"
-  [ -d "$ct" ] || die "cloudtak path missing: $ct"
+  require_checkout_package_json "$ct"
   [ -d "$staging" ] || die "staging missing: $staging"
   case "$staging" in
     */.cache/cloudtak-marketplace/"$plugin_id") ;;

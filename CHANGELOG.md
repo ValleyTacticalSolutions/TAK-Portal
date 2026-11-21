@@ -17,6 +17,8 @@ All notable changes to this project will be documented in this file.  Minor qual
 ✨ `Enhancement` - Agencies page now requires a domain to be entered before enabling auto-approve access requests<br>
 ✨ `Enhancement` - Email is now clickable in the pending user request table<br>
 🐛 `Bug Fix` - Fixes integration delete failing with `unknown user tak` on Docker TAK Server hosts: the stored-password cert repair and plugin update uploads now go through the container in Docker mode, and the error now says to switch TAK Server mode to Docker<br>
+🐛 `Bug Fix` - CloudTAK Marketplace only installs into a verified checkout (`api/package.json` + compose): prefers the running compose project's working dir, self-heals a stale saved path (e.g. leftover `/root/CloudTAK` after infra-TAK re-home), never fabricates a tree via reclaim, and reclaim-as-root uses the checkout owner so takwerx-owned trees stay writable<br>
+🐛 `Bug Fix` - CloudTAK Marketplace writes a Portal-marked `Dockerfile.dockerignore` when upstream excludes `app/plugins/*` (CloudTAK 13.122.8+), so native `./cloudtak.sh update` / marketplace rebuilds keep installed plugins in the api image; leaves infra-TAK and operator dockerignore files untouched<br>
 
 ### v2.0.38 - 11/20/26
 ✨ `Enhancement` - TAK Beacon added to Supported TAK Clients within Settings / Setup My Device<br>

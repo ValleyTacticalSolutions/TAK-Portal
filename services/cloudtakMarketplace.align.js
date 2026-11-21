@@ -1505,6 +1505,97 @@ function resolveWebDir(ctRoot) {
   return detectWebLayout(ctRoot).webDir;
 }
 
+/** Marker for Portal-managed Dockerfile.dockerignore (native CloudTAK app/plugins ignore). */
+const PORTAL_DOCKERIGNORE_MARK =
+  "# TAK Portal marketplace: generated from .dockerignore; re-includes installed CloudTAK plugins.";
+const INFRATAK_DOCKERIGNORE_MARK =
+  "# infra-TAK (ops #299): generated from .dockerignore; re-includes the installed CloudTAK plugins.";
+const DISPATCHER_DOCKERIGNORE_MARK = "# managed by cloudtak-dispatcher-plugin install.sh";
+
+/**
+ * Upstream CloudTAK 13.122.8+ .dockerignore excludes app/plugins/*. Without a
+ * Dockerfile.dockerignore re-include, marketplace copies never enter the api image.
+ * Mirror infra-TAK's pattern with a Portal marker; never overwrite infra-TAK/operator files.
+ */
+function ensurePluginsInBuildContext(ctRoot) {
+  const root = String(ctRoot || "").trim();
+  const changes = [];
+  if (!root || !fs.existsSync(root)) return changes;
+  const layout = detectWebLayout(root);
+  const pluginsDir = layout.pluginsDir;
+  if (!pluginsDir) return changes;
+  const rel = toPosix(path.relative(root, pluginsDir));
+  if (!rel || rel.startsWith("..")) return changes;
+  const baseIgnore = path.join(root, ".dockerignore");
+  const outPath = path.join(root, "Dockerfile.dockerignore");
+  let baseText = "";
+  if (fs.existsSync(baseIgnore)) {
+    try {
+      baseText = fs.readFileSync(baseIgnore, "utf8");
+    } catch (_) {
+      return changes;
+    }
+  }
+  const excluded = new Set([rel, rel + "/", rel + "/*", rel + "/**"]);
+  const leavesOut = baseText
+    .split(/\r?\n/)
+    .some((ln) => excluded.has(String(ln || "").trim()));
+  let firstLine = "";
+  let haveText = null;
+  if (fs.existsSync(outPath)) {
+    try {
+      haveText = fs.readFileSync(outPath, "utf8");
+      firstLine = String(haveText.split(/\r?\n/)[0] || "").trim();
+    } catch (_) {
+      return changes;
+    }
+  }
+  const isPortal = firstLine === PORTAL_DOCKERIGNORE_MARK.trim();
+  const isForeign =
+    !!haveText &&
+    !isPortal &&
+    (firstLine === INFRATAK_DOCKERIGNORE_MARK.trim() ||
+      firstLine === DISPATCHER_DOCKERIGNORE_MARK.trim() ||
+      firstLine.length > 0);
+  if (!leavesOut) {
+    if (isPortal) {
+      try {
+        fs.unlinkSync(outPath);
+        changes.push("Dockerfile.dockerignore: removed (CloudTAK no longer leaves plugins out of the build)");
+      } catch (_) {}
+    }
+    return changes;
+  }
+  if (isForeign) {
+    return changes;
+  }
+  const names = listInstalledPluginDirs(pluginsDir);
+  const lines = [
+    PORTAL_DOCKERIGNORE_MARK,
+    baseText.replace(/\s+$/, ""),
+    "",
+    `!${rel}/*`,
+    `${rel}/*/**/node_modules/`,
+  ];
+  for (const n of names) {
+    lines.push(`!${rel}/${n}`, `${rel}/${n}/**/node_modules/`);
+  }
+  const want = lines.join("\n") + "\n";
+  if (haveText === want) return changes;
+  try {
+    fs.writeFileSync(outPath, want);
+    changes.push(
+      `Dockerfile.dockerignore: keep ${rel}/ in the api image build` +
+        (names.length ? ` (${names.join(", ")})` : "")
+    );
+  } catch (err) {
+    changes.push(
+      "WARNING: could not write Dockerfile.dockerignore: " + String((err && err.message) || err || "unknown")
+    );
+  }
+  return changes;
+}
+
 function alignInstalledPlugins(ctRoot) {
   const root = String(ctRoot || "").trim();
   const layout = detectWebLayout(root);
@@ -1554,6 +1645,7 @@ function alignInstalledPlugins(ctRoot) {
     changes.push(...relaxHostPluginCheck(web));
   }
   changes.push(...relaxMarketplaceServerRoutes(path.join(root, "api")));
+  changes.push(...ensurePluginsInBuildContext(root));
   // Heal Replay hub/index.ts if a prior drifted patch left `replay?: boolean` outside
   // SubmitCotsRequest (breaks API image eslint with Parsing error: Expression expected).
   // Keep these healers inlined (do not require cloudtakMarketplace.patch): this file is
@@ -1782,6 +1874,10 @@ module.exports = {
   alignInstalledPlugins,
   detectWebLayout,
   listInstalledPluginDirs,
+  ensurePluginsInBuildContext,
+  PORTAL_DOCKERIGNORE_MARK,
+  INFRATAK_DOCKERIGNORE_MARK,
+  DISPATCHER_DOCKERIGNORE_MARK,
   shieldAppPluginEslint,
   shieldAppPluginTsconfig,
   readSubscriptionLoadKeys,

@@ -580,6 +580,12 @@ function isEnabledValue(v) {
   return ["1", "true", "yes", "on"].includes(String(v || "").trim().toLowerCase());
 }
 
+/** In-memory probe cache so we do not re-SSH on every job step (5 minutes). */
+let _checkoutProbeCache = { at: 0, path: "", result: null };
+const CHECKOUT_PROBE_TTL_MS = 5 * 60 * 1000;
+/** Set when ensureCheckoutPath heals a stale saved path; cleared after reconcile. */
+let _pendingPathHeal = null;
+
 async function persistDetectedPath(detected, { overwritePath = false } = {}) {
   if (!detected || !detected.ok || !detected.path) return detected;
   const current = settingsSvc.getSettings() || {};
@@ -606,9 +612,125 @@ async function detectAndPersist({ overwritePath = true } = {}) {
   return persistDetectedPath(detected, { overwritePath });
 }
 
+/**
+ * Probe a saved CloudTAK path over SSH.
+ * Returns { ok, valid, path, reason, runningDir, message } — never treats SSH failure as invalid.
+ */
+async function probeSavedCheckout(ctPath) {
+  const ct = String(ctPath || "").trim();
+  if (!ct) {
+    return { ok: false, valid: false, path: "", reason: "empty path", message: "CloudTAK path is empty." };
+  }
+  const now = Date.now();
+  if (
+    _checkoutProbeCache.result &&
+    _checkoutProbeCache.path === ct &&
+    now - Number(_checkoutProbeCache.at || 0) < CHECKOUT_PROBE_TTL_MS
+  ) {
+    return _checkoutProbeCache.result;
+  }
+  const result = await ssh.runCommand(`bash -lc ${ssh.shellQuote(ssh.probeCheckoutScript(ct))}`, 40000);
+  if (!result.ok) {
+    return {
+      ok: false,
+      valid: false,
+      path: ct,
+      reason: "probe_error",
+      message: result.message || "Could not probe CloudTAK path over SSH.",
+      sshError: true,
+    };
+  }
+  const lines = String(result.stdout || "")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const okLine = lines.find((l) => l.startsWith("CHECKOUT_OK"));
+  const badLine = lines.find((l) => l.startsWith("CHECKOUT_INVALID"));
+  if (okLine) {
+    const runningMatch = okLine.match(/RUNNING_DIR=(\S+)/);
+    const out = {
+      ok: true,
+      valid: true,
+      path: ct,
+      reason: "ok",
+      runningDir: runningMatch ? runningMatch[1] : "",
+      message: "",
+    };
+    _checkoutProbeCache = { at: now, path: ct, result: out };
+    return out;
+  }
+  if (badLine) {
+    const reasonMatch = badLine.match(/reason=(.+)$/);
+    const reason = reasonMatch ? reasonMatch[1].trim() : "not a CloudTAK checkout";
+    const out = {
+      ok: true,
+      valid: false,
+      path: ct,
+      reason,
+      runningDir: "",
+      message: `CloudTAK path ${ct} is not a CloudTAK checkout (${reason}).`,
+    };
+    _checkoutProbeCache = { at: now, path: ct, result: out };
+    return out;
+  }
+  return {
+    ok: false,
+    valid: false,
+    path: ct,
+    reason: "probe_error",
+    message: "Unexpected probe response from host.",
+    sshError: true,
+  };
+}
+
 async function ensureCheckoutPath() {
   let ct = ssh.resolvedCheckoutPath();
-  if (ct) return { ok: true, path: ct, composeService: ssh.resolvedComposeService() };
+  if (ct) {
+    const probe = await probeSavedCheckout(ct);
+    if (probe.sshError || !probe.ok) {
+      return {
+        ok: false,
+        message: probe.message || `Could not verify CloudTAK path ${ct}.`,
+        path: ct,
+      };
+    }
+    if (probe.valid) {
+      if (probe.runningDir) {
+        console.warn(
+          `[cloudtak-marketplace] saved path ${ct} is valid, but CloudTAK is running from ${probe.runningDir}`
+        );
+      }
+      return { ok: true, path: ct, composeService: ssh.resolvedComposeService() };
+    }
+    // Saved path is not a real checkout — self-heal via detect.
+    const detected = await ssh.detectCheckout();
+    if (!detected.ok || !detected.path) {
+      return {
+        ok: false,
+        message:
+          `${probe.message} Detect found no valid CloudTAK checkout (need api/package.json and a compose file). ` +
+          `Set Settings → CloudTAK checkout path to the folder that runs docker compose (often ~/CloudTAK), then Detect.`,
+        path: ct,
+        previousPath: ct,
+        reason: probe.reason,
+      };
+    }
+    const previousPath = ct;
+    await persistDetectedPath(detected, { overwritePath: true });
+    _checkoutProbeCache = { at: 0, path: "", result: null };
+    _pendingPathHeal = { from: previousPath, to: detected.path, at: Date.now() };
+    console.warn(
+      `[cloudtak-marketplace] CloudTAK path ${previousPath} is not a CloudTAK checkout (${probe.reason}); using ${detected.path}`
+    );
+    return {
+      ok: true,
+      path: detected.path,
+      composeService: detected.composeService || "api",
+      composeFile: detected.composeFile,
+      healedFrom: previousPath,
+      healReason: probe.reason,
+    };
+  }
   const detected = await ssh.detectCheckout();
   if (!detected.ok) return detected;
   await persistDetectedPath(detected, { overwritePath: false });
@@ -618,6 +740,39 @@ async function ensureCheckoutPath() {
     composeService: detected.composeService || "api",
     composeFile: detected.composeFile,
   };
+}
+
+/**
+ * After a path heal, drop installed.json rows whose plugins are not on the new tree.
+ * Returns the pruned ids.
+ */
+function reconcileInstalledAfterPathHeal(scanCache) {
+  const heal = _pendingPathHeal;
+  if (!heal || !heal.to) return [];
+  const scanPath = String((scanCache && scanCache.path) || "").trim();
+  if (!scanCache || !scanCache.ok || !scanPath || scanPath !== heal.to) return [];
+  const scanPlugins = Array.isArray(scanCache.plugins) ? scanCache.plugins : [];
+  const presentIds = new Set(
+    scanPlugins.map((s) => s && s.catalogId).filter(Boolean).map((id) => String(id))
+  );
+  const presentDests = new Set(
+    scanPlugins.map((s) => String((s && s.dest) || "").toLowerCase()).filter(Boolean)
+  );
+  const rec = store.readInstalled();
+  const pruned = [];
+  for (const [id, row] of Object.entries(rec.plugins || {})) {
+    if (!isMarketplaceInstalledRecord(row)) continue;
+    const dest = String((row && row.dest) || "").toLowerCase();
+    if (presentIds.has(id) || (dest && presentDests.has(dest))) continue;
+    pruned.push(id);
+    delete rec.plugins[id];
+    console.warn(
+      `[cloudtak-marketplace] pruned installed record for ${id} after path heal ${heal.from} -> ${heal.to}; reinstall required`
+    );
+  }
+  if (pruned.length) store.writeInstalled(rec);
+  _pendingPathHeal = null;
+  return pruned;
 }
 
 function pluginLayoutBash() {
@@ -1096,9 +1251,16 @@ elevate_run() {
 }
 
 reclaim_cloudtak_plugin_paths() {
-  local me grp
+  local me grp owner_u owner_g
   me=$(id -un)
   grp=$(id -gn)
+  # Root SSH into a takwerx-owned tree (infra-TAK re-home): reclaim as the checkout owner.
+  owner_u=$(cloudtak_owner)
+  owner_g=$(stat -c '%G' "$CT" 2>/dev/null || stat -f '%Sg' "$CT" 2>/dev/null || true)
+  if [ "$me" = "root" ] && [ -n "$owner_u" ] && [ "$owner_u" != "root" ]; then
+    me="$owner_u"
+    grp="\${owner_g:-\$owner_u}"
+  fi
   echo "Reclaiming CloudTAK plugin paths for $me — fixes root-owned leftovers from prior SSH users"
   # Install helper (takwerx) before stripping leftover NOPASSWD: ALL.
   ensure_marketplace_sudoers || true
@@ -1113,12 +1275,31 @@ reclaim_cloudtak_plugin_paths() {
   # prior root SSH installs leave those root-owned and break takwerx rm/cp.
   # Also reclaim api/*/lib + api/test — Replay install.sh copies server files there
   # (routes alone is not enough; Permission denied on replay-player.ts is common).
+  # Only mkdir plugin subdirs under an already-verified checkout (never fabricate api/).
   if ! elevate_run "mkdir -p '$CT/app/plugins' '$CT/api/web/plugins' '$CT/app/src/plugins' '$CT/api/web/src/plugins' '$CT/api/stateless/routes' '$CT/api/stateless/lib' '$CT/api/stateful/lib' '$CT/api/test' '$CT/cloudtak-marketplace-plugins' '$HOME/.cache/cloudtak-marketplace' && chown -R '$me:$grp' '$CT/app/plugins' '$CT/api/web/plugins' '$CT/app/src/plugins' '$CT/api/web/src/plugins' '$CT/api/stateless/routes' '$CT/api/stateless/lib' '$CT/api/stateful/lib' '$CT/api/test' '$CT/cloudtak-marketplace-plugins' '$HOME/.cache/cloudtak-marketplace' && chmod -R u+rwX '$CT/app/plugins' '$CT/api/web/plugins' '$CT/app/src/plugins' '$CT/api/web/src/plugins' '$CT/api/stateless/routes' '$CT/api/stateless/lib' '$CT/api/stateful/lib' '$CT/api/test' '$CT/cloudtak-marketplace-plugins' '$HOME/.cache/cloudtak-marketplace' && { chown '$me:$grp' '$CT'/docker-compose.plugin-*.yml '$CT'/docker-compose.marketplace.yml 2>/dev/null || true; }"; then
     echo "WARNING: could not reclaim plugin paths; continuing and elevating per-operation" >&2
     return 0
   fi
   echo "Reclaim complete"
   return 0
+}
+`.trim();
+}
+
+/** Preflight shared by install / uninstall / rebuild remote scripts. */
+function checkoutPreflightBash() {
+  return `
+${ssh.ctakCheckoutOkBash()}
+require_cloudtak_checkout() {
+  local ct="\${1:-}"
+  local reason
+  reason=\$(ctak_checkout_reason "\$ct")
+  if [ "\$reason" = "ok" ]; then
+    return 0
+  fi
+  echo "CHECKOUT_INVALID path=\$ct reason=\$reason" >&2
+  echo "ERROR: \$ct is not a CloudTAK checkout (\$reason). Set Settings → CloudTAK checkout path to the folder with api/package.json and docker-compose.yml (often ~/CloudTAK), then Detect." >&2
+  exit 1
 }
 `.trim();
 }
@@ -1743,6 +1924,10 @@ async function scanHost() {
     caddy: caddyCacheRecord(caddy),
   };
   store.writeScanCache(cache);
+  const pruned = reconcileInstalledAfterPathHeal(cache);
+  if (pruned.length) {
+    cache.prunedInstalled = pruned;
+  }
   const state = store.readNotifyState();
   state.lastScanAt = Date.now();
   store.writeNotifyState(state);
@@ -3965,10 +4150,12 @@ reset_cache() {
   fi
 }
 
+${checkoutPreflightBash()}
 ${pluginLayoutBash()}
 ${pluginPrivilegeBash({ composeService: apiSvc })}
 ${pluginRemoveBash()}
 ${pluginMarketplaceGitHygieneBash()}
+require_cloudtak_checkout "$CT"
 WEB_REL=$(cloudtak_web_rel "$CT")
 PLUGIN_ROOT="$CT/$WEB_REL/plugins"
 echo "CloudTAK plugin directory: $PLUGIN_ROOT"
@@ -4317,6 +4504,9 @@ strip_marketplace_plugin_tests() {
 }
 strip_marketplace_plugin_tests "$CT"
 
+# Root SSH into a takwerx-owned tree: re-apply ownership after the copy.
+reclaim_cloudtak_plugin_paths || true
+
 # Match plugin calls and imports to this CloudTAK checkout before vue-tsc.
 # Applies to every plugin already on disk, not only the one being installed.
 ${pluginHostAlignRunnerBash()}
@@ -4358,8 +4548,10 @@ DEST=${ssh.shellQuote(dest)}
 ID=${ssh.shellQuote(id)}
 CT_COMPOSE_SVC=${ssh.shellQuote(apiSvc)}
 if [ -z "$ID" ]; then ID="$DEST"; fi
+${checkoutPreflightBash()}
 ${pluginLayoutBash()}
 ${pluginPrivilegeBash({ composeService: apiSvc })}
+require_cloudtak_checkout "$CT"
 WEB_REL=$(cloudtak_web_rel "$CT")
 PLUGIN_ROOT="$CT/$WEB_REL/plugins"
 echo "CloudTAK plugin directory: $PLUGIN_ROOT (also clearing legacy api/web paths)"
@@ -4528,7 +4720,9 @@ function rebuildRemoteScript(ct, service) {
 set -euo pipefail
 CT=${ssh.shellQuote(ct)}
 SVC=${ssh.shellQuote(svc)}
+${checkoutPreflightBash()}
 ${pluginPrivilegeBash({ composeService: svc })}
+require_cloudtak_checkout "$CT"
 cd "$CT"
 # Prefer fixed marketplace-helper rebuild (narrow sudoers). Fall back to docker compose.
 ensure_marketplace_sudoers || true
@@ -4749,6 +4943,12 @@ async function performInstall(job, plugin) {
   if (!safeDestName(plugin.web.dest)) throw new Error("Invalid plugin dest folder");
   const loc = await ensureCheckoutPath();
   if (!loc.ok) throw new Error(loc.message || "CloudTAK path not found");
+  if (loc.healedFrom) {
+    appendJobLog(
+      job.id,
+      `CloudTAK path ${loc.healedFrom} is not a CloudTAK checkout (${loc.healReason || "invalid"}); using ${loc.path}`
+    );
+  }
   appendJobLog(job.id, `Using CloudTAK at ${loc.path}`);
   await stageMarketplaceHelperSource(job.id);
   const result = await runLoggedScript(
@@ -4785,6 +4985,12 @@ async function performUninstall(job, dest, plugin) {
   if (!safeDestName(dest)) throw new Error("Invalid plugin dest folder");
   const loc = await ensureCheckoutPath();
   if (!loc.ok) throw new Error(loc.message || "CloudTAK path not found");
+  if (loc.healedFrom) {
+    appendJobLog(
+      job.id,
+      `CloudTAK path ${loc.healedFrom} is not a CloudTAK checkout (${loc.healReason || "invalid"}); using ${loc.path}`
+    );
+  }
   const routeGuess = [];
   if (plugin && plugin.routes) {
     routeGuess.push(`plugin-${plugin.id}.ts`);
@@ -5335,6 +5541,10 @@ module.exports = {
   isEnabledValue,
   detectAndPersist,
   persistDetectedPath,
+  ensureCheckoutPath,
+  probeSavedCheckout,
+  reconcileInstalledAfterPathHeal,
+  checkoutPreflightBash,
   onEnabled,
   normalizeInstallScript,
   installRemoteScript,
