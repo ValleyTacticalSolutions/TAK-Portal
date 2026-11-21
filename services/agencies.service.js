@@ -228,7 +228,16 @@ function agencyHasDefaultTemplate(agencySuffix) {
   return !!templatesStore.getDefaultTemplateForAgency(agencySuffix);
 }
 
+function agencyHasLookupDomain(agency) {
+  return domainsListFromStored(agency?.lookupDomain).length > 0;
+}
+
 function assertAgencyCanEnableAutoApprove(agency) {
+  if (!agencyHasLookupDomain(agency)) {
+    throw new Error(
+      "Enter at least one email domain before enabling auto-approve."
+    );
+  }
   if (!agencyHasDefaultTemplate(agency?.suffix)) {
     throw new Error(
       "Set a default template for this agency on the Templates page before enabling auto-approve."
@@ -251,6 +260,14 @@ function syncAutoApproveForAgencySuffix(suffix) {
   }
   if (changed) save(agencies);
   return changed;
+}
+
+/** Turn off auto-approve when domains are cleared (same safety as losing a default template). */
+function syncAutoApproveForMissingDomains(agency) {
+  if (!agency || agency.autoApproveRequests !== true) return false;
+  if (agencyHasLookupDomain(agency)) return false;
+  agency.autoApproveRequests = false;
+  return true;
 }
 
 function save(data) {
@@ -289,6 +306,8 @@ module.exports = {
   findAgencyForGroup,
   findAgencyForGroupName,
   agencyHasDefaultTemplate,
+  agencyHasLookupDomain,
   assertAgencyCanEnableAutoApprove,
   syncAutoApproveForAgencySuffix,
+  syncAutoApproveForMissingDomains,
 };

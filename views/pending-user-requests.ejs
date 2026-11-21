@@ -919,6 +919,10 @@ th.sortable:hover{
             : r.agencySuffix;
       const displayName = `${r.lastName || ''}, ${r.firstName || ''}`.replace(/^,\s*|,\s*$/g, '').trim();
       const submittedLabel = fmtDate(r.createdAt);
+      const email = String(r.email || '').trim();
+      const emailHtml = email
+        ? `<a href="mailto:${esc(email)}">${esc(email)}</a>`
+        : '—';
       return `
         <tr data-request-row="1" data-request-id="${esc(r.id)}">
           <td class="reqSubmittedCell" data-label="Submitted">${esc(submittedLabel)}</td>
@@ -927,7 +931,7 @@ th.sortable:hover{
             <div class="cardTitleText">${esc(displayName || '—')}</div>
             ${submittedLabel ? `<span class="cardMetaBadge">${esc(submittedLabel)}</span>` : ''}
           </td>
-          <td class="reqEmailCell" data-label="Email">${esc(r.email||'') || '—'}</td>
+          <td class="reqEmailCell" data-label="Email">${emailHtml}</td>
           <td class="reqAgencyCell" data-label="Agency">${esc(agencyLabel)}</td>
           <td class="reqActionsCell cardActionsCell">
             <div class="row cardActionsRow">

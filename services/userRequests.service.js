@@ -625,7 +625,8 @@ function shouldAutoApproveRequest(agency, validated) {
   const defaultTpl = templatesStore.getDefaultTemplateForAgency(agency.suffix);
   if (!defaultTpl) return false;
   const list = agenciesStore.domainsListFromStored(agency.lookupDomain);
-  if (list.length > 0 && !agenciesStore.emailDomainInAgencyList(validated.email, agency.lookupDomain)) {
+  if (list.length === 0) return false;
+  if (!agenciesStore.emailDomainInAgencyList(validated.email, agency.lookupDomain)) {
     return false;
   }
   return true;

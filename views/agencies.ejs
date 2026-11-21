@@ -145,7 +145,7 @@
                   <span>Auto-Approve User Requests</span>
                   <span class="settings-help-tip">
                     <button type="button" class="settings-help-btn" aria-label="Help" aria-expanded="false">?</button>
-                    <span class="settings-help-popover" role="tooltip">When enabled, matching Request Access submissions are approved automatically and a user account is created with this agency's default template. A default template must be set before this can be turned on. If domains are listed, only matching emails are auto-approved. If no domains are listed, any email that selects this agency is auto-approved.</span>
+                    <span class="settings-help-popover" role="tooltip">When enabled, matching Request Access submissions are approved automatically and a user account is created with this agency's default template. At least one email domain and a default template must be set before this can be turned on. Only emails matching a listed domain are auto-approved.</span>
                   </span>
                 </span>
                 <button
@@ -157,7 +157,7 @@
                 ></button>
               </div>
               <small id="autoApproveHint" class="muted" style="display:none;">
-                A default template must be set for this agency on the Templates page before auto-approve can be enabled.
+                Enter at least one email domain and set a default template for this agency on the Templates page before auto-approve can be enabled.
               </small>
               <div class="settings-field settings-field-bool">
                 <span class="settings-label">
@@ -1571,6 +1571,13 @@ function showDomainModalError(message) {
   }
 }
 
+function lookupDomainFieldHasValidDomain() {
+  const domainInput = document.getElementById("lookupDomain");
+  const parts = parseDomainListClient(domainInput ? domainInput.value : "");
+  if (parts.length === 0) return false;
+  return parts.every((p) => !p.includes("@") && domainPartRegex.test(p));
+}
+
 function syncLookupModalToggles() {
   setSettingsToggleState(document.getElementById("accountLookupToggle"), currentLookupModalEnabled);
   setSettingsToggleState(
@@ -1579,20 +1586,47 @@ function syncLookupModalToggles() {
   );
   const autoToggle = document.getElementById("autoApproveToggle");
   setSettingsToggleState(autoToggle, currentLookupModalAutoApprove);
-  const locked = !currentLookupModalHasDefaultTemplate;
+  const hasDomain = lookupDomainFieldHasValidDomain();
+  const missingTemplate = !currentLookupModalHasDefaultTemplate;
+  const canEnable = hasDomain && !missingTemplate;
+  // Grey out only when off and prerequisites are missing; keep enabled so it can still be turned off.
+  const locked = !currentLookupModalAutoApprove && !canEnable;
   if (autoToggle) {
     autoToggle.classList.toggle("is-locked", locked);
     if (!autoToggle.hasAttribute("data-busy")) {
       autoToggle.disabled = locked;
     }
     autoToggle.setAttribute("aria-disabled", locked ? "true" : "false");
-    autoToggle.title = locked
-      ? "Set a default template for this agency on the Templates page before enabling auto-approve."
-      : "";
+    if (locked) {
+      if (!hasDomain && missingTemplate) {
+        autoToggle.title =
+          "Enter at least one email domain and set a default template on the Templates page before enabling auto-approve.";
+      } else if (!hasDomain) {
+        autoToggle.title = "Enter at least one email domain before enabling auto-approve.";
+      } else {
+        autoToggle.title =
+          "Set a default template for this agency on the Templates page before enabling auto-approve.";
+      }
+    } else {
+      autoToggle.title = "";
+    }
   }
   const hint = document.getElementById("autoApproveHint");
   if (hint) {
-    hint.style.display = locked ? "block" : "none";
+    if (!locked) {
+      hint.style.display = "none";
+    } else {
+      if (!hasDomain && missingTemplate) {
+        hint.textContent =
+          "Enter at least one email domain and set a default template for this agency on the Templates page before auto-approve can be enabled.";
+      } else if (!hasDomain) {
+        hint.textContent = "Enter at least one email domain before auto-approve can be enabled.";
+      } else {
+        hint.textContent =
+          "A default template must be set for this agency on the Templates page before auto-approve can be enabled.";
+      }
+      hint.style.display = "block";
+    }
   }
 }
 
@@ -1692,14 +1726,14 @@ if (lookupOverlay) {
   });
 }
 
+const domainPartRegex = /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
 function parseDomainListClient(raw) {
   return String(raw || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
 }
-
-const domainPartRegex = /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
 /** True while the user is mid-entry of another domain (e.g. "agency.gov, " or "agency.gov, coun"). */
 function isLookupDomainListIncomplete(raw) {
@@ -1765,7 +1799,16 @@ function saveLookupDomains() {
         domainInput.value = normalized;
       }
       lastSavedLookupDomain = normalized;
+      if (typeof out.autoApproveRequests === "boolean") {
+        currentLookupModalAutoApprove = out.autoApproveRequests;
+      } else if (a) {
+        currentLookupModalAutoApprove = !!a.autoApproveRequests;
+      }
+      if (a) {
+        currentLookupModalHasDefaultTemplate = !!a.hasDefaultTemplate;
+      }
       showDomainModalError("");
+      syncLookupModalToggles();
       return true;
     })
     .catch(() => {
@@ -1774,6 +1817,7 @@ function saveLookupDomains() {
     })
     .finally(() => {
       lookupDomainSaveInFlight = false;
+      syncLookupModalToggles();
     });
 }
 
@@ -1787,13 +1831,18 @@ function scheduleLookupDomainAutoSave() {
 
 const lookupDomainInput = document.getElementById("lookupDomain");
 if (lookupDomainInput) {
-  lookupDomainInput.addEventListener("input", scheduleLookupDomainAutoSave);
+  lookupDomainInput.addEventListener("input", function () {
+    syncLookupModalToggles();
+    scheduleLookupDomainAutoSave();
+  });
   lookupDomainInput.addEventListener("blur", function () {
     if (lookupDomainSaveTimer) {
       clearTimeout(lookupDomainSaveTimer);
       lookupDomainSaveTimer = null;
     }
-    saveLookupDomains();
+    saveLookupDomains().then(function () {
+      syncLookupModalToggles();
+    });
   });
 }
 
@@ -1862,7 +1911,7 @@ if (autoApproveToggle) {
     if (!currentLookupAgencyId) return;
     const enabling = !currentLookupModalAutoApprove;
 
-    if (enabling && !currentLookupModalHasDefaultTemplate) {
+    if (enabling && (!currentLookupModalHasDefaultTemplate || !lookupDomainFieldHasValidDomain())) {
       syncLookupModalToggles();
       return;
     }

@@ -18,9 +18,24 @@ try {
   assert.strictEqual(templatesSvc.getDefaultTemplateForAgency("ems"), null);
   assert.strictEqual(templatesSvc.getDefaultTemplateForAgency(""), null);
 
-  agenciesSvc.assertAgencyCanEnableAutoApprove({ suffix: "cfd" });
+  agenciesSvc.assertAgencyCanEnableAutoApprove({
+    suffix: "cfd",
+    lookupDomain: "agency.gov",
+  });
   assert.throws(
-    () => agenciesSvc.assertAgencyCanEnableAutoApprove({ suffix: "ems" }),
+    () =>
+      agenciesSvc.assertAgencyCanEnableAutoApprove({
+        suffix: "cfd",
+        lookupDomain: "",
+      }),
+    /email domain/i
+  );
+  assert.throws(
+    () =>
+      agenciesSvc.assertAgencyCanEnableAutoApprove({
+        suffix: "ems",
+        lookupDomain: "ems.gov",
+      }),
     /default template/i
   );
 
@@ -40,17 +55,17 @@ try {
   assert.strictEqual(shouldAutoApproveRequest(agencyOn, validatedMatch), true);
   assert.strictEqual(shouldAutoApproveRequest(agencyOn, validatedMiss), false);
 
-  const agencyAnyDomain = {
+  const agencyNoDomain = {
     suffix: "cfd",
     autoApproveRequests: true,
     lookupDomain: "",
   };
   assert.strictEqual(
-    shouldAutoApproveRequest(agencyAnyDomain, { agencySuffix: "cfd", email: "anyone@gmail.com" }),
-    true
+    shouldAutoApproveRequest(agencyNoDomain, { agencySuffix: "cfd", email: "anyone@gmail.com" }),
+    false
   );
 
-  const agencyOff = { suffix: "cfd", autoApproveRequests: false, lookupDomain: "" };
+  const agencyOff = { suffix: "cfd", autoApproveRequests: false, lookupDomain: "agency.gov" };
   assert.strictEqual(
     shouldAutoApproveRequest(agencyOff, { agencySuffix: "cfd", email: "user@agency.gov" }),
     false
@@ -59,7 +74,7 @@ try {
   const noDefaultAgency = {
     suffix: "ems",
     autoApproveRequests: true,
-    lookupDomain: "",
+    lookupDomain: "ems.gov",
   };
   assert.strictEqual(
     shouldAutoApproveRequest(noDefaultAgency, { agencySuffix: "ems", email: "user@ems.gov" }),
@@ -70,6 +85,14 @@ try {
     shouldAutoApproveRequest(agencyOn, { agencySuffix: "__other__", email: "user@agency.gov" }),
     false
   );
+
+  const withDomain = { autoApproveRequests: true, lookupDomain: "agency.gov" };
+  assert.strictEqual(agenciesSvc.syncAutoApproveForMissingDomains(withDomain), false);
+  assert.strictEqual(withDomain.autoApproveRequests, true);
+
+  const cleared = { autoApproveRequests: true, lookupDomain: "" };
+  assert.strictEqual(agenciesSvc.syncAutoApproveForMissingDomains(cleared), true);
+  assert.strictEqual(cleared.autoApproveRequests, false);
 
   console.log("agencyAutoApprove.test.js: ok");
 } catch (err) {

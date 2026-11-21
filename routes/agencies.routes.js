@@ -1416,6 +1416,7 @@ router.put("/:index", async (req, res) => {
   }
 
   const before = agencies[idx];
+  store.syncAutoApproveForMissingDomains(a);
   agencies[idx] = a;
   store.save(agencies);
 
@@ -1818,6 +1819,7 @@ router.post("/:index/lookup/domain", (req, res) => {
   const agency = agencies[idx];
   const beforeDomain = String(agency.lookupDomain || "");
   agencies[idx].lookupDomain = normalized;
+  const autoApproveCleared = store.syncAutoApproveForMissingDomains(agencies[idx]);
 
   store.save(agencies);
 
@@ -1831,10 +1833,15 @@ router.post("/:index/lookup/domain", (req, res) => {
       beforeDomain,
       afterDomain: normalized,
       lookupEnabled: agency.lookupEnabled === true,
+      autoApproveCleared: autoApproveCleared === true,
     },
   });
 
-  return res.json({ success: true, lookupDomain: normalized });
+  return res.json({
+    success: true,
+    lookupDomain: normalized,
+    autoApproveRequests: agencies[idx].autoApproveRequests === true,
+  });
 });
 
 // Enable Lookup (by index). Domains from body.lookupDomain or legacy body.domain (comma-separated).
@@ -1926,7 +1933,7 @@ router.post("/:index/lookup/disable", (req, res) => {
 });
 
 
-// Enable auto-approve of matching Request Access submissions (requires a default template).
+// Enable auto-approve of matching Request Access submissions (requires domains + default template).
 router.post("/:index/auto-approve/enable", (req, res) => {
   const idx = Number(req.params.index);
   if (!Number.isInteger(idx)) {
