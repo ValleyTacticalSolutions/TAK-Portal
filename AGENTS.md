@@ -33,6 +33,15 @@ npm run build:map
 
 Bug fix PRs must include an automated test under `tests/` that fails without the fix. `npm test` runs every `tests/*.test.js` (listed files first, then any others), so a new file is picked up automatically. If a test isn't feasible, say why and how you proved the fix.
 
+## UI — mobile-friendly by default
+
+Every page and UI change must work on mobile and match the rest of the site:
+
+- Design for narrow viewports first (phone), not only desktop. Stack headers/actions, wrap long text, and avoid horizontal page scroll.
+- Reuse existing layout/CSS patterns (`public/styles.css`, page `@media` breakpoints around ~990px / ~640px, `.row` wrap, full-width controls on small screens). Do not invent a one-off mobile look.
+- Job logs, tables, cards, toolbars, and modals must remain readable and tappable on a phone (adequate tap targets, `overflow-wrap` / `min-width: 0` where flex/grid would overflow).
+- When touching a page, check the mobile layout of the area you changed; do not ship desktop-only UI.
+
 ## CloudTAK Marketplace catalog
 
 When adding or editing `catalog/cloudtak-plugins.json`:

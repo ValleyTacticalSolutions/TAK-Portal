@@ -9,3 +9,4 @@
 - Keep `AGENTS.md` the single source for repo rules, so Cursor and Claude see the same thing. This file only imports it and adds Claude-specific notes.
 - **Git push target:** never push to any branch except `main`. Do not create or push `agent/*` (or other) branches unless Justin explicitly asks for that branch in the current message.
 - Marketplace `additionalActions`: only for required manual operator work (Caddy / reverse-proxy / major external config). Skip Refresh App, egress tips, disk notes, and other README material — see **CloudTAK Marketplace catalog** in `AGENTS.md`.
+- **UI:** every page must be mobile-friendly and match the rest of the site — see **UI — mobile-friendly by default** in `AGENTS.md`.
