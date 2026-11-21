@@ -53,16 +53,20 @@ function getEnrollHost() {
   return isValidEnrollHost(v) ? v : "";
 }
 
-/** True when a command targets TAK Server's own files/service rather than the host. */
+/**
+ * True when a command targets TAK Server's own files/service rather than the host.
+ * `/opt/tak` only — not siblings like `/opt/tak-guarddog`.
+ */
 function touchesTakServer(innerCommand, runAsUser) {
-  return String(runAsUser || "") === "tak" || /\/opt\/tak\b/.test(String(innerCommand || ""));
+  return String(runAsUser || "") === "tak" || /\/opt\/tak(?![\w-])/.test(String(innerCommand || ""));
 }
 
 /**
  * Rewrite a native-install command for Docker TAK Server.
  * Commands that don't touch TAK Server come back unchanged. The caller's wrapper still runs the
  * result with privilege, so runAsUser is cleared when rewritten (the user is set in the container).
- * Uses `docker exec … --` so the inner command cannot be parsed as docker flags.
+ * Docker stops reading options at the container name, so no `--` after the name (Docker would
+ * treat `--` as the command and fail with `exec: "--": executable file not found`).
  * @returns {{ command: string, runAsUser: string, rewritten: boolean }}
  */
 function toDockerCommand(innerCommand, runAsUser, container = getDockerContainer()) {
@@ -75,13 +79,13 @@ function toDockerCommand(innerCommand, runAsUser, container = getDockerContainer
     return { command: inner, runAsUser: String(runAsUser || ""), rewritten: false };
   }
   const user = String(runAsUser || "") === "tak" ? "-u tak " : "";
-  return { command: `docker exec -i ${user}${c} -- ${inner}`, runAsUser: "", rewritten: true };
+  return { command: `docker exec -i ${user}${c} ${inner}`, runAsUser: "", rewritten: true };
 }
 
 /** Unprivileged tee into a file inside the container (CoreConfig.xml etc.). */
 function dockerTeeInner(escapedPath, container = getDockerContainer()) {
   const c = safeContainer(container);
-  return `docker exec -i ${c} -- tee '${escapedPath}' > /dev/null`;
+  return `docker exec -i ${c} tee '${escapedPath}' > /dev/null`;
 }
 
 module.exports = {
