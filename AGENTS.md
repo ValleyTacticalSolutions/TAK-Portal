@@ -5,7 +5,7 @@
 - `main` is the **beta** channel (UI beta mode pulls latest `main`)
 - Stable installs pull **GitHub Releases** only
 - Current package version lives in `package.json` (`version` + `beta-version`)
-- Agents work on `agent/*` branches and open PRs. Nothing merges to `main` until Justin replies `yes merge` in Slack and CI is green
+- Work and push on **`main` only**. Never create, checkout-for-shipping, or push `agent/*` (or any other) branches. If Justin wants a branch/PR workflow, he will say so explicitly.
 - **Releases are Justin's, by hand.** Agents never tag or release
 
 ## Categories
