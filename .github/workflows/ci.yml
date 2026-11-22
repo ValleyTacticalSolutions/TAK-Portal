@@ -17,6 +17,7 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
+      # build:map first: typecheck needs the generated client/map/ported/ files.
       - run: npm run build:map
+      - run: npm run typecheck
       - run: npm test

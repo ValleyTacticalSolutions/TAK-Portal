@@ -11,7 +11,7 @@
   "scripts": {
     "test": "node scripts/run-tests.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "verify": "npm run typecheck && npm run build:map && npm test",
+    "verify": "npm run build:map && npm run typecheck && npm test",
     "prepare": "node -e \"try{require('child_process').execSync('git config core.hooksPath .githooks',{stdio:'ignore'})}catch(e){}\"",
     "audit:icons": "node scripts/audit-map-icons.js",
     "vendor:icons": "node --use-system-ca scripts/vendor-cloudtak-icons.js",
