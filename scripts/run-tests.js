@@ -1,13 +1,18 @@
 #!/usr/bin/env node
 /**
- * Run unit tests; exit non-zero on first failure.
+ * Run unit tests.
  * Files in TEST_FILES run first, in that order. Any other tests/*.test.js run after them,
  * alphabetically, so a new test can never be skipped by forgetting to list it here.
+ *
+ * Quiet by default: only failing tests print their output, then a one-line summary.
+ * Every test runs even after a failure, so one run shows everything that is broken.
+ * TEST_VERBOSE=1 streams every test's output.
  */
 const { spawnSync } = require("child_process");
 const path = require("path");
 
 const TEST_FILES = [
+  "smoke.load.test.js",
   "mapIcon.test.js",
   "mapIconRender.test.js",
   "mapMeta.test.js",
@@ -98,15 +103,33 @@ const unlisted = fs
   .filter((f) => f.endsWith(".test.js") && !TEST_FILES.includes(f))
   .sort();
 
-for (const file of [...TEST_FILES, ...unlisted]) {
+const verbose = process.env.TEST_VERBOSE === "1";
+const all = [...TEST_FILES, ...unlisted];
+const failed = [];
+const started = Date.now();
+
+for (const file of all) {
   const testPath = path.join(testsDir, file);
   const result = spawnSync(process.execPath, [testPath], {
-    stdio: "inherit",
+    stdio: verbose ? "inherit" : "pipe",
+    encoding: "utf8",
     cwd: path.join(__dirname, ".."),
+    maxBuffer: 64 * 1024 * 1024,
   });
   if (result.status !== 0) {
-    process.exit(result.status || 1);
+    failed.push(file);
+    if (!verbose) {
+      console.log(`\n--- FAILED: ${file} (exit ${result.status}) ---`);
+      process.stdout.write(result.stdout || "");
+      process.stdout.write(result.stderr || "");
+      if (result.error) console.log(String(result.error));
+    }
   }
 }
 
-console.log("All tests passed.");
+const secs = ((Date.now() - started) / 1000).toFixed(1);
+if (failed.length) {
+  console.log(`\n${failed.length} of ${all.length} test files failed (${secs}s): ${failed.join(", ")}`);
+  process.exit(1);
+}
+console.log(`All tests passed (${all.length} files, ${secs}s).`);

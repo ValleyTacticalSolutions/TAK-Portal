@@ -1,0 +1,10 @@
+#!/bin/sh
+# Blocks a push when the type check, map build or tests fail.
+# Installed by `npm ci` / `npm install` (the "prepare" script sets core.hooksPath).
+# Emergency bypass: git push --no-verify
+echo "pre-push: running npm run verify..."
+if ! npm run --silent verify; then
+  echo ""
+  echo "pre-push: verify failed; push blocked. Fix it, or bypass with: git push --no-verify"
+  exit 1
+fi

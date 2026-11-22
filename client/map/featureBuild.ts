@@ -97,7 +97,7 @@ export function isMarkerStale(
 
 /** Channel keys used for paint/filter. Unassigned/Stale are not special catalog channels. */
 export function paintChannelKeys(
-  marker: { channelKeys?: string; groups?: string[]; stale?: string | null }
+  marker: { channelKeys?: string; groups?: string[] | null; stale?: string | null }
 ): string {
   const raw = String(marker.channelKeys || "").trim();
   if (raw) {

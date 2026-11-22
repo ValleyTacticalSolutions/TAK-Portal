@@ -1,1 +1,2 @@
 host-helpers/** text eol=lf
+.githooks/* text eol=lf

@@ -29,10 +29,9 @@ Map build (when UI map changes):
 npm run build:map
 ```
 
-Run one test while iterating, then the full suite before saying it works:
-
 ```bash
-node tests/<name>.test.js
+node tests/<name>.test.js   # one test while iterating
+npm run verify              # typecheck + map build + all tests; required before "done"
 ```
 
 Tests that shell out to bash must pass on Windows too (Git Bash): convert temp paths to `/c/...` form where the script expects POSIX absolute paths or splits on `:`. If a module is missing, run `npm ci`. `node_modules` is probably out of date.
@@ -53,9 +52,15 @@ Tests that shell out to bash must pass on Windows too (Git Bash): convert temp p
 - **No new entry** for a tweak to something already listed under the IN PROGRESS version (e.g. polishing a feature added in this beta). It falls under the parent entry. Edit that entry only if the tweak changes what it says.
 - **No entry** for test-only, docs-only, or agent-config changes.
 
-## Proof tests
+## Tests and verify
 
-Bug fix PRs must include an automated test under `tests/` that fails without the fix. `npm test` runs every `tests/*.test.js` (listed files first, then any others), so a new file is picked up automatically. If a test isn't feasible, say why and how you proved the fix.
+`main` ships to beta users on every push, so nothing broken may reach it.
+
+- **Every change ships with a test** under `tests/`, UI included. A bug fix's test must fail without the fix. A feature or enhancement's test proves the new behavior. For UI, assert on the template/CSS (see `tests/siteFooter.test.js`, `tests/modalStickyFooter.test.js`). If a test truly isn't feasible, say why and how you proved it.
+- Prefer extending the existing test file for that area over making a new one. `npm test` picks up any new `tests/*.test.js` automatically.
+- **Done means `npm run verify` passed.** It runs the type check, the map build and the full suite (about 30s). The pre-push hook (`.githooks/pre-push`, installed by `npm ci`) runs it too and blocks the push on failure. CI runs the same steps.
+- `tests/smoke.load.test.js` loads every route/service, parses `server.js`/`worker.js`, compiles every view and parses every browser script. If it fails, the app would fail to start or a page would 500.
+- **Keep it cheap:** run only the one test file while iterating, then `npm run verify` once at the end. `npm test` is quiet: it prints only failing tests plus a summary line, and keeps going after a failure so one run shows everything. `TEST_VERBOSE=1` streams all output.
 
 ## UI — mobile-friendly by default
 

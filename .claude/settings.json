@@ -2,6 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(npm test)",
+      "Bash(npm run verify)",
+      "Bash(npm run typecheck)",
+      "PowerShell(npm run verify)",
       "Bash(npm ci)",
       "Bash(npm run build:map)",
       "Bash(npm run generate:map)",
