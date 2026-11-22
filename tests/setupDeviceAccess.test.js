@@ -171,6 +171,10 @@ function response() {
   );
   assert.strictEqual(errorRes.statusCode, 200);
 
+  const setupView = fs.readFileSync(path.join(__dirname, "..", "views", "setup-my-device.ejs"), "utf8");
+  assert.ok(!/<strong>\$\{CURRENT_USERNAME\}<\/strong>/.test(setupView), "CURRENT_USERNAME must be escaped before innerHTML");
+  assert.ok(setupView.includes("<strong>${escapeHtml(CURRENT_USERNAME)}</strong>"));
+
   console.log("setupDeviceAccess tests passed");
 })().catch((err) => {
   console.error(err);
