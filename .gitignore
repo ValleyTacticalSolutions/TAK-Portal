@@ -41,3 +41,6 @@ reports/
 Thumbs.db
 .vscode/
 .idea/
+
+# Claude Code per-machine settings
+.claude/settings.local.json

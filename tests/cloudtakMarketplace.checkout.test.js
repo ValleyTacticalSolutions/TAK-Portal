@@ -30,6 +30,12 @@ function mkTmp(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
+// COMPOSE_FILE is split on ':', so a Windows "C:\..." path must reach bash as "/c/...".
+function toBashPath(p) {
+  if (process.platform !== "win32") return p;
+  return p.replace(/^([A-Za-z]):[\\/]/, (_, d) => `/${d.toLowerCase()}/`).replace(/\\/g, "/");
+}
+
 function writeFile(p, text) {
   fs.mkdirSync(path.dirname(p), { recursive: true });
   fs.writeFileSync(p, text);
@@ -157,11 +163,11 @@ function makeLeftoverTree(root) {
   );
   const composePath = path.join(onlyEnv, "stack-compose.yml");
   writeFile(composePath, "services:\n  api:\n    build: .\n");
-  writeFile(path.join(onlyEnv, ".env"), `COMPOSE_FILE=${composePath}\n`);
+  writeFile(path.join(onlyEnv, ".env"), `COMPOSE_FILE=${toBashPath(composePath)}\n`);
   const script = [
     "set -euo pipefail",
     ssh.ctakCheckoutOkBash(),
-    `ctak_checkout_ok ${JSON.stringify(onlyEnv)} && echo ACCEPT`,
+    `ctak_checkout_ok ${JSON.stringify(toBashPath(onlyEnv))} && echo ACCEPT`,
   ].join("\n");
   const r = runBash(script);
   assert.strictEqual(r.status, 0, r.stderr || r.stdout);
@@ -309,7 +315,7 @@ exit 0
   const leftover = mkTmp("ctak-helper-leftover-");
   makeLeftoverTree(leftover);
   const before = fs.readdirSync(leftover).sort().join(",");
-  const r = spawnSync(bash, [helperSrc, "reclaim", leftover, "nobody", "nogroup"], {
+  const r = spawnSync(bash, [helperSrc, "reclaim", toBashPath(leftover), "nobody", "nogroup"], {
     encoding: "utf8",
   });
   assert.notStrictEqual(r.status, 0);

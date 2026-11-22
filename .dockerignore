@@ -4,6 +4,7 @@
 
 .git
 .vscode
+.claude
 .idea
 
 node_modules

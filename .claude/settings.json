@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm test)",
+      "Bash(npm ci)",
+      "Bash(npm run build:map)",
+      "Bash(npm run generate:map)",
+      "Bash(node tests/*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(gh api repos/ValleyTacticalSolutions/tak-portal-ops/contents/*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue list:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)",
+      "PowerShell(npm test)",
+      "PowerShell(node tests/*)",
+      "PowerShell(git status:*)",
+      "PowerShell(git diff:*)",
+      "PowerShell(git log:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git tag:*)",
+      "Bash(gh release:*)"
+    ]
+  }
+}

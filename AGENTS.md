@@ -29,6 +29,30 @@ Map build (when UI map changes):
 npm run build:map
 ```
 
+Run one test while iterating, then the full suite before saying it works:
+
+```bash
+node tests/<name>.test.js
+```
+
+Tests that shell out to bash must pass on Windows too (Git Bash): convert temp paths to `/c/...` form where the script expects POSIX absolute paths or splits on `:`. If a module is missing, run `npm ci`. `node_modules` is probably out of date.
+
+## Repo map
+
+- `server.js` (web) and `worker.js` (background jobs) are separate processes.
+- `routes/*.routes.js` hold the HTTP handlers. Logic goes in `services/*.service.js` (and sibling helpers). Pages are `views/*.ejs` with `public/styles.css`.
+- `db/migrations/NNN_*.sql` holds the numbered Postgres migrations. Add a new file; never edit a shipped one.
+- **Map client:** edit `client/map/legacy/*.js` and `client/map/*.ts`. Never edit `client/map/ported/` or `public/dist/`. They're generated and gitignored, so rebuild with `npm run build:map`.
+- CloudTAK Marketplace: `services/cloudtakMarketplace.*`, `catalog/cloudtak-plugins.json`, `host-helpers/marketplace-helper` (bash, runs on Linux hosts).
+- `takportal` is the operator's bash CLI around Docker Compose.
+
+## Changelog and beta version
+
+- Every product change gets one line in `CHANGELOG.md` under the top `### vX.X.XX - IN PROGRESS` heading. Use the emoji/category formats in the comments at the top of the file and end the line with `<br>` like the existing entries.
+- The in-progress version is one ahead of the latest release: `beta-version` in `package.json` = `version` + 1 patch. If no IN PROGRESS heading exists, add one and bump `beta-version` to match.
+- **No new entry** for a tweak to something already listed under the IN PROGRESS version (e.g. polishing a feature added in this beta). It falls under the parent entry. Edit that entry only if the tweak changes what it says.
+- **No entry** for test-only, docs-only, or agent-config changes.
+
 ## Proof tests
 
 Bug fix PRs must include an automated test under `tests/` that fails without the fix. `npm test` runs every `tests/*.test.js` (listed files first, then any others), so a new file is picked up automatically. If a test isn't feasible, say why and how you proved the fix.
@@ -41,6 +65,7 @@ Every page and UI change must work on mobile and match the rest of the site:
 - Reuse existing layout/CSS patterns (`public/styles.css`, page `@media` breakpoints around ~990px / ~640px, `.row` wrap, full-width controls on small screens). Do not invent a one-off mobile look.
 - Job logs, tables, cards, toolbars, and modals must remain readable and tappable on a phone (adequate tap targets, `overflow-wrap` / `min-width: 0` where flex/grid would overflow).
 - When touching a page, check the mobile layout of the area you changed; do not ship desktop-only UI.
+- The check is a CSS/markup review against the existing breakpoints and patterns. Don't launch the app for a screenshot unless asked.
 
 ## CloudTAK Marketplace
 
