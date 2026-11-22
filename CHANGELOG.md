@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.41 - IN PROGRESS
+✨ `Enhancement` - Backend Change - package.json now contains a cloudtak-marketplace-version so that changes to cloudtak marketplace logic and plugins can be tracked more accurately.
+
 ### v2.0.40 - 11/22/26
 🐛 `Bug Fix` - CloudTAK Marketplace no longer lets an out-of-range installed plugin (e.g. Replay past its supported CloudTAK) poison every other Marketplace install/rebuild: those plugins' API files stay out of OXLint, align snapshots/restores the lint tree on failure, API lint is preflighted before a no-cache rebuild (abort naming the file/plugin), batch CSP updates defer `api` recreate until the shared rebuild, and rebuild failures attribute the culprit plugin instead of failing every job with the same text (#146)<br>
 🐛 `Bug Fix` - CloudTAK Marketplace no longer re-adds host `pdfjs-dist` after Rubber Sheet's install.sh removes it when PDF.js is vendored under `lib/vendor/pdfjs`; leftover host entries are dropped, and only legacy installs without the vendor still get `pdfjs-dist` seeded (#146)<br>
