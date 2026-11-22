@@ -1,0 +1,17 @@
+---
+description: Bump cloudtak-marketplace-version when marketplace plugins or logic change
+globs: catalog/cloudtak-plugins.json,services/cloudtakMarketplace.*,routes/cloudtakMarketplace.routes.js,views/cloudtak-marketplace.ejs,tests/cloudtakMarketplace*.js
+alwaysApply: false
+---
+
+# CloudTAK Marketplace version
+
+When you change marketplace plugins or how the marketplace works, bump `cloudtak-marketplace-version` in `package.json` in the same change set. Do not bump `version` / `beta-version` for marketplace-only work unless the product release also requires it.
+
+Bump for:
+
+- Add / remove / edit plugins in `catalog/cloudtak-plugins.json`
+- Install, uninstall, rebuild, align, Caddy, SSH, store, routes, or marketplace UI logic changes
+- Marketplace helper / remote script behavior that affects installs
+
+Full rule: **CloudTAK Marketplace** in `AGENTS.md`.

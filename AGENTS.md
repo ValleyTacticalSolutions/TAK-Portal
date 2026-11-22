@@ -42,7 +42,21 @@ Every page and UI change must work on mobile and match the rest of the site:
 - Job logs, tables, cards, toolbars, and modals must remain readable and tappable on a phone (adequate tap targets, `overflow-wrap` / `min-width: 0` where flex/grid would overflow).
 - When touching a page, check the mobile layout of the area you changed; do not ship desktop-only UI.
 
-## CloudTAK Marketplace catalog
+## CloudTAK Marketplace
+
+### Version bump (required)
+
+Whenever CloudTAK Marketplace plugins or marketplace behavior changes, bump `cloudtak-marketplace-version` in `package.json` (semver patch/minor as appropriate). This is separate from `version` / `beta-version`.
+
+Bump it when **any** of these change:
+
+- Plugins added, removed, or edited in `catalog/cloudtak-plugins.json` (or other marketplace catalog/plugin payload)
+- Install / uninstall / rebuild / align / Caddy / SSH / store / routes / UI logic for the marketplace (`services/cloudtakMarketplace.*`, `routes/cloudtakMarketplace.routes.js`, `views/cloudtak-marketplace.ejs`, related helpers)
+- Marketplace helper scripts, remote install scripts, or other logic that changes how marketplace installs or runs
+
+Do **not** leave marketplace-related code or catalog changes without a corresponding `cloudtak-marketplace-version` bump in the same change set.
+
+### Catalog `additionalActions`
 
 When adding or editing `catalog/cloudtak-plugins.json`:
 
