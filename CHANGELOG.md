@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 ## Version History
 
 ### v2.0.41 - IN PROGRESS
+🐛 `Bug Fix` - Setup My Device now HTML-escapes the username in the manual login instructions before writing them with innerHTML (CodeQL js/xss alerts 197-199)<br>
 ✨ `Enhancement` - Backend Change - package.json now contains a cloudtak-marketplace-version so that changes to cloudtak marketplace logic and plugins can be tracked more accurately.
 
 ### v2.0.40 - 11/22/26
