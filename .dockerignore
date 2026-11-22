@@ -3,7 +3,6 @@
 # get sent as build context and any server edit busts the map-build layer.
 
 .git
-.cursor
 .vscode
 .idea
 
