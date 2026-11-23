@@ -9,8 +9,10 @@ const fs = require("fs");
 const path = require("path");
 
 const root = path.join(__dirname, "..");
-const dockerfile = fs.readFileSync(path.join(root, "Dockerfile"), "utf8");
-const dockerignore = fs.readFileSync(path.join(root, ".dockerignore"), "utf8");
+// Normalize CRLF so the line-anchored checks pass on Windows checkouts (core.autocrlf=true).
+const readLf = (p) => fs.readFileSync(p, "utf8").replace(/\r\n/g, "\n");
+const dockerfile = readLf(path.join(root, "Dockerfile"));
+const dockerignore = readLf(path.join(root, ".dockerignore"));
 
 assert.match(dockerfile, /AS map-build/);
 assert.match(dockerfile, /AS prod-deps/);

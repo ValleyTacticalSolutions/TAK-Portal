@@ -8,7 +8,8 @@ const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 
-const read = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
+// Normalize CRLF so the "\n}\n" function matchers work on Windows checkouts (core.autocrlf=true).
+const read = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8").replace(/\r\n/g, "\n");
 
 const mou = read("routes/mou.routes.js");
 const fn = mou.match(/function sendPlainError[\s\S]*?\n}\n/)[0];
