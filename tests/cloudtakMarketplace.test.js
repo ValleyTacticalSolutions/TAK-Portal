@@ -1746,3 +1746,14 @@ assertOnboardValidation()
   assert.match(m[0], /-n docker "\$@" <\/dev\/null/, "sudo -n docker path closes stdin");
   assert.match(m[0], /command docker "\$@" <\/dev\/null/, "plain docker path closes stdin");
 }
+
+// CodeQL js/bad-tag-filter: the </script> end tag may carry whitespace/attributes
+{
+  const alignSrc = fs.readFileSync(path.join(__dirname, "..", "services", "cloudtakMarketplace.align.js"), "utf8");
+  const m = alignSrc.match(/const re = (\/<script\\b[^\n]*\/gi);/);
+  assert.ok(m, "vue script regexp present");
+  const scriptRe = eval(m[1]);
+  assert.ok(scriptRe.test("<script>x</script\t\n bar>"));
+  scriptRe.lastIndex = 0;
+  assert.ok(scriptRe.test("<script>x</script >"));
+}

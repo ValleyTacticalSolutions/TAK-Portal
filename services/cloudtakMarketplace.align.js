@@ -735,7 +735,7 @@ function transformCode(filePath, source, ctx) {
 function transformFile(filePath, source, ctx) {
   if (!filePath.endsWith(".vue")) return transformCode(filePath, source, ctx);
   const changes = [];
-  const re = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi;
+  const re = /<script\b([^>]*)>([\s\S]*?)<\/script[^>]*>/gi;
   let code = "";
   let last = 0;
   let m;
