@@ -551,7 +551,8 @@ async function patchMutualAidUserGroupAttr(userId, groupName) {
     });
   } catch (err) {
     console.warn(
-      `[groupRenamePropagate] Failed to update mutual_aid_group for user ${id}:`,
+      "[groupRenamePropagate] Failed to update mutual_aid_group for user %s:",
+      String(id),
       err?.message || err
     );
   }

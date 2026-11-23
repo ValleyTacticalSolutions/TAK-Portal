@@ -18,12 +18,10 @@ function resolvePathMaybe(p) {
   return path.isAbsolute(raw) ? raw : path.join(process.cwd(), raw);
 }
 
-function shellQuote(str) {
-  return `'${String(str || "").replace(/'/g, `'\"'\"'`)}'`;
-}
+const { shellQuote, escapeForSingleQuotes } = require("./shellQuote");
 
 function quoteForSingleQuotedShell(str) {
-  return String(str || "").replace(/'/g, "'\"'\"'");
+  return escapeForSingleQuotes(str);
 }
 
 function ensureDir(dirPath) {

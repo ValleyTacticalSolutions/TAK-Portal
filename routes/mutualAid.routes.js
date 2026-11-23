@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const path = require("path");
 const fs = require("fs");
 const multer = require("multer");
@@ -27,7 +28,7 @@ const uploadMaLogo = multer({
       const safeExt = [".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(ext)
         ? ext
         : ".png";
-      cb(null, `upload-${Date.now()}-${Math.random().toString(16).slice(2)}${safeExt}`);
+      cb(null, `upload-${Date.now()}-${crypto.randomBytes(8).toString("hex")}${safeExt}`);
     },
   }),
   limits: { fileSize: 2 * 1024 * 1024 },

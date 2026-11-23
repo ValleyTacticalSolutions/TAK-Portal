@@ -1,3 +1,4 @@
+const randomIdSvc = require("../services/randomId");
 const router = require("express").Router();
 const groups = require("../services/groups.service");
 const mutualAid = require("../services/mutualAid.service");
@@ -55,7 +56,7 @@ async function getGroupNameSafe(groupId) {
 // -------------------- Mass assign/unassign progress jobs (in-memory) --------------------
 const massJobs = new Map();
 function newJobId() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return randomIdSvc.timeId();
 }
 
 router.get("/", async (req, res) => {

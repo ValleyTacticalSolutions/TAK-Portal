@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const api = require("./authentik");
 const db = require("./db");
 const cryptoSecrets = require("./cryptoSecrets");
@@ -82,9 +83,7 @@ async function viewTokenKey(identifier) {
 }
 
 async function createAppPasswordForUserId(userId, expiresAt) {
-  const identifier = `${IDENT_PREFIX}${Date.now()}-${Math.random()
-    .toString(16)
-    .slice(2, 10)}`;
+  const identifier = `${IDENT_PREFIX}${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
 
   const payload = {
     identifier,

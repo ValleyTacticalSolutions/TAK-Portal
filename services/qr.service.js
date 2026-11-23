@@ -140,6 +140,7 @@ function buildPreferenceUrl({ callsign, teamLabel, roleLabel, phone }) {
 }
 
 const QR_PNG_CACHE_MAX = 250;
+const QR_CACHE_SALT = crypto.randomBytes(16);
 /** @type {Map<string, Buffer>} */
 const qrPngCache = new Map();
 let _sans64BlackFont = null;
@@ -162,12 +163,17 @@ function qrPngCacheKey(content, options = {}) {
   const username = String(options.usernameLabel || "")
     .trim()
     .toUpperCase();
+  // QR content carries enrollment secrets, so derive the key with scrypt (a password hash)
+  // under a per-process random salt. The cache is in memory only: nothing persisted needs
+  // upgrading, and a restart simply starts with an empty cache.
   return crypto
-    .createHash("sha256")
-    .update(
-      [String(content || ""), width, margin, logoId, logoRatio, username].join("\0")
+    .scryptSync(
+      [String(content || ""), width, margin, logoId, logoRatio, username].join("\0"),
+      QR_CACHE_SALT,
+      32,
+      { N: 1024, r: 8, p: 1 }
     )
-    .digest("hex");
+    .toString("hex");
 }
 
 function displayQrCacheKey(content) {
