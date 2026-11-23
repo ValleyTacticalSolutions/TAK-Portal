@@ -2,6 +2,25 @@
 # Blocks a push when the type check, map build or tests fail.
 # Installed by `npm ci` / `npm install` (the "prepare" script sets core.hooksPath).
 # Emergency bypass: git push --no-verify
+# GUI git clients (VS Code Source Control) can start without Node on PATH, e.g. right
+# after a per-user Node install. Look in the usual Windows locations before giving up.
+if ! command -v npm >/dev/null 2>&1; then
+  for d in \
+    "$LOCALAPPDATA"/Programs/node-*-win-x64 \
+    "$LOCALAPPDATA/Programs/nodejs" \
+    "$PROGRAMFILES/nodejs" \
+    "/c/Program Files/nodejs"; do
+    if [ -d "$d" ] && [ -f "$d/npm.cmd" -o -x "$d/npm" ]; then
+      PATH="$d:$PATH"
+      export PATH
+      break
+    fi
+  done
+fi
+if ! command -v npm >/dev/null 2>&1; then
+  echo "pre-push: npm not found on PATH; install Node >=22 or add it to PATH."
+  exit 1
+fi
 echo "pre-push: running npm run verify..."
 if ! npm run --silent verify; then
   echo ""
