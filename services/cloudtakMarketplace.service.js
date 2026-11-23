@@ -1901,6 +1901,7 @@ async function scanHost() {
       dest: host.dest,
       kind: host.kind,
       gitHead: host.gitHead || "",
+      version: host.version || "",
       gitRemote: host.gitRemote || "",
       onDisk: true,
       inWebPlugins: false,
@@ -2291,9 +2292,16 @@ function buildUiPlugins(options = {}) {
   const plugins = [...byId.values()]
     .map((row) => {
       const sha = shaById[row.id];
+      // A cached version only describes the commit it was resolved for. After a
+      // reinstall/update the installed sha changes, so a stale cached version
+      // (e.g. 0.1.4-ccso) must not stick (#177); enrichUpdateShas re-resolves it.
+      const currentSha = installedShaFromRow(row, installedRec.plugins);
+      // Older caches carried a stale version forward under the new sha, so only trust
+      // entries that record the commit the version itself was resolved for.
+      const cachedVersionFresh = !!(sha && sha.installedVersionSha && currentSha && sha.installedVersionSha === currentSha);
       const installedVersion =
         cleanPluginVersion(row.scan && row.scan.version) ||
-        cleanPluginVersion(sha && sha.installedVersion);
+        (cachedVersionFresh ? cleanPluginVersion(sha.installedVersion) : "");
       const base = sha
         ? {
             ...row,
@@ -2332,6 +2340,7 @@ async function refreshShaCache() {
       updateAvailable: !!row.updateAvailable,
       remoteVersion: row.remoteVersion || "",
       installedVersion: row.installedVersion || "",
+      installedVersionSha: row.installedVersion && row.installedSha ? row.installedSha : "",
     };
   }
   store.writeShaCache({ updatedAt: new Date().toISOString(), byId });
@@ -4835,11 +4844,18 @@ if [ "$WEB_REL" = "app" ] && [ -e "$CT/api/web/plugins/$DEST" ] && [ ! -e "$PLUG
   echo "Moving $DEST from api/web/plugins to app/plugins (CloudTAK 13.102+)"
   run_as_writer "mkdir -p $(printf '%q' "$PLUGIN_ROOT") && mv $(printf '%q' "$CT/api/web/plugins/$DEST") $(printf '%q' "$PLUGIN_ROOT/$DEST")"
 fi
-if [ "$WEB_REL" = "app" ] && [ -e "$PLUGIN_ROOT/$DEST" ] && [ -e "$CT/api/web/plugins/$DEST" ]; then
-  echo "Removing leftover api/web/plugins/$DEST"
-  if ! remove_plugin_tree "$CT/api/web/plugins/$DEST"; then
-    echo "WARNING: leftover $CT/api/web/plugins/$DEST could not be removed; continuing because $PLUGIN_ROOT/$DEST is installed" >&2
-  fi
+# The host scan lists the first copy it finds (app/plugins first). An older copy of this
+# plugin in any other plugin root would be shown instead of the one just installed
+# (e.g. an old 0.1.4-ccso copy, #177), so clear every other root once this install exists.
+if [ -e "$PLUGIN_ROOT/$DEST" ]; then
+  for _root in app/plugins api/web/plugins api/web/src/plugins app/src/plugins; do
+    [ "$CT/$_root" = "$PLUGIN_ROOT" ] && continue
+    [ -e "$CT/$_root/$DEST" ] || continue
+    echo "Removing leftover $_root/$DEST"
+    if ! remove_plugin_tree "$CT/$_root/$DEST"; then
+      echo "WARNING: leftover $CT/$_root/$DEST could not be removed; continuing because $PLUGIN_ROOT/$DEST is installed" >&2
+    fi
+  done
 fi
 
 # Official CloudTAK sample: index.ts at dest root, Vue/TS/assets in lib/.

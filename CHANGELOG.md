@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ### v2.0.42 - IN PROGRESS
 🐛 `Bug Fix` - Backend Change - CloudTAK Marketplace no longer runs a `<priv> -n true` probe before elevating on the host. Hosts with narrow grants refused it, which mailed a refusal notice to root on every run and skipped commands that were actually granted. The real command is now tried directly, and only a refusal moves on to the stored password (#178)<br>
+🐛 `Bug Fix` - Backend Change - CloudTAK Marketplace no longer keeps showing an old installed plugin version (e.g. Incident Manager stuck at v0.1.4-ccso) after a reinstall or update. Install now removes older copies of the plugin from every other CloudTAK plugin folder (the host scan listed the first copy it found), the cached version is only reused for the same installed commit, and the host scan keeps the plugin version (#177)<br>
 
 ### v2.0.41 - 11/23/26
 🔒 `Security` - Group names can no longer contain `;`, `|` or `,` when a group is created or renamed (manual, auto-create, Mutual Aid and agency admin groups). Portal login reads the Authentik groups header by splitting on those characters, so a group named like `tak_x|<admin group>` could be read as membership in the admin group and let an agency admin act as a global admin. Existing groups keep working and can still be edited without renaming them<br>

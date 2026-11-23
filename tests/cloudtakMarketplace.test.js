@@ -961,7 +961,10 @@ assert.match(installScript, /apply_plugin_csp/);
 assert.match(installScript, /cloudtak_web_rel/);
 assert.match(installScript, /app\/plugins/);
 assert.match(installScript, /Moving \$DEST from api\/web\/plugins to app\/plugins/);
-assert.match(installScript, /Removing leftover api\/web\/plugins\/\$DEST/);
+assert.match(installScript, /Removing leftover \$_root\/\$DEST/);
+// #177: the scan lists the first copy found, so an old copy in ANY other plugin root
+// (e.g. a 0.1.4-ccso tree) must be cleared on install, not only api/web/plugins.
+assert.match(installScript, /for _root in app\/plugins api\/web\/plugins api\/web\/src\/plugins app\/src\/plugins/);
 assert.match(installScript, /docker compose --progress=plain/);
 {
   const rebuild = marketplace.rebuildRemoteScript("/root/CloudTAK", "api");
@@ -1756,4 +1759,52 @@ assertOnboardValidation()
   assert.ok(scriptRe.test("<script>x</script\t\n bar>"));
   scriptRe.lastIndex = 0;
   assert.ok(scriptRe.test("<script>x</script >"));
+}
+
+// #177: a stale cached installedVersion must not stick after a reinstall, and the
+// host scan must keep the plugin's package.json version.
+{
+  const scanOut = [
+    "PLUGIN\tincident-manager\tdir\t1\tcloudtak-plugin-incident-manager\thttps://github.com/clptak/cloudtak-plugin-incident-manager.git\tnewsha1\t\t1.0.0",
+    "SCAN_END",
+  ].join("\n");
+  const parsed = marketplace.parseScanStdout(scanOut, []);
+  assert.strictEqual(parsed.plugins[0].version, "1.0.0", "scan parser keeps version");
+  const scanSrc = fs.readFileSync(path.join(__dirname, "..", "services", "cloudtakMarketplace.service.js"), "utf8");
+  assert.match(scanSrc, /version: host\.version \|\| ""/, "scan cache entries keep the host version");
+
+  const prevInstalled = store.readInstalled();
+  const prevScan = store.readScanCache();
+  const prevSha = store.readShaCache();
+  store.writeInstalled({
+    plugins: { "incident-manager": { sha: "newsha1", dest: "incident-manager", installedAt: new Date().toISOString() } },
+  });
+  store.writeScanCache({
+    ok: true,
+    scannedAt: new Date().toISOString(),
+    path: "/root/CloudTAK",
+    plugins: [{ dest: "incident-manager", catalogId: "incident-manager", origin: "marketplace", onDisk: true, gitHead: "newsha1" }],
+  });
+  try {
+    const shaDoc = (installedSha) => ({
+      updatedAt: new Date().toISOString(),
+      byId: { "incident-manager": { installedSha, installedVersion: "0.1.4-ccso", installedVersionSha: installedSha, remoteSha: "newsha1", remoteVersion: "1.0.0" } },
+    });
+    store.writeShaCache(shaDoc("oldsha0"));
+    let row = marketplace.buildUiPlugins({ skipRemoteSha: true }).plugins.find((p) => p.id === "incident-manager");
+    assert.strictEqual(row.installedVersion, "", "stale cached version from an older commit is dropped");
+    store.writeShaCache(shaDoc("newsha1"));
+    row = marketplace.buildUiPlugins({ skipRemoteSha: true }).plugins.find((p) => p.id === "incident-manager");
+    assert.strictEqual(row.installedVersion, "0.1.4-ccso", "cached version for the same commit is kept");
+    // Poisoned legacy cache: new sha carried with the old version, no installedVersionSha.
+    const legacy = shaDoc("newsha1");
+    delete legacy.byId["incident-manager"].installedVersionSha;
+    store.writeShaCache(legacy);
+    row = marketplace.buildUiPlugins({ skipRemoteSha: true }).plugins.find((p) => p.id === "incident-manager");
+    assert.strictEqual(row.installedVersion, "", "legacy cache entry without installedVersionSha is not trusted");
+  } finally {
+    store.writeInstalled(prevInstalled || { plugins: {} });
+    if (prevScan) store.writeScanCache(prevScan);
+    if (prevSha) store.writeShaCache(prevSha);
+  }
 }
