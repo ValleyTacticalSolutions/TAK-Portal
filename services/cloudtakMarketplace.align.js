@@ -3,7 +3,13 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { escapeRegExp } = require("./safeRegex");
+
+// This file is staged ALONE to the CloudTAK host (/tmp/ctak-marketplace-align.cjs, /align.cjs in
+// docker), so it may only require Node built-ins — a relative require (e.g. ./safeRegex) throws
+// MODULE_NOT_FOUND on the host and fails every rebuild. Keep in sync with services/safeRegex.js.
+function escapeRegExp(value) {
+  return String(value == null ? "" : value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 const SOURCE_EXT = new Set([".ts", ".tsx", ".js", ".mjs", ".cjs", ".vue"]);
 const RESOLVE_EXT = [".ts", ".tsx", ".js", ".mjs", ".vue", ".d.ts"];
