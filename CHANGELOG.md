@@ -11,7 +11,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
-### v2.0.41 - IN PROGRESS
+### v2.0.41 - 11/23/26
 🔒 `Security` - Group names can no longer contain `;`, `|` or `,` when a group is created or renamed (manual, auto-create, Mutual Aid and agency admin groups). Portal login reads the Authentik groups header by splitting on those characters, so a group named like `tak_x|<admin group>` could be read as membership in the admin group and let an agency admin act as a global admin. Existing groups keep working and can still be edited without renaming them<br>
 🐛 `Bug Fix` - CloudTAK Marketplace rebuilds no longer fail with `Cannot find module './safeRegex'` while aligning plugins (the align script is copied alone to the host, so it now carries its own helper)<br>
 🐛 `Bug Fix` - CloudTAK Marketplace install/update/uninstall, host scan and Caddy deploy no longer fail with `FAILED CHECKOUT_OK path=...` on hosts whose `~/.bash_logout` returns an error: the scripts now trust their own result line when SSH reports a non-zero exit after they finished<br>
