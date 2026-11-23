@@ -961,7 +961,10 @@ assert.match(installScript, /apply_plugin_csp/);
 assert.match(installScript, /cloudtak_web_rel/);
 assert.match(installScript, /app\/plugins/);
 assert.match(installScript, /Moving \$DEST from api\/web\/plugins to app\/plugins/);
-assert.match(installScript, /Removing leftover api\/web\/plugins\/\$DEST/);
+assert.match(installScript, /Removing leftover \$_root\/\$DEST/);
+// #177: the scan lists the first copy found, so an old copy in ANY other plugin root
+// (e.g. a 0.1.4-ccso tree) must be cleared on install, not only api/web/plugins.
+assert.match(installScript, /for _root in app\/plugins api\/web\/plugins api\/web\/src\/plugins app\/src\/plugins/);
 assert.match(installScript, /docker compose --progress=plain/);
 {
   const rebuild = marketplace.rebuildRemoteScript("/root/CloudTAK", "api");
