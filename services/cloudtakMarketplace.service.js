@@ -2296,7 +2296,9 @@ function buildUiPlugins(options = {}) {
       // reinstall/update the installed sha changes, so a stale cached version
       // (e.g. 0.1.4-ccso) must not stick (#177); enrichUpdateShas re-resolves it.
       const currentSha = installedShaFromRow(row, installedRec.plugins);
-      const cachedVersionFresh = !!(sha && sha.installedSha && currentSha && sha.installedSha === currentSha);
+      // Older caches carried a stale version forward under the new sha, so only trust
+      // entries that record the commit the version itself was resolved for.
+      const cachedVersionFresh = !!(sha && sha.installedVersionSha && currentSha && sha.installedVersionSha === currentSha);
       const installedVersion =
         cleanPluginVersion(row.scan && row.scan.version) ||
         (cachedVersionFresh ? cleanPluginVersion(sha.installedVersion) : "");
@@ -2338,6 +2340,7 @@ async function refreshShaCache() {
       updateAvailable: !!row.updateAvailable,
       remoteVersion: row.remoteVersion || "",
       installedVersion: row.installedVersion || "",
+      installedVersionSha: row.installedVersion && row.installedSha ? row.installedSha : "",
     };
   }
   store.writeShaCache({ updatedAt: new Date().toISOString(), byId });

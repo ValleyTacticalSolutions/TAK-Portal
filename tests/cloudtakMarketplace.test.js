@@ -1785,7 +1785,7 @@ assertOnboardValidation()
   try {
     const shaDoc = (installedSha) => ({
       updatedAt: new Date().toISOString(),
-      byId: { "incident-manager": { installedSha, installedVersion: "0.1.4-ccso", remoteSha: "newsha1", remoteVersion: "1.0.0" } },
+      byId: { "incident-manager": { installedSha, installedVersion: "0.1.4-ccso", installedVersionSha: installedSha, remoteSha: "newsha1", remoteVersion: "1.0.0" } },
     });
     store.writeShaCache(shaDoc("oldsha0"));
     let row = marketplace.buildUiPlugins({ skipRemoteSha: true }).plugins.find((p) => p.id === "incident-manager");
@@ -1793,6 +1793,12 @@ assertOnboardValidation()
     store.writeShaCache(shaDoc("newsha1"));
     row = marketplace.buildUiPlugins({ skipRemoteSha: true }).plugins.find((p) => p.id === "incident-manager");
     assert.strictEqual(row.installedVersion, "0.1.4-ccso", "cached version for the same commit is kept");
+    // Poisoned legacy cache: new sha carried with the old version, no installedVersionSha.
+    const legacy = shaDoc("newsha1");
+    delete legacy.byId["incident-manager"].installedVersionSha;
+    store.writeShaCache(legacy);
+    row = marketplace.buildUiPlugins({ skipRemoteSha: true }).plugins.find((p) => p.id === "incident-manager");
+    assert.strictEqual(row.installedVersion, "", "legacy cache entry without installedVersionSha is not trusted");
   } finally {
     store.writeInstalled(prevInstalled || { plugins: {} });
     if (prevScan) store.writeScanCache(prevScan);
