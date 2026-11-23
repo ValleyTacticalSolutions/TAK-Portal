@@ -8,3 +8,19 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - "type:dependency"
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - "type:dependency"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - "type:dependency"
