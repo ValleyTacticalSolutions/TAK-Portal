@@ -150,10 +150,12 @@ function assertOutboundUrl(urlLike, opts = {}) {
   }
   const host = normHost(u.hostname);
   if (!host) throw new OutboundUrlError("Outbound URL has no host.");
-  const allowed = opts.configuredOnly
+  // Redirect hops (opts.anyHost): the first hop was allow-listed; CDN/S3 targets can't be listed,
+  // so only scheme and blocked address ranges are enforced.
+  const allowed = opts.anyHost ? null : opts.configuredOnly
     ? new Set([...getConfiguredHosts(), ...(opts.allowHosts || []).map(hostOf)])
     : buildAllowed(opts);
-  const explicit = hostMatches(host, allowed);
+  const explicit = opts.anyHost || hostMatches(host, allowed);
   if (!explicit) {
     throw new OutboundUrlError(`Outbound host "${host}" is not a configured host.`);
   }
@@ -196,7 +198,7 @@ function guardAxios(client, opts = {}) {
     if (config.maxRedirects !== 0) {
       const prev = config.beforeRedirect;
       config.beforeRedirect = (options, resp) => {
-        assertOutboundUrl(`${options.protocol}//${options.hostname || options.host}${options.path || ""}`, o);
+        assertOutboundUrl(`${options.protocol}//${options.hostname || options.host}${options.path || ""}`, { ...o, anyHost: true });
         if (typeof prev === "function") prev(options, resp);
       };
     }
@@ -215,7 +217,7 @@ function guardedAxios(axiosLib, opts = {}) {
     if (c.maxRedirects !== 0) {
       const prev = c.beforeRedirect;
       c.beforeRedirect = (options, resp) => {
-        assertOutboundUrl(`${options.protocol}//${options.hostname || options.host}${options.path || ""}`, opts);
+        assertOutboundUrl(`${options.protocol}//${options.hostname || options.host}${options.path || ""}`, { ...opts, anyHost: true });
         if (typeof prev === "function") prev(options, resp);
       };
     }
@@ -239,7 +241,7 @@ async function guardedFetch(url, init = {}, opts = {}) {
   let current = String(url);
   const max = 5;
   for (let i = 0; i <= max; i++) {
-    await assertOutboundUrlResolved(current, opts);
+    await assertOutboundUrlResolved(current, i === 0 ? opts : { ...opts, anyHost: true });
     const res = await fetchImpl(current, { ...init, redirect: "manual" });
     if (res.status >= 300 && res.status < 400 && res.headers && res.headers.get("location")) {
       if (init.redirect === "manual") return res;

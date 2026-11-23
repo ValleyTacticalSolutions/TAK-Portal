@@ -71,6 +71,23 @@ settings.get = (k, fb) => (k in conf ? conf[k] : fb);
   await g.guardedAxios(fakeAxios).get("https://api.github.com/x");
   assert.strictEqual(calls.length, 1);
 
+  // redirect hops may land on an unlisted CDN/S3 host, but never on a blocked range
+  {
+    const seen = [];
+    const impl = async (u) => {
+      seen.push(u);
+      if (seen.length === 1) return { status: 302, headers: new Map([["location", "https://cdn-bucket.s3.amazonaws.com/p.apk"]]) };
+      return { status: 200, headers: new Map() };
+    };
+    const r = await g.guardedFetch("https://tak.gov/p.apk", {}, { fetchImpl: impl });
+    assert.strictEqual(r.status, 200);
+    assert.strictEqual(seen[1], "https://cdn-bucket.s3.amazonaws.com/p.apk");
+    let n = 0;
+    const bad = async () => (++n === 1 ? { status: 302, headers: new Map([["location", "http://169.254.169.254/x"]]) } : { status: 200, headers: new Map() });
+    await assert.rejects(g.guardedFetch("https://tak.gov/p.apk", {}, { fetchImpl: bad }), /blocked/);
+    await assert.rejects(g.guardedFetch("https://cdn-bucket.s3.amazonaws.com/p.apk", {}, { fetchImpl: impl }), /not a configured host/);
+  }
+
   // every outbound caller is routed through the guard
   const root = path.join(__dirname, "..");
   for (const f of [
