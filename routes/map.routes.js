@@ -716,6 +716,11 @@ router.get("/missions/:missionName", async (req, res) => {
 });
 
 /** Mission CoT geometry as GeoJSON (read-only). */
+// Mission passwords come in a header, never the URL (they end up in logs/history).
+function missionPasswordFromHeader(req) {
+  return String(req.get("x-mission-password") || "").trim();
+}
+
 router.get("/missions/:missionName/geojson", async (req, res) => {
   try {
     const authUser = req.authentikUser || null;
@@ -728,7 +733,8 @@ router.get("/missions/:missionName/geojson", async (req, res) => {
     const includeAttachments = String(req.query.attachments || "1") !== "0";
     const refresh = String(req.query.refresh || "") === "1";
     const queryParams = {};
-    if (req.query.password) queryParams.password = String(req.query.password);
+    const missionPassword = missionPasswordFromHeader(req);
+    if (missionPassword) queryParams.password = missionPassword;
 
     if (String(req.query.debug || "") === "decor") {
       const audit = await missionGeo.auditMissionShapeDecor(missionName, {
@@ -783,7 +789,8 @@ router.get("/missions/:missionName/cot-raw", async (req, res) => {
     const uid = String(req.query.uid || "").trim();
     if (!uid) return res.status(400).json({ error: "Missing uid" });
     const queryParams = {};
-    if (req.query.password) queryParams.password = String(req.query.password);
+    const missionPassword = missionPasswordFromHeader(req);
+    if (missionPassword) queryParams.password = missionPassword;
     const raw = await missionGeo.getMissionCotRaw(missionName, uid, { queryParams });
     res.setHeader("Cache-Control", "no-cache");
     res.type("application/xml");
@@ -813,7 +820,8 @@ router.get("/missions/:missionName/layers", async (req, res) => {
     );
     const refresh = String(req.query.refresh || "") === "1";
     const queryParams = {};
-    if (req.query.password) queryParams.password = String(req.query.password);
+    const missionPassword = missionPasswordFromHeader(req);
+    if (missionPassword) queryParams.password = missionPassword;
 
     const layers = await missionGeo.getMissionLayerTree(missionName, {
       queryParams,
