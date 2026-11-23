@@ -2498,7 +2498,10 @@ router.get("/admin/mou/compliance", requireMouEnabled, requireMouPermission, (re
 function sendPlainError(res, status, message) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.type("text/plain");
-  return res.status(status).send(String(message == null ? "" : message));
+  // Fixed text per status: the caller's message (which can echo request input) is not sent.
+  void message;
+  const text = status === 404 ? "Not found." : status === 403 ? "Forbidden." : "Request could not be completed.";
+  return res.status(status).send(text);
 }
 
 function clientSafeErrorMessage(message) {
