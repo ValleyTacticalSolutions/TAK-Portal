@@ -1984,7 +1984,7 @@ router.get("/admin/mou/archive/:archiveId/view", requireMouEnabled, requireMouPe
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     return res.send(out.html || "<p>Signed document not found.</p>");
   } catch (err) {
-    return res.status(404).send(err?.message || "Archived document not found.");
+    return sendPlainError(res, 404, err?.message || "Archived document not found.");
   }
 });
 
@@ -2001,7 +2001,7 @@ router.get("/admin/mou/archive/:archiveId/pdf", requireMouEnabled, requireMouPer
     );
     return res.send(pdf.buffer);
   } catch (err) {
-    return res.status(404).send(err?.message || "Archived signed PDF not found.");
+    return sendPlainError(res, 404, err?.message || "Archived signed PDF not found.");
   }
 });
 
@@ -2034,7 +2034,7 @@ router.get("/admin/mou/archive/:archiveId/document", requireMouEnabled, requireM
     }
     return res.send(out.html);
   } catch (err) {
-    return res.status(404).send(err?.message || "Archived document not found.");
+    return sendPlainError(res, 404, err?.message || "Archived document not found.");
   }
 });
 
@@ -2494,6 +2494,13 @@ router.get("/admin/mou/compliance", requireMouEnabled, requireMouPermission, (re
  * Only a short single-line message reaches the browser; stack frames, file paths and
  * multi-line details stay in the server log.
  */
+/** Error text is sent as text/plain so a message that echoes request input can never render as HTML. */
+function sendPlainError(res, status, message) {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.type("text/plain");
+  return res.status(status).send(String(message == null ? "" : message));
+}
+
 function clientSafeErrorMessage(message) {
   const m = String(message || "");
   if (m.length > 200 || /\n|\bat\s+\S+\s+\(|[\\/][\w.-]+\.(js|ts|ejs)\b|node_modules/i.test(m)) {
@@ -2606,7 +2613,7 @@ router.get("/request-access/mou/:token/file", requireMouEnabled, (req, res) => {
     }
     return res.send(content.html);
   } catch (err) {
-    return res.status(404).send(err?.message || "Not found");
+    return sendPlainError(res, 404, err?.message || "Not found");
   }
 });
 
@@ -2748,7 +2755,7 @@ router.get(
       );
       return res.send(pdf.buffer);
     } catch (err) {
-      return res.status(404).send(err?.message || "Not found");
+      return sendPlainError(res, 404, err?.message || "Not found");
     }
   }
 );
