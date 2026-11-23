@@ -32,6 +32,7 @@ const https = require("https");
 const axios = require("axios");
 const { getBool, getInt, getString } = require("./env");
 const { attachCookieStore, getSharedTakCookieStore } = require("./takHttpSession");
+const { guardAxios, hostOf } = require("./outboundUrl");
 
 /** Full cert catalogs can exceed the default 5s Marti axios timeout on busy servers. */
 const DEFAULT_CERT_LIST_TIMEOUT_MS = 60_000;
@@ -313,6 +314,10 @@ function createTakAxiosClient(options = {}) {
     baseURL: options.baseURL !== undefined ? options.baseURL : getTakBaseUrl(),
     httpsAgent,
     timeout: typeof options.timeout === "number" ? options.timeout : 5000,
+  });
+  guardAxios(client, {
+    builtin: false,
+    allowHosts: () => (options.baseURL ? [hostOf(options.baseURL)] : []),
   });
 
   const shareCookies = options.allowInsecureServer !== true;

@@ -27,6 +27,7 @@ const axios = require("axios");
 const { URL } = require("url");
 const { getBool, getString } = require("./env");
 const { attachCookieStore, getSharedTakCookieStore } = require("./takHttpSession");
+const { guardAxios } = require("./outboundUrl");
 
 function resolvePathMaybe(p) {
   const v = String(p || "").trim();
@@ -133,6 +134,7 @@ function buildTakAxios() {
     maxRedirects: 0,
     validateStatus: (s) => s >= 200 && s < 500,
   });
+  guardAxios(client, { builtin: false });
 
   attachCookieStore(client, getSharedTakCookieStore());
 

@@ -7,6 +7,7 @@
  */
 
 const fs = require("fs");
+const { guardedFetch } = require("./outboundUrl");
 const path = require("path");
 const readline = require("readline");
 const zlib = require("zlib");
@@ -801,7 +802,7 @@ function createOpenAddressesService(options = {}) {
       if (typeof fetch !== "function") {
         return Promise.reject(new Error("fetch is not available"));
       }
-      return fetch(url, init);
+      return guardedFetch(url, init);
     };
   const getTokenFn = options.getToken || getToken;
 

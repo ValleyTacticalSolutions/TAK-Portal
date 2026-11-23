@@ -1,5 +1,6 @@
 require("dotenv").config({ quiet: true });
 const express = require("express");
+const { guardedAxios } = require("./services/outboundUrl");
 const path = require("path");
 const { resolveInside } = require("./services/safePath");
 const fs = require("fs");
@@ -1509,7 +1510,7 @@ app.post("/lookup", async (req, res) => {
       params.append("secret", hcaptchaSecretKey);
       params.append("response", token);
 
-      const verifyResp = await axios.post(
+      const verifyResp = await guardedAxios(axios).post(
         "https://hcaptcha.com/siteverify",
         params.toString(),
         { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
@@ -1723,7 +1724,7 @@ app.post("/request-access", async (req, res) => {
       params.append("secret", hcaptchaSecretKey);
       params.append("response", token);
 
-      const verifyResp = await axios.post("https://hcaptcha.com/siteverify", params.toString(), {
+      const verifyResp = await guardedAxios(axios).post("https://hcaptcha.com/siteverify", params.toString(), {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
       });
 

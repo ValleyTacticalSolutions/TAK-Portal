@@ -7,6 +7,7 @@ const crypto = require("crypto");
  */
 
 const fs = require("fs");
+const { guardedFetch, guardedAxios } = require("./outboundUrl");
 const path = require("path");
 const { resolveInside } = require("./safePath");
 const { pipeline, Readable } = require("stream");
@@ -638,7 +639,7 @@ async function takGovFetchStreamToFile(url, accessToken, destFilePath, options =
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, {
+    const response = await guardedFetch(url, {
       dispatcher: new Agent({ allowH2: true }),
       signal: controller.signal,
       headers: {
@@ -1040,7 +1041,7 @@ async function addPluginFromUrl(downloadUrl, meta = {}) {
 
   let response;
   try {
-    response = await axios.get(downloadUrl, {
+    response = await guardedAxios(axios).get(downloadUrl, {
       responseType: "arraybuffer",
       timeout: 120000,
       maxContentLength: 500 * 1024 * 1024, // 500 MB

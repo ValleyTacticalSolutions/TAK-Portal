@@ -9,6 +9,7 @@
  */
 
 const pluginsSvc = require("./plugins.service");
+const { guardedFetch } = require("./outboundUrl");
 
 const GITHUB_API = "https://api.github.com";
 const GITHUB_RAW = "https://raw.githubusercontent.com";
@@ -98,7 +99,7 @@ async function githubGetJson(path) {
     "X-GitHub-Api-Version": "2022-11-28",
   };
 
-  const res = await fetch(`${GITHUB_API}${path}`, { headers });
+  const res = await guardedFetch(`${GITHUB_API}${path}`, { headers });
   const text = await res.text();
   let data = {};
   try {
@@ -212,7 +213,7 @@ async function discoverPackageName(folderName) {
   const fallback = folderToPackageNameGuess(folderName);
   try {
     const url = `${GITHUB_RAW}/${MONOREPO}/main/plugins/${encodeURIComponent(folderName)}/app/build.gradle`;
-    const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
+    const res = await guardedFetch(url, { headers: { "User-Agent": USER_AGENT } });
     if (!res.ok) return fallback;
     const text = await res.text();
     const m = text.match(/namespace\s+['"]([^'"]+)['"]/);

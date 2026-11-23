@@ -2,6 +2,8 @@
  * Resolve the latest standalone TAK Beacon app APK (not the ATAK plugin) from GitHub Releases.
  */
 
+const { guardedFetch } = require("./outboundUrl");
+
 const GITHUB_API = "https://api.github.com";
 const OWNER = "cfd2474";
 const REPO = "TAK_Beacon";
@@ -58,7 +60,7 @@ function pathBasename(pathname) {
 }
 
 async function fetchLatestRelease() {
-  const res = await fetch(
+  const res = await guardedFetch(
     `${GITHUB_API}/repos/${OWNER}/${REPO}/releases/latest`,
     {
       headers: {
