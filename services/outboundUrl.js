@@ -112,6 +112,51 @@ function isBlockedIp(ip) {
   return false;
 }
 
+/** True for loopback / RFC1918 / CGNAT / unique-local addresses, plus anything isBlockedIp blocks. */
+function isPrivateOrBlockedIp(ip) {
+  if (isBlockedIp(ip)) return true;
+  let addr = normHost(ip);
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(addr);
+  if (mapped) addr = mapped[1];
+  if (net.isIPv4(addr)) {
+    const [a, b] = addr.split(".").map(Number);
+    return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+  }
+  if (net.isIPv6(addr)) {
+    return addr === "::1" || /^::ffff:/.test(addr) || ((parseInt(addr.split(":")[0] || "0", 16) & 0xfe00) === 0xfc00);
+  }
+  return false;
+}
+
+/** Redirect hops: https only, and never a loopback/private/link-local literal or localhost name. */
+function assertRedirectHop(urlLike, opts = {}) {
+  const u = assertOutboundUrl(urlLike, { ...opts, anyHost: true });
+  const host = normHost(u.hostname);
+  const configured = getConfiguredHosts();
+  if (configured.has(host) || (opts.allowHosts || []).map(normHost).includes(host)) return u;
+  if (u.protocol !== "https:") throw new OutboundUrlError("Redirect target must be https.");
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".internal") || host.endsWith(".local") || isPrivateOrBlockedIp(host)) {
+    throw new OutboundUrlError("Redirect target points at a blocked address range.");
+  }
+  return u;
+}
+
+/** dns.lookup replacement for redirect hops: refuses names that resolve to private/blocked addresses. */
+function guardedLookup(hostname, options, cb) {
+  if (typeof options === "function") { cb = options; options = {}; }
+  const host = normHost(hostname);
+  const configured = getConfiguredHosts();
+  dns.lookup(hostname, { ...(options || {}), all: true }, (err, addrs) => {
+    if (err) return cb(err);
+    const list = Array.isArray(addrs) ? addrs : [{ address: addrs, family: 4 }];
+    if (!configured.has(host) && list.some((a) => isPrivateOrBlockedIp(a.address))) {
+      return cb(new OutboundUrlError("Outbound host resolves to a blocked address range."));
+    }
+    if (options && options.all) return cb(null, list);
+    cb(null, list[0].address, list[0].family);
+  });
+}
+
 function hostMatches(host, allowed) {
   for (const a of allowed) {
     const n = normHost(a);
@@ -196,9 +241,10 @@ function guardAxios(client, opts = {}) {
     const o = { ...opts, allowHosts: extra || [] };
     await assertOutboundUrlResolved(axiosUri, o);
     if (config.maxRedirects !== 0) {
+      if (!config.lookup) config.lookup = guardedLookup;
       const prev = config.beforeRedirect;
       config.beforeRedirect = (options, resp) => {
-        assertOutboundUrl(`${options.protocol}//${options.hostname || options.host}${options.path || ""}`, { ...o, anyHost: true });
+        assertRedirectHop(`${options.protocol}//${options.hostname || options.host}${options.path || ""}`, o);
         if (typeof prev === "function") prev(options, resp);
       };
     }
@@ -215,9 +261,10 @@ function guardedAxios(axiosLib, opts = {}) {
   const withRedirectCheck = (cfg) => {
     const c = { ...(cfg || {}) };
     if (c.maxRedirects !== 0) {
+      if (!c.lookup) c.lookup = guardedLookup;
       const prev = c.beforeRedirect;
       c.beforeRedirect = (options, resp) => {
-        assertOutboundUrl(`${options.protocol}//${options.hostname || options.host}${options.path || ""}`, { ...opts, anyHost: true });
+        assertRedirectHop(`${options.protocol}//${options.hostname || options.host}${options.path || ""}`, opts);
         if (typeof prev === "function") prev(options, resp);
       };
     }
@@ -241,7 +288,16 @@ async function guardedFetch(url, init = {}, opts = {}) {
   let current = String(url);
   const max = 5;
   for (let i = 0; i <= max; i++) {
-    await assertOutboundUrlResolved(current, i === 0 ? opts : { ...opts, anyHost: true });
+    if (i === 0) await assertOutboundUrlResolved(current, opts);
+    else {
+      const hop = assertRedirectHop(current, opts);
+      const h = normHost(hop.hostname);
+      if (!net.isIP(h) && !getConfiguredHosts().has(h)) {
+        let addrs = [];
+        try { addrs = await dns.promises.lookup(h, { all: true }); } catch (_) { /* client reports DNS error */ }
+        if (addrs.some((a) => isPrivateOrBlockedIp(a.address))) throw new OutboundUrlError("Outbound host resolves to a blocked address range.");
+      }
+    }
     const res = await fetchImpl(current, { ...init, redirect: "manual" });
     if (res.status >= 300 && res.status < 400 && res.headers && res.headers.get("location")) {
       if (init.redirect === "manual") return res;
@@ -258,6 +314,9 @@ module.exports = {
   BUILTIN_HOSTS,
   getConfiguredHosts,
   isBlockedIp,
+  isPrivateOrBlockedIp,
+  assertRedirectHop,
+  guardedLookup,
   assertOutboundUrl,
   assertOutboundUrlResolved,
   guardAxios,

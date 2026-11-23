@@ -88,6 +88,22 @@ settings.get = (k, fb) => (k in conf ? conf[k] : fb);
     await assert.rejects(g.guardedFetch("https://cdn-bucket.s3.amazonaws.com/p.apk", {}, { fetchImpl: impl }), /not a configured host/);
   }
 
+  // redirect hops: https only, no private/loopback/link-local, DNS-resolved names checked too
+  for (const bad of ["http://cdn.example.com/x", "https://127.0.0.1/x", "https://10.1.2.3/x", "https://192.168.0.5/x", "https://localhost/x", "https://169.254.169.254/x"]) {
+    assert.throws(() => g.assertRedirectHop(bad), /https|blocked/, bad);
+  }
+  g.assertRedirectHop("https://cdn-bucket.s3.amazonaws.com/p.apk");
+  {
+    const dnsMod = require("dns");
+    const origLookup = dnsMod.promises.lookup;
+    dnsMod.promises.lookup = async () => [{ address: "169.254.169.254", family: 4 }];
+    let n = 0;
+    const viaDns = async () => (++n === 1 ? { status: 302, headers: new Map([["location", "https://rebind.example.net/x"]]) } : { status: 200, headers: new Map() });
+    await assert.rejects(g.guardedFetch("https://tak.gov/p.apk", {}, { fetchImpl: viaDns }), /blocked/);
+    dnsMod.promises.lookup = origLookup;
+  }
+  assert.strictEqual(typeof g.guardedLookup, "function");
+
   // every outbound caller is routed through the guard
   const root = path.join(__dirname, "..");
   for (const f of [
