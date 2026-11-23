@@ -3,6 +3,7 @@
  */
 
 const fs = require("fs");
+const { guardedFetch } = require("./outboundUrl");
 const path = require("path");
 const PDFDocument = require("pdfkit");
 const Jimp = require("./jimpCompat");
@@ -320,7 +321,7 @@ async function fetchMapTile(layerId, z, x, y) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 4000);
   try {
-    const res = await fetch(url, {
+    const res = await guardedFetch(url, {
       signal: ctrl.signal,
       headers: {
         Accept: "image/png,image/jpeg",

@@ -2,6 +2,7 @@
  * SMS via Twilio or Brevo (settings: SMS_PROVIDER).
  */
 const axios = require("axios");
+const { guardedAxios } = require("./outboundUrl");
 const settingsSvc = require("./settings.service");
 
 function isSmsConfigured() {
@@ -63,7 +64,7 @@ async function sendTwilio(cfg, toE164, bodyText) {
   params.set("To", toE164);
   params.set("From", from);
   params.set("Body", bodyText);
-  const res = await axios.post(url, params.toString(), {
+  const res = await guardedAxios(axios).post(url, params.toString(), {
     headers: {
       Authorization: `Basic ${auth}`,
       "Content-Type": "application/x-www-form-urlencoded",
@@ -82,7 +83,7 @@ async function sendTwilio(cfg, toE164, bodyText) {
 async function sendBrevo(cfg, toE164, bodyText) {
   const key = String(cfg.SMS_BREVO_API_KEY || "").trim();
   const sender = String(cfg.SMS_BREVO_SENDER || "").trim().slice(0, 11);
-  const res = await axios.post(
+  const res = await guardedAxios(axios).post(
     "https://api.brevo.com/v3/transactionalSMS/sms",
     {
       sender,

@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const { guardedAxios } = require("./outboundUrl");
 const path = require("path");
 const crypto = require("crypto");
 const axios = require("axios");
@@ -557,7 +558,7 @@ function matchCatalogPlugin(hostPlugin, catalogPlugins) {
 async function fetchCatalog() {
   const url = defaultCatalogUrl();
   try {
-    const response = await axios.get(url, {
+    const response = await guardedAxios(axios).get(url, {
       timeout: 15000,
       headers: {
         Accept: "application/json",
@@ -2002,7 +2003,7 @@ async function remoteVersionForPlugin(plugin, now = Date.now(), refOverride) {
       const url =
         "https://raw.githubusercontent.com/" + gh.owner + "/" + gh.repo + "/" +
         encodeURIComponent(ref) + "/" + file;
-      const response = await axios.get(url, { timeout: 8000, headers: { "User-Agent": "TAK-Portal" }, responseType: "json" });
+      const response = await guardedAxios(axios).get(url, { timeout: 8000, headers: { "User-Agent": "TAK-Portal" }, responseType: "json" });
       const data = response.data;
       version = cleanPluginVersion(data && typeof data === "object" ? data.version : "");
       if (version) break;
@@ -2019,7 +2020,7 @@ async function remoteShaForPlugin(plugin) {
   if (gh) {
     try {
       const url = `https://api.github.com/repos/${gh.owner}/${gh.repo}/commits/${encodeURIComponent(plugin.ref)}`;
-      const response = await axios.get(url, { timeout: 10000, headers: githubHeaders() });
+      const response = await guardedAxios(axios).get(url, { timeout: 10000, headers: githubHeaders() });
       const sha = response.data && (response.data.sha || (response.data.commit && response.data.sha));
       if (sha) return String(sha);
     } catch (_) {

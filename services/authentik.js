@@ -2,6 +2,7 @@ const axios = require("axios");
 const http = require("http");
 const https = require("https");
 const { getString } = require("./env");
+const { guardAxios } = require("./outboundUrl");
 
 const agentOptions = {
   keepAlive: true,
@@ -14,6 +15,9 @@ const client = axios.create({
   httpAgent: new http.Agent(agentOptions),
   httpsAgent: new https.Agent(agentOptions),
 });
+// Registered before the baseURL interceptor below: axios runs request interceptors last-added-first,
+// so the guard sees the final URL.
+guardAxios(client, { builtin: false });
 
 client.interceptors.request.use((config) => {
   const AUTHENTIK_URL = getString("AUTHENTIK_URL", "");

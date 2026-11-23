@@ -6,6 +6,7 @@
  * Photon, Nominatim, and optional Geocodio (GEOCODIO_API_KEY).
  */
 const { getString } = require("./env");
+const { guardedFetch } = require("./outboundUrl");
 
 let openaddresses = require("./openaddresses.service");
 
@@ -53,7 +54,7 @@ function geocodioApiKey() {
 }
 
 function fetchJson(url, headers = {}) {
-  return fetch(url, {
+  return guardedFetch(url, {
     headers: {
       Accept: "application/json",
       "User-Agent": USER_AGENT,

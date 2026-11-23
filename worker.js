@@ -1,6 +1,7 @@
 require("dotenv").config({ quiet: true });
 
 const db = require("./services/db");
+const { guardedAxios } = require("./services/outboundUrl");
 const settingsSvc = require("./services/settings.service");
 const jsonImport = require("./services/jsonImport.service");
 const directorySync = require("./services/directorySync.service");
@@ -22,7 +23,7 @@ async function writeAppUpdateMeta() {
   try {
     const repo = process.env.GITHUB_REPO || "ValleyTacticalSolutions/TAK-Portal";
     const url = `https://api.github.com/repos/${repo}/releases/latest`;
-    const response = await axios.get(url, {
+    const response = await guardedAxios(axios).get(url, {
       timeout: 5000,
       headers: {
         Accept: "application/vnd.github+json",
