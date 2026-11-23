@@ -100,6 +100,17 @@ function stripTakPrefix(name) {
   return n.toLowerCase().startsWith("tak_") ? n.slice(4) : n;
 }
 
+// Portal auth reads the X-Authentik-Groups header by splitting it on these characters
+// (Authentik joins group names with "|"). A group name containing one would be read as
+// several groups, so "tak_x|<admin group>" would grant admin. Refuse them in new names.
+const GROUP_NAME_SEPARATORS_RE = /[;|,]/;
+
+function assertGroupNameHasNoSeparator(name) {
+  if (GROUP_NAME_SEPARATORS_RE.test(String(name || ""))) {
+    throw new Error('Group names cannot contain ";", "|" or ",".');
+  }
+}
+
 function isAgencyAdminGroupName(name) {
   return /-AgencyAdmin$/i.test(String(name || "").trim());
 }
@@ -647,6 +658,7 @@ async function createGroup(name, opts = {}) {
 
   const n = resolveAuthentikGroupName(raw);
   if (!n) throw new Error("Group name is required");
+  assertGroupNameHasNoSeparator(n);
 
   const payload = { name: n };
 
@@ -741,6 +753,9 @@ async function renameGroup(groupId, newName, opts = {}) {
   // Need old name so we can update templates that reference it
   const oldName = String(current?.name || "").trim();
   if (!oldName) throw new Error("Could not determine existing group name");
+  // Only a real name change is checked, so editing the description/type of an existing
+  // group that already has one of these characters keeps working.
+  if (n !== oldName) assertGroupNameHasNoSeparator(n);
 
   // Rename (and update attributes) in Authentik
   const payload = { name: n };
@@ -1637,6 +1652,7 @@ async function collectGroupsExportRows(groups, { authUser, agencyAbbreviation, a
 }
 
 module.exports = {
+  assertGroupNameHasNoSeparator,
   getAllGroups,
   getGroupsForAuthUser,
   searchGroupsForAuthUser,
