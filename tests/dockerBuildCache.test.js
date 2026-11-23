@@ -40,3 +40,17 @@ assert.match(dockerignore, /public\/dist/);
 assert.match(dockerignore, /client\/map\/ported/);
 
 console.log("dockerBuildCache.test.js: ok");
+
+// Security hardening (wave 6): pinned base, patched packages, no npm in the runtime image.
+{
+  const froms = dockerfile.split("\n").filter((l) => l.startsWith("FROM "));
+  assert.strictEqual(froms.length, 3);
+  for (const l of froms) assert.match(l, /^FROM node:22-alpine@sha256:[0-9a-f]{64}( AS \S+)?$/, `pinned by digest: ${l}`);
+  const finalStage = dockerfile.slice(dockerfile.lastIndexOf("FROM "));
+  assert.match(finalStage, /apk upgrade --no-cache/);
+  assert.match(finalStage, /rm -rf [^\n]*node_modules\/npm/);
+  assert.match(finalStage, /node_modules\/corepack/);
+  const dependabot = fs.readFileSync(path.join(root, ".github", "dependabot.yml"), "utf8");
+  assert.match(dependabot, /package-ecosystem: docker/);
+  assert.match(dependabot, /package-ecosystem: github-actions/);
+}
