@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 ## Version History
 
 ### v2.0.41 - IN PROGRESS
+🐛 `Bug Fix` - Backend Change - Security hardening (CodeQL wave 10): MOU and Mutual Aid plain-text error responses use fixed messages, and the map video player reads its stream URL from the marker record and only accepts http(s) (CodeQL js/xss-through-exception, js/xss-through-dom, ops #109)<br>
 🐛 `Bug Fix` - Backend Change - Security hardening (CodeQL wave 1): remote SSH commands use one shared shell-quoting helper, IDs and temp names use crypto randomness instead of Math.random, the QR cache key uses scrypt, log messages use fixed format strings, request-driven CSV loops and object keys are bounded, and sign-link errors no longer expose internal details<br>
 🐛 `Bug Fix` - Backend Change - Docker image hardening: base image pinned by digest, Alpine packages upgraded at build, npm/corepack removed from the runtime image, and Dependabot now watches Docker and GitHub Actions<br>
 🔒 `Security` - Backend Change - All outbound HTTP requests (TAK Server, Authentik, GitHub, SMS, geocoding, plugin downloads) now go through a new URL guard: http/https only, host must be a configured or built-in service, and link-local/metadata ranges (169.254.0.0/16, fe80::/10, fd00::/8) are refused (redirects to CDN hosts are allowed, but never into those ranges); plugin download URLs from the browser can only point at those hosts (CodeQL `js/request-forgery`, ops #88)<br>

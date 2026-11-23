@@ -59,6 +59,10 @@ function statusForError(err, fallback = 400) {
   return fallback;
 }
 
+function fixedErrorText(status) {
+  return status === 404 ? "Not found." : status === 403 ? "Forbidden." : "Unable to download the QR code.";
+}
+
 router.get("/", async (req, res) => {
   try {
     const out = await mutualAid.listForUserWithCertStatus(req.authentikUser || null);
@@ -312,7 +316,7 @@ router.get("/:id/qr/download", async (req, res) => {
   } catch (err) {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.type("text/plain");
-    res.status(statusForError(err)).send(String(toErrorPayload(err)));
+    res.status(statusForError(err)).send(fixedErrorText(statusForError(err)));
   }
 });
 

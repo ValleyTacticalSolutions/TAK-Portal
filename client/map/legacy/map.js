@@ -6567,11 +6567,21 @@
     });
   }
 
+  function safeHttpVideoUrl(raw) {
+    try {
+      const parsed = new URL(String(raw || "").trim());
+      return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : "";
+    } catch (_) {
+      return "";
+    }
+  }
+
   function wireDetailVideoPlayer(bodyEl, uid) {
     if (!bodyEl) return;
     const wrap = bodyEl.querySelector('[data-detail-key="video"]');
     if (!wrap) return;
-    const url = String(wrap.getAttribute("data-video-url") || "").trim();
+    // Read the URL from the marker record, not from DOM text, and only accept http(s).
+    const url = safeHttpVideoUrl(markerVideoUrl(getMarkerRecord(uid)));
     const videoEl = wrap.querySelector("video.map-detail-video");
     if (!url || !videoEl) return;
 
