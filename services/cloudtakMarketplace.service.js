@@ -1901,6 +1901,7 @@ async function scanHost() {
       dest: host.dest,
       kind: host.kind,
       gitHead: host.gitHead || "",
+      version: host.version || "",
       gitRemote: host.gitRemote || "",
       onDisk: true,
       inWebPlugins: false,
@@ -2291,9 +2292,14 @@ function buildUiPlugins(options = {}) {
   const plugins = [...byId.values()]
     .map((row) => {
       const sha = shaById[row.id];
+      // A cached version only describes the commit it was resolved for. After a
+      // reinstall/update the installed sha changes, so a stale cached version
+      // (e.g. 0.1.4-ccso) must not stick (#177); enrichUpdateShas re-resolves it.
+      const currentSha = installedShaFromRow(row, installedRec.plugins);
+      const cachedVersionFresh = !!(sha && sha.installedSha && currentSha && sha.installedSha === currentSha);
       const installedVersion =
         cleanPluginVersion(row.scan && row.scan.version) ||
-        cleanPluginVersion(sha && sha.installedVersion);
+        (cachedVersionFresh ? cleanPluginVersion(sha.installedVersion) : "");
       const base = sha
         ? {
             ...row,
