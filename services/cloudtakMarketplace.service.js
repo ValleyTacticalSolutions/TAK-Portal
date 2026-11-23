@@ -1542,6 +1542,10 @@ $(docker ps --format '{{.Names}}' 2>/dev/null || true)
 CONTAINERS
 fi
 printf 'SCAN_END\\n'
+# Drop errexit before exiting: under bash -lc a failing ~/.bash_logout (Ubuntu's
+# clear_console -q over a PTY) would otherwise turn this exit 0 into exit 1.
+set +e
+exit 0
 `.trim();
 }
 
@@ -1805,9 +1809,12 @@ ${pluginPrivilegeBash({ composeService: "api" })}
 ensure_marketplace_sudoers || true
 install_marketplace_helper || true
 ${applyBody}
+set +e
+exit 0
 `.trim();
     const write = await ssh.runCommand(`bash -lc ${ssh.shellQuote(remote)}`, 90000);
-    if (!write.ok || !/APPLY_OK/.test(write.stdout || "")) {
+    const applied = /APPLY_OK/.test(write.stdout || "") && (write.ok || ssh.completedRun(write));
+    if (!applied) {
       const detail = String(write.message || write.stderr || write.stdout || "Caddy update failed.")
         .split(/\r?\n/)
         .map((l) => l.trim())
@@ -1874,7 +1881,10 @@ async function scanHost() {
     return err;
   }
   const result = await ssh.runCommand(`bash -lc ${ssh.shellQuote(scanRemoteScript(loc.path, catalog.plugins))}`, 60000);
-  if (!result.ok) {
+  // SCAN_END is the script's last output, so trust it when the run reached an exit
+  // code even if a login-shell logout step made that code non-zero.
+  const scanFinished = /^SCAN_END$/m.test(String(result.stdout || "")) && ssh.completedRun(result);
+  if (!result.ok && !scanFinished) {
     const prev = store.readScanCache();
     const err = {
       ok: false,

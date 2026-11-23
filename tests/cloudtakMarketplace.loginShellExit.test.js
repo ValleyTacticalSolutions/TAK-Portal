@@ -71,6 +71,28 @@ const bash = resolveBash();
   fs.rmSync(base, { recursive: true, force: true });
 }
 
+// --- host scan (set -eu, bash -lc) survives a failing ~/.bash_logout ---
+
+{
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "ctak-scan-logout-"));
+  const home = path.join(base, "home");
+  const ct = path.join(base, "CloudTAK");
+  writeFile(path.join(home, ".bash_profile"), "");
+  writeFile(path.join(home, ".bash_logout"), "false\n");
+  fs.mkdirSync(path.join(ct, "api"), { recursive: true });
+  fs.mkdirSync(path.join(ct, "app", "plugins"), { recursive: true });
+
+  const script = marketplace.scanRemoteScript(toBashPath(ct), []);
+  const r = spawnSync(bash, ["-lc", script], { encoding: "utf8", env: { ...process.env, HOME: home } });
+  assert.match(r.stdout, /^SCAN_END$/m, r.stderr || r.stdout);
+  assert.strictEqual(r.status, 0, "scan must exit 0 under a login shell with a failing logout");
+  fs.rmSync(base, { recursive: true, force: true });
+
+  const scanSrc = marketplace.scanHost.toString();
+  assert.match(scanSrc, /SCAN_END/, "scanHost must trust the SCAN_END marker");
+  assert.match(scanSrc, /completedRun/, "scanHost must require a completed run before trusting it");
+}
+
 // --- detect script ends by dropping errexit before exit 0 ---
 
 {
