@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 ## Version History
 
 ### v2.0.41 - IN PROGRESS
+🐛 `Bug Fix` - Backend Change - CloudTAK Marketplace host scan now waits its 5-minute interval after a failed scan too (SSH error or CloudTAK path not found) instead of retrying every 15-30 seconds, which kept an idle host's CPU busy with SSH logins and docker work (#165)<br>
 🐛 `Bug Fix` - Backend Change - Security hardening (CodeQL wave 10): MOU and Mutual Aid plain-text error responses use fixed messages, and the map video player reads its stream URL from the marker record and only accepts http(s) (CodeQL js/xss-through-exception, js/xss-through-dom, ops #109)<br>
 🐛 `Bug Fix` - Backend Change - Security hardening (CodeQL wave 1): remote SSH commands use one shared shell-quoting helper, IDs and temp names use crypto randomness instead of Math.random, the QR cache key uses scrypt, log messages use fixed format strings, request-driven CSV loops and object keys are bounded, and sign-link errors no longer expose internal details<br>
 🐛 `Bug Fix` - Backend Change - Docker image hardening: base image pinned by digest, Alpine packages upgraded at build, npm/corepack removed from the runtime image, and Dependabot now watches Docker and GitHub Actions<br>

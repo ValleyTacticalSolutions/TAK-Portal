@@ -1843,7 +1843,17 @@ ${applyBody}
   };
 }
 
+// Stamp every scan attempt (not only successes). Failed scans (SSH down, path not
+// found) used to leave lastScanAt unset, so workerBackground retried every 15-30s
+// with several SSH sessions each time instead of waiting SCAN_INTERVAL_MS (#165).
+function markScanAttempt() {
+  const state = store.readNotifyState();
+  state.lastScanAt = Date.now();
+  store.writeNotifyState(state);
+}
+
 async function scanHost() {
+  markScanAttempt();
   const catalog = loadCatalog();
   const loc = await ensureCheckoutPath();
   if (!loc.ok) {
@@ -1939,9 +1949,7 @@ async function scanHost() {
   if (pruned.length) {
     cache.prunedInstalled = pruned;
   }
-  const state = store.readNotifyState();
-  state.lastScanAt = Date.now();
-  store.writeNotifyState(state);
+  markScanAttempt();
   return cache;
 }
 
