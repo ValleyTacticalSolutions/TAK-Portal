@@ -976,12 +976,10 @@ install_marketplace_helper() {
   marketplace_should_auto_deploy_helper || return 1
   if marketplace_helper_available; then
     if [ -f "\${CTAK_MARKETPLACE_HELPER_SRC:-}" ]; then
-      if "$CTAK_PRIV" -n true >/dev/null 2>&1; then
-        if "$CTAK_PRIV" -n cp "$CTAK_MARKETPLACE_HELPER_SRC" "$CTAK_MARKETPLACE_HELPER" 2>/dev/null \\
-          && "$CTAK_PRIV" -n chmod 755 "$CTAK_MARKETPLACE_HELPER" 2>/dev/null; then
-          echo "elevate: refreshed marketplace helper from staged source"
-          return 0
-        fi
+      if "$CTAK_PRIV" -n cp "$CTAK_MARKETPLACE_HELPER_SRC" "$CTAK_MARKETPLACE_HELPER" 2>/dev/null \\
+        && "$CTAK_PRIV" -n chmod 755 "$CTAK_MARKETPLACE_HELPER" 2>/dev/null; then
+        echo "elevate: refreshed marketplace helper from staged source"
+        return 0
       fi
       if [ -n "\${CTAK_SUDO_PASS:-}" ] && printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' true >/dev/null 2>&1; then
         if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' cp "$CTAK_MARKETPLACE_HELPER_SRC" "$CTAK_MARKETPLACE_HELPER" >/dev/null 2>&1 \\
@@ -1002,12 +1000,10 @@ install_marketplace_helper() {
   echo "elevate: auto-deploying marketplace helper for $(id -un) (infra-TAK; no Portal SSH handshake)"
 
   # Prefer leftover broad grant while it still exists, then stored password.
-  if "$CTAK_PRIV" -n true >/dev/null 2>&1; then
-    if "$CTAK_PRIV" -n bash "$script"; then
-      rm -f "$script" || true
-      echo "elevate: marketplace helper installed via passwordless $CTAK_PRIV"
-      marketplace_helper_available && return 0
-    fi
+  if "$CTAK_PRIV" -n bash "$script" 2>/dev/null; then
+    rm -f "$script" || true
+    echo "elevate: marketplace helper installed via passwordless $CTAK_PRIV"
+    marketplace_helper_available && return 0
   fi
   if [ -n "\${CTAK_SUDO_PASS:-}" ]; then
     if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' true >/dev/null 2>&1; then
@@ -1050,11 +1046,9 @@ install_marketplace_helper() {
     if [ "$ec" -eq 0 ] && [ -x "$CTAK_MARKETPLACE_HELPER" ]; then
       echo "elevate: marketplace helper binary present at $CTAK_MARKETPLACE_HELPER"
       if marketplace_helper_available; then rm -f "$script" || true; return 0; fi
-      if "$CTAK_PRIV" -n true >/dev/null 2>&1; then
-        if "$CTAK_PRIV" -n bash "$script"; then
-          rm -f "$script" || true
-          marketplace_helper_available && return 0
-        fi
+      if "$CTAK_PRIV" -n bash "$script" 2>/dev/null; then
+        rm -f "$script" || true
+        marketplace_helper_available && return 0
       fi
       if [ -n "\${CTAK_SUDO_PASS:-}" ] && printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' true >/dev/null 2>&1; then
         if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' bash "$script"; then
@@ -3469,11 +3463,17 @@ function pluginRuntimePrivilegeBash() {
     "}",
     "elevate_run() {",
     '  local cmd="$1"',
-    '  if "$CTAK_PRIV" -n true >/dev/null 2>&1; then',
+    "  local ec err",
+    '  err=$(mktemp /tmp/ctak-elevate.XXXXXX)',
+    "  # Run the real command with -n; no probe command, narrow grants refuse it.",
+    "  # Only the privilege tool's own refusal text falls through to the stored password.",
+    '  "$CTAK_PRIV" -n bash -lc "$cmd" 2>"$err" && ec=0 || ec=$?',
+    '  if [ "$ec" -eq 0 ] || ! grep -qE \'a password is required|a terminal is required to read the password|no tty present and no askpass\' "$err"; then',
+    '    cat "$err" >&2; rm -f "$err"',
     '    echo "elevate: $CTAK_PRIV -n"',
-    '    "$CTAK_PRIV" -n bash -lc "$cmd"',
-    "    return $?",
+    '    return "$ec"',
     "  fi",
+    '  rm -f "$err"',
     '  if [ -n "${CTAK_SUDO_PASS:-}" ]; then',
     '    if printf \'%s\\n\' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p \'\' true >/dev/null 2>&1; then',
     '      echo "elevate: $CTAK_PRIV -S stored password"',
