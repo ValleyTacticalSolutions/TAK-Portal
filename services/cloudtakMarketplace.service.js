@@ -640,8 +640,18 @@ async function probeSavedCheckout(ctPath) {
   ) {
     return _checkoutProbeCache.result;
   }
-  const result = await ssh.runCommand(`bash -lc ${ssh.shellQuote(ssh.probeCheckoutScript(ct))}`, 40000);
-  if (!result.ok) {
+  // Non-login shell: a login shell runs ~/.bash_logout, and a failing logout step
+  // (e.g. clear_console over a PTY) turned a good probe into exit 1.
+  const result = await ssh.runCommand(`bash -c ${ssh.shellQuote(ssh.probeCheckoutScript(ct))}`, 40000);
+  const lines = String(result.stdout || "")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const okLine = lines.find((l) => l.startsWith("CHECKOUT_OK"));
+  const badLine = lines.find((l) => l.startsWith("CHECKOUT_INVALID"));
+  // The probe prints its verdict as its last step, so a marker line on a run that
+  // reached an exit code is trusted even when that exit code is non-zero.
+  if (!result.ok && !((okLine || badLine) && ssh.completedRun(result))) {
     return {
       ok: false,
       valid: false,
@@ -651,12 +661,6 @@ async function probeSavedCheckout(ctPath) {
       sshError: true,
     };
   }
-  const lines = String(result.stdout || "")
-    .split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const okLine = lines.find((l) => l.startsWith("CHECKOUT_OK"));
-  const badLine = lines.find((l) => l.startsWith("CHECKOUT_INVALID"));
   if (okLine) {
     const runningMatch = okLine.match(/RUNNING_DIR=(\S+)/);
     const out = {

@@ -970,6 +970,9 @@ if [ -n "\$compose" ]; then
   fi
 fi
 printf 'DETECT_OK path=%s compose=%s service=%s\\n' "\$found" "\$compose" "\${svc:-api}"
+# See probeCheckoutScript: keep a failing ~/.bash_logout from poisoning the exit status.
+set +e
+exit 0
 `.trim();
 }
 
@@ -1006,6 +1009,9 @@ if command -v docker >/dev/null 2>&1; then
 \$(docker ps --format '{{.Names}}' 2>/dev/null || true)
 CONTAINERS
 fi
+# Result is decided; drop errexit so a failing ~/.bash_logout (e.g. clear_console
+# under a login shell) cannot turn a successful probe into exit 1.
+set +e
 if [ "\$reason" = "ok" ]; then
   if [ -n "\$running" ] && [ "\$running" != "\$CT" ] && [ "\$(cd "\$CT" 2>/dev/null && pwd -P)" != "\$(cd "\$running" 2>/dev/null && pwd -P)" ]; then
     printf 'CHECKOUT_OK path=%s RUNNING_DIR=%s\\n' "\$CT" "\$running"
@@ -1019,13 +1025,24 @@ exit 0
 `.trim();
 }
 
+/**
+ * True when the remote command actually ran to an exit code (not a connect
+ * failure, timeout or cancel). Used only to trust a script's own result marker.
+ */
+function completedRun(result) {
+  return !!result && !result.cancelled && Number.isInteger(result.exitCode);
+}
+
 async function detectCheckout() {
-  const result = await runCommand(`bash -lc ${shellQuote(detectScript())}`, 40000);
-  if (!result.ok) return result;
+  // Non-login shell: the script sets its own PATH (infra-TAK shims) and a login
+  // shell would run ~/.bash_logout, whose failure can poison the exit status.
+  const result = await runCommand(`bash -c ${shellQuote(detectScript())}`, 40000);
   const line = String(result.stdout || "")
     .split("\n")
     .map((s) => s.trim())
     .find((s) => s.startsWith("DETECT_OK"));
+  // A DETECT_OK line means the script finished; trust it even if exit != 0.
+  if (!result.ok && !(line && completedRun(result))) return result;
   if (!line) {
     return { ok: false, message: result.stdout || result.message || "Detect failed." };
   }
@@ -1064,7 +1081,7 @@ async function testConnection() {
   let detected = null;
   if (override) {
     const check = await runCommand(
-      `bash -lc ${shellQuote(probeCheckoutScript(override))}`,
+      `bash -c ${shellQuote(probeCheckoutScript(override))}`,
       40000
     );
     const out = String(check.stdout || "");
@@ -1150,6 +1167,7 @@ module.exports = {
   ctakCheckoutOkBash,
   detectScript,
   probeCheckoutScript,
+  completedRun,
   detectCheckout,
   testConnection,
   shellQuote,
