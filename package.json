@@ -53,7 +53,7 @@
     "geotiff": "^3.0.5",
     "geotiff-geokeys-to-proj4": "^2026.10.9",
     "jimp": "1.6.1",
-    "maplibre-gl": "6.18.0",
+    "maplibre-gl": "6.19.0",
     "marked": "^18.0.9",
     "milsymbol": "^3.0.5",
     "multer": "^2.5.0",
