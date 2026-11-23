@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 ### v2.0.41 - IN PROGRESS
 🐛 `Bug Fix` - Backend Change - Security hardening (CodeQL wave 1): remote SSH commands use one shared shell-quoting helper, IDs and temp names use crypto randomness instead of Math.random, the QR cache key uses scrypt, log messages use fixed format strings, request-driven CSV loops and object keys are bounded, and sign-link errors no longer expose internal details<br>
 🐛 `Bug Fix` - Setup My Device now HTML-escapes the username in the manual login instructions before writing them with innerHTML (CodeQL js/xss alerts 197-199)<br>
+🐛 `Bug Fix` - Backend Change - Template escaping now covers single quotes in Data Packages and Setup My Device, and CDN scripts on Mutual Aid and MOU signing carry SRI integrity hashes (CodeQL js/incomplete-html-attribute-sanitization, js/functionality-from-untrusted-source)<br>
 ✨ `Enhancement` - Backend Change - package.json now contains a cloudtak-marketplace-version so that changes to cloudtak marketplace logic and plugins can be tracked more accurately.
 
 ### v2.0.40 - 11/22/26
