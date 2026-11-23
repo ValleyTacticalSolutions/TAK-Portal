@@ -166,7 +166,7 @@ exit 1
 const limited = runRetry("ratelimit");
 assert.strictEqual(limited.status, 0, limited.stderr);
 assert.match(limited.stdout, /FAIL/);
-assert.match(limited.stderr, new RegExp(RATE.replace(/[.]/g, "\\.")));
+assert.match(limited.stderr, new RegExp(RATE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 assert.strictEqual(limited.count, 1, "a 429 must not be retried");
 
 const dropped = runRetry("eof");

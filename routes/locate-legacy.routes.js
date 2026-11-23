@@ -1,4 +1,5 @@
 const router = require("express").Router();
+const { isValidEmail } = require("../services/safeRegex");
 const locateConfig = require("../services/locateConfig.service");
 const locatorsSvc = require("../services/locators.service");
 const dataSyncSvc = require("../services/dataSync.service");
@@ -11,7 +12,6 @@ const smsSvc = require("../services/sms.service");
 const settingsSvc = require("../services/settings.service");
 const { getString } = require("../services/env");
 
-const EMAIL_RE = /^\S+@\S+\.[A-Za-z]{2,}$/;
 
 /** Public share URL for /locate/:slug — prefers TAK_PORTAL_PUBLIC_URL (required for CloudTAK bridge). */
 function buildPublicLocateUrl(req, slug) {
@@ -58,7 +58,7 @@ function parseRecipientEmails(raw) {
   const seen = new Set();
   const emails = [];
   for (const e of parts) {
-    if (!EMAIL_RE.test(e)) {
+    if (!isValidEmail(e)) {
       return { error: `Invalid email address: ${e}` };
     }
     const lower = e.toLowerCase();

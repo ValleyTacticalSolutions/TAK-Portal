@@ -20,6 +20,7 @@
 const fs = require("fs");
 const path = require("path");
 const settingsSvc = require("./settings.service");
+const { stripHtmlTags } = require("./htmlText");
 
 function getTemplatesDir() {
   // This file lives in /services; templates live in /email_templates
@@ -129,19 +130,12 @@ function renderTemplate(filename, vars) {
 function htmlToText(html) {
   // Super-simple fallback text conversion.
   // Keeps this dependency-free; you can improve later if desired.
-  return String(html || "")
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
+  const withBreaks = String(html || "")
     .replace(/<br\s*\/?\s*>/gi, "\n")
     .replace(/<\/p>/gi, "\n\n")
-    .replace(/<\/h[1-6]>/gi, "\n\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
+    .replace(/<\/h[1-6]>/gi, "\n\n");
+  // Real HTML parser (drops tags plus <script>/<style> bodies), one-pass entity decode.
+  return stripHtmlTags(withBreaks)
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }

@@ -2,6 +2,7 @@
  * Parse KML/KMZ mission attachments into GeoJSON features.
  */
 const unzipper = require("unzipper");
+const { stripHtmlTags } = require("./htmlText");
 const { kml } = require("@tmcw/togeojson");
 const { DOMParser } = require("@xmldom/xmldom");
 const dataSyncSvc = require("./dataSync.service");
@@ -57,14 +58,7 @@ function decodeKmlDescription(value) {
   let text = String(value || "");
   text = text.replace(/<br\s*\/?>/gi, "\n");
   text = text.replace(/<\/p>/gi, "\n");
-  text = text.replace(/<[^>]+>/g, "");
-  text = text
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, "&");
+  text = stripHtmlTags(text);
   return text
     .split("\n")
     .map((line) => line.trim())

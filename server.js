@@ -1,6 +1,7 @@
 require("dotenv").config({ quiet: true });
 const express = require("express");
 const path = require("path");
+const { resolveInside } = require("./services/safePath");
 const fs = require("fs");
 const multer = require("multer");
 const settingsSvc = require("./services/settings.service");
@@ -2190,7 +2191,7 @@ app.post(
         if (templatesDirForCompare) {
           try {
             const defaultHtml = fs.readFileSync(
-              path.join(templatesDirForCompare, onlyTemplate),
+              resolveInside(templatesDirForCompare, onlyTemplate),
               "utf8"
             );
             if (normalizeHtml(value) === normalizeHtml(defaultHtml)) {

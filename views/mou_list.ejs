@@ -1912,7 +1912,7 @@
 
   var editVersionKey = new URLSearchParams(window.location.search).get("editVersion");
   if (editVersionKey) {
-    var editorOverlay = document.querySelector('[data-edit-key="' + editVersionKey.replace(/"/g, '\\"') + '"]');
+    var editorOverlay = document.querySelector('[data-edit-key="' + editVersionKey.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"]');
     if (editorOverlay) openOverlay(editorOverlay);
   }
 

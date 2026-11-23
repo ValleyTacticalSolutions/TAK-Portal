@@ -11,6 +11,14 @@ const takwerxPluginsSvc = require("../services/takwerxPlugins.service");
 const pluginUpdateSyncSvc = require("../services/pluginUpdateSync.service");
 const auditSvc = require("../services/auditLog.service");
 const multer = require("multer");
+const { resolveInside } = require("../services/safePath");
+
+const UPLOADS_DIR = path.join(__dirname, "..", "data", "uploads");
+
+function removeUpload(p) {
+  const safe = resolveInside(UPLOADS_DIR, p);
+  if (fs.existsSync(safe)) fs.unlinkSync(safe);
+}
 
 // Upload plugin APK to temp dir; we copy into data/plugins in the service then remove temp file
 const upload = multer({
@@ -364,7 +372,7 @@ router.post("/upload", upload.single("plugin"), async (req, res) => {
       atakVersion: atakVersion || undefined,
     });
     try {
-      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      removeUpload(req.file.path);
     } catch (_) {}
     if (!result.success) {
       return res.status(400).json({ error: result.error });
@@ -381,7 +389,7 @@ router.post("/upload", upload.single("plugin"), async (req, res) => {
     res.json({ success: true, plugin: result.plugin });
   } catch (err) {
     try {
-      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      if (req.file?.path) removeUpload(req.file.path);
     } catch (_) {}
     res.status(500).json({ error: toErrorPayload(err) });
   }

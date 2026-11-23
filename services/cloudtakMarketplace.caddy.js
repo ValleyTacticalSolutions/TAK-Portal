@@ -1,4 +1,5 @@
 "use strict";
+const { escapeRegExp } = require("./safeRegex");
 
 const DIRECTIVE_HEADER =
   /^(route|handle|handle_path|handle_errors|redir|respond|reverse_proxy|forward_auth|basicauth|request_body|import|encode|header|uri|rewrite|root|file_server|php_fastcgi|log|tls|bind|metrics|map|vars)\b/;
@@ -93,7 +94,7 @@ function skipHeredoc(text, i) {
   if (!match) return i;
   const marker = match[1];
   const after = i + match[0].length;
-  const end = text.slice(after).search(new RegExp(`(?:^|\\n)[ \\t]*${marker}(?=\\s|$)`));
+  const end = text.slice(after).search(new RegExp(`(?:^|\\n)[ \\t]*${escapeRegExp(marker)}(?=\\s|$)`));
   if (end < 0) return text.length;
   return after + end + text.slice(after + end).indexOf(marker) + marker.length;
 }

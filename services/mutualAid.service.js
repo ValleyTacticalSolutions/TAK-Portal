@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const path = require("path");
+const { resolveInside } = require("./safePath");
 const fs = require("fs");
 const { getString } = require("./env");
 const groupsSvc = require("./groups.service");
@@ -358,7 +359,7 @@ async function applyDeploymentLogo({ id, file, removeLogo }) {
   const ext = path.extname(file.originalname || file.path || "").toLowerCase();
   if (!MA_LOGO_ALLOWED_EXT.has(ext)) {
     try {
-      fs.unlinkSync(file.path);
+      fs.unlinkSync(resolveInside(MA_LOGO_DIR, file.path));
     } catch {
       /* ignore */
     }
@@ -369,8 +370,9 @@ async function applyDeploymentLogo({ id, file, removeLogo }) {
   deleteLogoFilesForDeployment(owner.id);
 
   const destName = `${owner.id}${ext}`;
-  const destPath = path.join(MA_LOGO_DIR, destName);
-  fs.renameSync(file.path, destPath);
+  const destPath = resolveInside(MA_LOGO_DIR, destName);
+  const srcPath = resolveInside(MA_LOGO_DIR, file.path);
+  fs.renameSync(srcPath, destPath);
 
   const logoUrl = `/mutual-aid-logos/${destName}`;
   const nextOwner = {

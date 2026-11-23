@@ -5,6 +5,7 @@ const path = require("path");
 const crypto = require("crypto");
 const express = require("express");
 const multer = require("multer");
+const { resolveInside } = require("../services/safePath");
 const backup = require("../services/backup");
 const auditSvc = require("../services/auditLog.service");
 
@@ -117,7 +118,7 @@ router.post("/inspect", (req, res) => {
       });
     } catch (e) {
       try {
-        fs.unlinkSync(req.file.path);
+        fs.unlinkSync(resolveInside(backup.files.INCOMING_DIR, req.file.path));
       } catch (_) {}
       return res.status(400).json({ error: e.message || String(e) });
     }
@@ -130,7 +131,7 @@ router.post("/import", async (req, res) => {
     if (!filename || filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
       return res.status(400).json({ error: "Invalid inspect file" });
     }
-    const archivePath = path.join(backup.files.INCOMING_DIR, filename);
+    const archivePath = resolveInside(backup.files.INCOMING_DIR, filename);
     if (!fs.existsSync(archivePath)) {
       return res.status(400).json({ error: "Upload has expired. Select the file again." });
     }

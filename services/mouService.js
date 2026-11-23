@@ -1,4 +1,6 @@
 const crypto = require("crypto");
+const { stripHtmlTags } = require("./htmlText");
+const { trimChar } = require("./safeRegex");
 const fs = require("fs");
 const path = require("path");
 const PDFDocument = require("pdfkit");
@@ -74,9 +76,7 @@ function clone(value) {
 }
 
 function slugify(value) {
-  const out = normalizeLower(value)
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  const out = trimChar(normalizeLower(value).replace(/[^a-z0-9]+/g, "-"), "-");
   return out || "mou";
 }
 
@@ -1628,29 +1628,16 @@ function renderUserAgreementHtml(markdownSource) {
   return sanitizeUserAgreementHtml(marked.parse(String(markdownSource || "")));
 }
 
-function decodeBasicHtmlEntities(value) {
-  return String(value || "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&#x27;/gi, "'");
-}
 
 function htmlToPlainText(value) {
-  return decodeBasicHtmlEntities(
-    String(value || "")
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+  const withBreaks = String(value || "")
       .replace(/<br\s*\/?>/gi, "\n")
       .replace(/<\/p>\s*<p[^>]*>/gi, "\n\n")
       .replace(/<li[^>]*>/gi, "- ")
       .replace(/<\/li>/gi, "\n")
       .replace(/<(td|th)[^>]*>/gi, " ")
-      .replace(/<\/(div|p|h1|h2|h3|h4|h5|h6|blockquote|ul|ol|table|tr)>/gi, "\n")
-      .replace(/<[^>]+>/g, " ")
-  )
+      .replace(/<\/(div|p|h1|h2|h3|h4|h5|h6|blockquote|ul|ol|table|tr)>/gi, "\n");
+  return stripHtmlTags(withBreaks)
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n[ \t]+/g, "\n")
     .replace(/[ \t]{2,}/g, " ")
@@ -1729,14 +1716,13 @@ function deriveUserAgreementSource(versionRecord) {
   const markdown = normalizeText(versionRecord?.bodyMarkdown || versionRecord?.bodyText);
   if (markdown) return markdown;
   const html = String(versionRecord?.bodyHtml || "");
-  return decodeBasicHtmlEntities(
+  return stripHtmlTags(
     html
       .replace(/<br\s*\/?>/gi, "\n")
       .replace(/<\/p>\s*<p[^>]*>/gi, "\n\n")
       .replace(/<li[^>]*>/gi, "- ")
       .replace(/<\/li>/gi, "\n")
       .replace(/<\/(div|p|h1|h2|h3|blockquote|ul|ol)>/gi, "\n")
-      .replace(/<[^>]+>/g, "")
   )
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -1783,7 +1769,7 @@ function persistVersionContent({ mouId, version, contentType, html, file }) {
   }
 
   const safeHtml = sanitizeMouHtml(html || "");
-  requireNonEmpty(safeHtml.replace(/<[^>]+>/g, "").trim(), "Document HTML");
+  requireNonEmpty(stripHtmlTags(safeHtml).trim(), "Document HTML");
   enforceHtmlSize(safeHtml);
   store.writeHtml(targetPath, safeHtml);
   return {

@@ -1,4 +1,5 @@
 const router = require("express").Router();
+const { isValidEmail } = require("../services/safeRegex");
 const locatorsSvc = require("../services/locators.service");
 const locatorAccess = require("../services/locatorAccess.service");
 const locatorForm = require("../services/locatorForm.service");
@@ -18,7 +19,6 @@ const {
   recordAgreementAcceptance,
 } = require("../services/userAgreementSession.service");
 
-const EMAIL_RE = /^\S+@\S+\.[A-Za-z]{2,}$/;
 
 function buildPublicLocateUrl(req, slug) {
   let base = "";
@@ -64,7 +64,7 @@ function parseRecipientEmails(raw) {
   const seen = new Set();
   const emails = [];
   for (const e of parts) {
-    if (!EMAIL_RE.test(e)) {
+    if (!isValidEmail(e)) {
       return { error: `Invalid email address: ${e}` };
     }
     const lower = e.toLowerCase();

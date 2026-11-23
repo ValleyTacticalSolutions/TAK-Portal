@@ -109,9 +109,19 @@ function isHostPluginNoise(dest) {
 
 function parseGitHubRepo(repoUrl) {
   const s = String(repoUrl || "").trim();
-  let m = s.match(/github\.com[:/]+([^/]+)\/([^/]+?)(?:\.git)?$/i);
-  if (m) return { owner: m[1], repo: m[2].replace(/\.git$/i, "") };
-  return null;
+  if (s.length > 2048) return null;
+  const idx = s.toLowerCase().indexOf("github.com");
+  if (idx < 0) return null;
+  // Linear parse of "github.com[:/]+owner/repo[.git]" (no backtracking regex).
+  const rest = s.slice(idx + "github.com".length);
+  let i = 0;
+  while (i < rest.length && (rest[i] === ":" || rest[i] === "/")) i++;
+  if (i === 0) return null;
+  const parts = rest.slice(i).split("/");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+  const repo = parts[1].replace(/\.git$/i, "");
+  if (!repo) return null;
+  return { owner: parts[0], repo };
 }
 
 const CSP_DIRECTIVES = new Set([

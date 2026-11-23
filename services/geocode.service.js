@@ -9,6 +9,26 @@ const { getString } = require("./env");
 
 let openaddresses = require("./openaddresses.service");
 
+/**
+ * Linear-time split of "123 Main St Chattanooga" into ["123 Main St", "Chattanooga"].
+ * Same result as /^(\d+\s+[^,]+?)\s+([A-Za-z .'-]+)$/ without its backtracking.
+ * Expects whitespace already collapsed to single spaces. Returns null if no split.
+ */
+function splitStreetAndCity(base) {
+  const s = String(base || "");
+  if (s.length > 300) return null;
+  let d = 0;
+  while (d < s.length && s[d] >= "0" && s[d] <= "9") d++;
+  if (d === 0 || s[d] !== " ") return null;
+  const minSplit = d + 2; // at least one char of street name after "123 "
+  let suffixStart = s.length;
+  while (suffixStart > 0 && /[A-Za-z .'-]/.test(s[suffixStart - 1])) suffixStart--;
+  for (let p = Math.max(minSplit, suffixStart - 1); p < s.length - 1; p++) {
+    if (s[p] === " ") return [s.slice(0, p), s.slice(p + 1)];
+  }
+  return null;
+}
+
 function getOpenAddresses() {
   return openaddresses;
 }
@@ -306,10 +326,10 @@ function buildQueryVariants(query) {
   cityStateSuffix(base, "Chattanooga", "TN");
   cityStateSuffix(expanded, "Chattanooga", "TN");
 
-  const commaMatch = base.match(/^(\d+\s+[^,]+?)\s+([A-Za-z .'-]+)$/);
-  if (commaMatch && !base.includes(",")) {
-    variants.add(commaMatch[1].trim() + ", " + commaMatch[2].trim());
-    variants.add(commaMatch[1].trim() + ", " + commaMatch[2].trim() + ", TN");
+  const commaMatch = base.includes(",") ? null : splitStreetAndCity(base);
+  if (commaMatch) {
+    variants.add(commaMatch[0].trim() + ", " + commaMatch[1].trim());
+    variants.add(commaMatch[0].trim() + ", " + commaMatch[1].trim() + ", TN");
   }
 
   return Array.from(variants);
@@ -637,6 +657,7 @@ async function geocodeSearch(query, options = {}) {
 }
 
 module.exports = {
+  splitStreetAndCity,
   geocodeSearch,
   mergeHits,
   normalizeHit,

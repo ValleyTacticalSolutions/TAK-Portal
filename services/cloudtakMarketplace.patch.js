@@ -307,7 +307,7 @@ function repairOrphanedHubReplay(ctRoot) {
 
   // Comments (optional) + indented replay field sitting between `};` and HubClient.
   const orphanRe =
-    /(\n\};\r?\n)(?:\r?\n)?((?:[ \t]*\/\/[^\n]*\r?\n)*[ \t]*replay\?: boolean;\r?\n)(export interface HubClient\b)/;
+    /(\n\};\r?\n)(?:\r?\n)?((?:[ \t]*\/\/[^\r\n]*\r?\n)*[ \t]*replay\?: boolean;\r?\n)(export interface HubClient\b)/;
   if (orphanRe.test(text)) {
     text = text.replace(orphanRe, "$1\n$3");
     notes.push("api/common/hub/index.ts (removed orphaned replay field)");

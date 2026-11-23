@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const { trimChar } = require("../services/safeRegex");
 const os = require("os");
 const path = require("path");
 const router = require("express").Router();
@@ -506,7 +507,7 @@ function requestOriginUrl(req, bodyOrigin) {
   const fromBody = String(bodyOrigin || "").trim();
   if (/^https?:\/\//i.test(fromBody)) return fromBody;
   const origin = String(req.get("origin") || "").trim();
-  if (/^https?:\/\//i.test(origin)) return `${origin.replace(/\/+$/, "")}/cloudtak-marketplace`;
+  if (/^https?:\/\//i.test(origin)) return `${trimChar(origin, "/", { start: false })}/cloudtak-marketplace`;
   const referer = String(req.get("referer") || "").trim();
   if (/^https?:\/\//i.test(referer)) return referer;
   const host = String(req.get("x-forwarded-host") || req.get("host") || "").trim();
