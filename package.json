@@ -58,7 +58,7 @@
     "milsymbol": "^3.0.5",
     "multer": "^2.5.0",
     "node-forge": "^1.4.3",
-    "nodemailer": "^10.6.0",
+    "nodemailer": "^10.6.1",
     "pdf-lib": "^1.17.1",
     "pdfkit": "^0.21.0",
     "pg": "^8.23.1",
