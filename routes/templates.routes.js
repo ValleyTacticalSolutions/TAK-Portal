@@ -1,3 +1,4 @@
+const randomIdSvc = require("../services/randomId");
 const router = require("express").Router();
 const store = require("../services/templates.service");
 const accessSvc = require("../services/access.service");
@@ -9,7 +10,7 @@ const usersSvc = require("../services/users.service");
 // In-memory progress jobs for bulk template group updates.
 const templateBulkJobs = new Map();
 function newTemplateBulkJobId() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return randomIdSvc.timeId();
 }
 
 async function runBulkTemplateGroupUpdate({

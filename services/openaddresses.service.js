@@ -696,7 +696,8 @@ function haversineKm(lat1, lon1, lat2, lon2) {
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function scoreLabel(label, tokens) {
+function scoreLabel(label, rawTokens) {
+  const tokens = Array.isArray(rawTokens) ? rawTokens.slice(0, 50) : [];
   const parsed = parseAddressLabel(label);
   const streetLine = [parsed.number, parsed.street].filter(Boolean).join(" ").toLowerCase();
   const city = String(parsed.city || "").toLowerCase();

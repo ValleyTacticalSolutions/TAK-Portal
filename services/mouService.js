@@ -49,7 +49,7 @@ function nowIso() {
 
 function makeId() {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${Date.now()}-${crypto.randomBytes(8).toString("hex")}`;
 }
 
 function normalizeText(value) {

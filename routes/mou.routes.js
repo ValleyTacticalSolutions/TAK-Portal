@@ -358,12 +358,15 @@ function buildMoUSignPageUrls(stream, versionRecord, agencySuffix) {
   };
 }
 
+const RESERVED_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 function parseAgencySigningPayload(body, agencySuffixes) {
-  const agencySigning = {};
+  // No prototype: keys come from request-controlled agency suffixes.
+  const agencySigning = Object.create(null);
   const suffixes = Array.isArray(agencySuffixes) ? agencySuffixes : [];
   for (const suffix of suffixes) {
     const safeSuffix = String(suffix || "").trim().toLowerCase();
-    if (!safeSuffix) continue;
+    if (!safeSuffix || RESERVED_OBJECT_KEYS.has(safeSuffix)) continue;
     const modeRaw = String(body?.[`signingMode_${safeSuffix}`] || "")
       .trim()
       .toLowerCase();
@@ -2487,14 +2490,27 @@ router.get("/admin/mou/compliance", requireMouEnabled, requireMouPermission, (re
   return res.redirect("/mou");
 });
 
+/**
+ * Only a short single-line message reaches the browser; stack frames, file paths and
+ * multi-line details stay in the server log.
+ */
+function clientSafeErrorMessage(message) {
+  const m = String(message || "");
+  if (m.length > 200 || /\n|\bat\s+\S+\s+\(|[\\/][\w.-]+\.(js|ts|ejs)\b|node_modules/i.test(m)) {
+    return "Unable to open this sign link. Please try again or contact the sender.";
+  }
+  return m;
+}
+
 function renderExternalSignError(res, err, token) {
   const message = err?.message || String(err || "Unable to open sign link.");
+  if (err && err.stack) console.warn("[mou] external sign error: %s", String(err.stack));
   const linkUnavailable =
     /already been used|confirmation link|sign link not found|no longer valid|no longer accepts|not available|expired|invalid/i.test(
       message
     );
   return res.status(linkUnavailable ? 410 : 400).render("mou_external_sign", {
-    error: linkUnavailable ? "" : message,
+    error: linkUnavailable ? "" : clientSafeErrorMessage(message),
     success: "",
     token: token || "",
     stream: null,

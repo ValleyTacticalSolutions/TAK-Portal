@@ -1,3 +1,4 @@
+const randomIdSvc = require("./randomId");
 const store = require("./auditLog.store");
 const agenciesSvc = require("./agencies.service");
 const accessSvc = require("./access.service");
@@ -225,7 +226,7 @@ function logEvent(payload) {
     }
 
     const ev = {
-      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+      id: randomIdSvc.timeId(),
       timestamp: nowIso,
       actor: actor
         ? {

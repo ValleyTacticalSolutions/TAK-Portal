@@ -1,3 +1,4 @@
+const randomIdSvc = require("../services/randomId");
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
@@ -138,7 +139,7 @@ const importJobs = new Map();
 
 function newJobId() {
   // Simple unique ID: time + random
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return randomIdSvc.timeId();
 }
 
 // Small helper to keep error responses consistent and safe (no raw HTML from Authentik)

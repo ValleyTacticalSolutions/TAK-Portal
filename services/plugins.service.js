@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 /**
  * Plugin Manager service: TAK.gov link state + plugin storage under data/plugins.
  * Uses TAK.gov OAuth 2.0 Device Authorization Grant (same as OpenTAKServer).
@@ -681,7 +682,7 @@ async function downloadTakGovPlugin(pluginItem) {
   }
 
   ensurePluginsDir();
-  const tempPath = path.join(PLUGINS_DIR, `_tmp_${Date.now()}_${Math.random().toString(36).slice(2)}.apk`);
+  const tempPath = path.join(PLUGINS_DIR, `_tmp_${Date.now()}_${crypto.randomBytes(8).toString("hex")}.apk`);
   try {
     const result = await takGovFetchStreamToFile(apkUrl, token.access_token, tempPath, { timeoutMs: 300000 });
     if (result.statusCode !== 200) {

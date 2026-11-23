@@ -209,9 +209,11 @@ function csvEscapeCell(value) {
   return s;
 }
 
+const MAX_IMPORT_CSV_LINES = 20000;
+
 /** Minimal CSV line parser (supports quotes / escaped quotes). */
 function parseCsvLine(line) {
-  const raw = String(line ?? "");
+  const raw = String(line ?? "").slice(0, 20000);
   const out = [];
   let cur = "";
   let inQuotes = false;
@@ -758,7 +760,8 @@ router.post("/import-csv", upload.single("file"), async (req, res) => {
     const skipped = [];
     const failed = [];
 
-    for (let i = 1; i < lines.length; i++) {
+    const lineLimit = Math.min(lines.length, MAX_IMPORT_CSV_LINES);
+    for (let i = 1; i < lineLimit; i++) {
       const parts = parseCsvLine(lines[i]);
       const line = i + 1;
 

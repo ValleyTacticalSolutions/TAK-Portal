@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 ## Version History
 
 ### v2.0.41 - IN PROGRESS
+🐛 `Bug Fix` - Backend Change - Security hardening (CodeQL wave 1): remote SSH commands use one shared shell-quoting helper, IDs and temp names use crypto randomness instead of Math.random, the QR cache key uses scrypt, log messages use fixed format strings, request-driven CSV loops and object keys are bounded, and sign-link errors no longer expose internal details<br>
 🐛 `Bug Fix` - Setup My Device now HTML-escapes the username in the manual login instructions before writing them with innerHTML (CodeQL js/xss alerts 197-199)<br>
 ✨ `Enhancement` - Backend Change - package.json now contains a cloudtak-marketplace-version so that changes to cloudtak marketplace logic and plugins can be tracked more accurately.
 

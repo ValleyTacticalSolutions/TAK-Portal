@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 /**
  * Public locate form schema for live (non-TAK-CoreConfig) locators.
  */
@@ -26,7 +27,7 @@ function normalizeColor(raw) {
 }
 
 function newFieldId() {
-  return `f_${Math.random().toString(36).slice(2, 10)}`;
+  return `f_${crypto.randomBytes(4).toString("hex")}`;
 }
 
 function normalizeFieldType(raw) {

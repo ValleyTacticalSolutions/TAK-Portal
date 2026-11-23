@@ -117,7 +117,7 @@ function csvHeaderKey(h) {
 
 /** Minimal CSV line parser (supports quotes / escaped quotes). Used for import headers. */
 function parseCsvHeaderLine(line) {
-  const raw = String(line ?? "");
+  const raw = String(line ?? "").slice(0, 20000);
   const out = [];
   let cur = "";
   let inQuotes = false;
@@ -3228,15 +3228,14 @@ async function getUserById(userId) {
   if (!user) return null;
   const pks = Array.isArray(user.groups) ? user.groups : [];
   if (!pks.length) {
-    user.groupDetails = [];
-    return user;
+    return { ...user, groupDetails: [] };
   }
   const named = await directoryRepo.getGroupsByPks(pks);
-  user.groupDetails = (Array.isArray(named) ? named : []).map((g) => ({
+  const groupDetails = (Array.isArray(named) ? named : []).map((g) => ({
     pk: g.pk,
     name: g.name,
   }));
-  return user;
+  return { ...user, groupDetails };
 }
 
 /**

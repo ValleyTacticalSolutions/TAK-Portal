@@ -41,8 +41,10 @@ function ensureDir(dirPath) {
   }
 }
 
+const { escapeForSingleQuotes, assertShellToken } = require("./shellQuote");
+
 function quoteForSingleQuotedShell(str) {
-  return String(str || "").replace(/'/g, "'\"'\"'");
+  return escapeForSingleQuotes(str);
 }
 
 function normalizePrivilegeBin(raw) {
@@ -134,6 +136,7 @@ function buildPrivilegedCommand(origInner, mode, options = {}) {
     innerCommand = d.command;
     runAsUser = d.runAsUser;
   }
+  if (runAsUser) runAsUser = assertShellToken(runAsUser, "run-as user");
   const bin = getPrivilegeBin();
   if (!mode || mode.mode === "none") {
     throw new Error(privilegedUnavailableMessage());

@@ -239,7 +239,8 @@ async function findConflictingDataFeedName(dataFeedName) {
     return feed?.name ? String(feed.name) : null;
   } catch (probeErr) {
     console.warn(
-      `[integrations] Data feed name probe failed for "${dataFeedName}" (list also failed); continuing without conflict confirmation:`,
+      "[integrations] Data feed name probe failed for \"%s\" (list also failed); continuing without conflict confirmation:",
+      String(dataFeedName),
       probeErr?.response?.status || probeErr?.message || probeErr
     );
     return null;
@@ -310,7 +311,9 @@ async function rollbackIntegrationCreation({ userId, username, dataFeedName }) {
       await deleteDataFeedIfPresent(dataFeedName);
     } catch (err) {
       console.warn(
-        `[integrations] Rollback: could not delete data feed "${dataFeedName}" for "${un}":`,
+        "[integrations] Rollback: could not delete data feed \"%s\" for \"%s\":",
+        String(dataFeedName),
+        String(un),
         err?.message || err
       );
     }

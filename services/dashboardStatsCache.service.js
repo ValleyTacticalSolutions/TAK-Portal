@@ -253,7 +253,8 @@ async function refreshAgencyNow(agencyName, { expectedAgencySuffix, groupPrefix,
       return entry;
     } catch (err) {
       console.warn(
-        `[DASHBOARD] Agency stats cache refresh failed (${name}):`,
+        "[DASHBOARD] Agency stats cache refresh failed (%s):",
+        String(name),
         err?.message || err
       );
       const entry = {
