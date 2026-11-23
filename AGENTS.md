@@ -5,7 +5,7 @@
 - `main` is the **beta** channel (UI beta mode pulls latest `main`)
 - Stable installs pull **GitHub Releases** only
 - Current package version lives in `package.json` (`version` + `beta-version`)
-- Work and push on **`main` only**. Never create, checkout-for-shipping, or push `agent/*` (or any other) branches. If Justin wants a branch/PR workflow, he will say so explicitly.
+- **Always commit and push directly to `main`, nothing else.** Never create, switch to, commit on, or push `agent/*` (or any other) branches, and don't open PRs. If Justin wants a branch/PR workflow, he will say so explicitly in the current message. Run `npm run verify` first; the pre-push hook runs it too, so never bypass it with `--no-verify`.
 - **Releases are Justin's, by hand.** Agents never tag or release
 
 ## Categories
