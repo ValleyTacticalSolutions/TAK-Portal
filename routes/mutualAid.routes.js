@@ -310,7 +310,9 @@ router.get("/:id/qr/download", async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${out.filename}"`);
     res.send(out.pngBuffer);
   } catch (err) {
-    res.status(statusForError(err)).send(toErrorPayload(err));
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.type("text/plain");
+    res.status(statusForError(err)).send(String(toErrorPayload(err)));
   }
 });
 

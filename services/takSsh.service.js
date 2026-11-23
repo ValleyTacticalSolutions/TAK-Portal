@@ -1513,8 +1513,13 @@ async function createTakClientCertForIntegration(username) {
     return { ok: false, skipped: true, message: "TAK bypass enabled." };
   }
 
-  const un = String(username || "").trim();
-  if (!un) return { ok: false, message: "Username required." };
+  if (!String(username || "").trim()) return { ok: false, message: "Username required." };
+  let un;
+  try {
+    un = sanitizeIntegrationUsername(username);
+  } catch (err) {
+    return { ok: false, message: err.message };
+  }
 
   const config = getTakSshConfig();
   if (!config) {
@@ -1525,8 +1530,9 @@ async function createTakClientCertForIntegration(username) {
     };
   }
 
-  // Safe for shell: single-quote wrapped; username is alphanumeric + hyphens only for integrations
-  const safeName = un.replace(/'/g, "'\"'\"'");
+  // un is validated by sanitizeIntegrationUsername (lowercase letters, digits, hyphens), so it is
+  // safe unquoted inside the bash -lc string; shellQuote would break the nested quoting.
+  const safeName = assertShellToken(un, "integration username");
   const inner = `bash -lc 'cd ${TAK_CERTS_DIR} && bash makeCert.sh client ${safeName}'`;
 
   if (TAK_DEBUG) console.log("[TAK SSH] Connecting to", config.host + ":" + config.port, "as", config.username);
