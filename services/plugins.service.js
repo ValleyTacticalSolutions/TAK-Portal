@@ -8,6 +8,7 @@ const crypto = require("crypto");
 
 const fs = require("fs");
 const path = require("path");
+const { resolveInside } = require("./safePath");
 const { pipeline, Readable } = require("stream");
 const { promisify } = require("util");
 const http2 = require("http2");
@@ -18,6 +19,7 @@ const pipelinePromise = promisify(pipeline);
 
 const DATA_DIR = path.join(__dirname, "..", "data");
 const PLUGINS_DIR = path.join(DATA_DIR, "plugins");
+const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
 const MANIFEST_PATH = path.join(DATA_DIR, "plugin-manifest.json");
 
 function notifyPluginCatalogChanged(reason) {
@@ -713,7 +715,7 @@ async function downloadTakGovPlugin(pluginItem) {
       if (existing) {
         preservedFavorite = existing.favorite === true;
         try {
-          const oldPath = path.join(PLUGINS_DIR, existing.filename);
+          const oldPath = resolveInside(PLUGINS_DIR, existing.filename);
           if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
         } catch (_) {}
         manifest.plugins = manifest.plugins.filter((p) => p.id !== existing.id);
@@ -976,6 +978,11 @@ function nextPluginId(plugins) {
 async function addPluginFromFile(sourceFilePath, meta = {}) {
   return withCatalogLock(() => {
     ensurePluginsDir();
+    try {
+      sourceFilePath = resolveInside(UPLOADS_DIR, sourceFilePath);
+    } catch (_) {
+      return { success: false, error: "File not found or not a file." };
+    }
     if (!fs.existsSync(sourceFilePath) || !fs.statSync(sourceFilePath).isFile()) {
       return { success: false, error: "File not found or not a file." };
     }
@@ -984,7 +991,7 @@ async function addPluginFromFile(sourceFilePath, meta = {}) {
     const ext = path.extname(baseName);
     const safeName = baseName.replace(/[^a-zA-Z0-9._-]/g, "_");
     const destFileName = safeName;
-    const destPath = path.join(PLUGINS_DIR, destFileName);
+    const destPath = resolveInside(PLUGINS_DIR, destFileName);
 
     const existing = manifest.plugins.find((p) => p.filename === destFileName);
     if (existing) {

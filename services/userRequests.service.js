@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { isValidEmail } = require("./safeRegex");
 const agenciesStore = require("./agencies.service");
 const accessSvc = require("./access.service");
 const store = require("./userRequests.store");
@@ -476,7 +477,7 @@ function validateCreate(input) {
   if (!firstName) throw new Error("First Name is required");
   if (!lastName) throw new Error("Last Name is required");
   if (!email) throw new Error("Email Address is required");
-  if (!/^\S+@\S+\.[A-Za-z]{2,}$/.test(email)) {
+  if (!isValidEmail(email)) {
     throw new Error("Email Address must be valid");
   }
   if (!badgeNumber) throw new Error("Badge Number is required");

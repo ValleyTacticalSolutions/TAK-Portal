@@ -137,8 +137,8 @@ function normalizeCNValue(rawValue, nameWithoutTak) {
     v = v.trim();
 
     // Strip leading CN:
-    const m = v.match(/^cn\s*:\s*(.*)$/i);
-    if (m) v = String(m[1] || "").trim();
+    const m = v.match(/^cn\s*:/i);
+    if (m) v = v.slice(m[0].length).trim();
 
     // Strip one layer of surrounding quotes
     if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {

@@ -86,6 +86,8 @@ function zipDirectory(srcDir, outPath) {
 }
 
 async function encryptFileTo(srcPath, destPath, passphrase) {
+  srcPath = safeResolve(BACKUPS_DIR, srcPath);
+  destPath = safeResolve(BACKUPS_DIR, destPath);
   const plain = fs.readFileSync(srcPath);
   const enc = encryptBuffer(plain, passphrase);
   ensureDir(path.dirname(destPath));
@@ -94,16 +96,18 @@ async function encryptFileTo(srcPath, destPath, passphrase) {
 }
 
 function maybeDecryptToZip(srcPath, passphrase, tmpDir) {
+  srcPath = safeResolve(BACKUPS_DIR, srcPath);
   const buf = fs.readFileSync(srcPath);
   if (!isEncryptedBackup(buf)) return srcPath;
   const zipBuf = decryptBuffer(buf, passphrase);
   ensureDir(tmpDir);
-  const out = path.join(tmpDir, "backup.zip");
+  const out = safeResolve(tmpDir, "backup.zip");
   fs.writeFileSync(out, zipBuf);
   return out;
 }
 
 function peekIsEncrypted(srcPath) {
+  srcPath = safeResolve(BACKUPS_DIR, srcPath);
   const fd = fs.openSync(srcPath, "r");
   try {
     const header = Buffer.alloc(10);

@@ -4,6 +4,7 @@
  */
 
 const crypto = require("crypto");
+const { trimChar } = require("./safeRegex");
 const { getString } = require("./env");
 const settingsSvc = require("./settings.service");
 const { buildTakAxios } = require("./tak.service");
@@ -44,12 +45,13 @@ function save(data) {
 }
 
 function titleToSlug(title) {
-  const s = String(title || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 120);
+  const s = trimChar(
+    String(title || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-"),
+    "-"
+  ).slice(0, 120);
   return s || "locator";
 }
 

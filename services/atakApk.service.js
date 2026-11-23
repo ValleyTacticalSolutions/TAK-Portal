@@ -5,9 +5,11 @@
 
 const fs = require("fs");
 const path = require("path");
+const { resolveInside } = require("./safePath");
 const settingsSvc = require("./settings.service");
 
 const ATAK_DIR = path.join(__dirname, "..", "data", "atak");
+const UPLOADS_DIR = path.join(__dirname, "..", "data", "uploads");
 const STORED_FILENAME = "atak-client.apk";
 /** Authenticated Setup My Device download. */
 const DOWNLOAD_PATH = "/api/atak/download";
@@ -87,7 +89,11 @@ function getApkFilePath() {
  * @param {string} originalName
  */
 function saveUploadedApk(tempPath, originalName) {
-  if (!tempPath || !fs.existsSync(tempPath)) {
+  if (!tempPath) {
+    throw new Error("Uploaded file not found.");
+  }
+  tempPath = resolveInside(UPLOADS_DIR, tempPath);
+  if (!fs.existsSync(tempPath)) {
     throw new Error("Uploaded file not found.");
   }
   const safeName = String(originalName || STORED_FILENAME)

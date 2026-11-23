@@ -6,9 +6,12 @@ const router = require("express").Router();
 const path = require("path");
 const fs = require("fs");
 const multer = require("multer");
+const { resolveInside } = require("../services/safePath");
 const atakApkSvc = require("../services/atakApk.service");
 const auditSvc = require("../services/auditLog.service");
 const { toSafeApiError } = require("../services/apiErrorPayload.service");
+
+const UPLOADS_DIR = path.join(__dirname, "..", "data", "uploads");
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -78,7 +81,7 @@ router.post("/upload", (req, res) => {
     } catch (e) {
       if (req.file && req.file.path) {
         try {
-          fs.unlinkSync(req.file.path);
+          fs.unlinkSync(resolveInside(UPLOADS_DIR, req.file.path));
         } catch (_) {
           /* ignore */
         }

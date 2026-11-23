@@ -3,6 +3,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { escapeRegExp } = require("./safeRegex");
 
 const SOURCE_EXT = new Set([".ts", ".tsx", ".js", ".mjs", ".cjs", ".vue"]);
 const RESOLVE_EXT = [".ts", ".tsx", ".js", ".mjs", ".vue", ".d.ts"];
@@ -149,7 +150,7 @@ function readSubscriptionLoadKeys(source) {
   const named = head.match(/\bopts\??\s*:\s*([A-Za-z_$][\w$]*)/);
   if (!named) return null;
   const typeName = named[1];
-  const aliasRe = new RegExp("(?:type|interface)\\s+" + typeName + "\\b[^\\{]*\\{");
+  const aliasRe = new RegExp("(?:type|interface)\\s+" + escapeRegExp(typeName) + "\\b[^\\{]*\\{");
   const alias = aliasRe.exec(text);
   if (!alias) return null;
   const brace = text.indexOf("{", alias.index);
@@ -161,7 +162,7 @@ function readSubscriptionLoadKeys(source) {
 function hostHasMethod(source, name) {
   const re = new RegExp(
     "(?:^|\\n)[ \\t]*(?:(?:public|private|protected|async|static|readonly|override)\\s+)*" +
-      name +
+      escapeRegExp(name) +
       "\\s*\\(",
     "m"
   );
@@ -527,7 +528,7 @@ function rewriteConnReconnect(filePath, source, ctx) {
 }
 
 function countIdent(source, name) {
-  const re = new RegExp("\\b" + name + "\\b", "g");
+  const re = new RegExp("\\b" + escapeRegExp(name) + "\\b", "g");
   const m = source.match(re);
   return m ? m.length : 0;
 }
@@ -543,7 +544,7 @@ function identifiersIn(text) {
 }
 
 function removeFunctionDeclaration(source, name) {
-  const re = new RegExp("(?:^|\\n)[ \\t]*(?:async\\s+)?function\\s+" + name + "\\s*\\(");
+  const re = new RegExp("(?:^|\\n)[ \\t]*(?:async\\s+)?function\\s+" + escapeRegExp(name) + "\\s*\\(");
   const m = re.exec(source);
   if (!m) return null;
   const lineStart = source.lastIndexOf("\n", m.index) + 1;
@@ -734,7 +735,7 @@ function transformCode(filePath, source, ctx) {
 function transformFile(filePath, source, ctx) {
   if (!filePath.endsWith(".vue")) return transformCode(filePath, source, ctx);
   const changes = [];
-  const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+  const re = /<script\b([^>]*)>([\s\S]*?)<\/script[^>]*>/gi;
   let code = "";
   let last = 0;
   let m;
@@ -1957,7 +1958,7 @@ function repairOrphanedHubReplay(ctRoot) {
   let changed = false;
 
   const orphanRe =
-    /(\n\};\r?\n)(?:\r?\n)?((?:[ \t]*\/\/[^\n]*\r?\n)*[ \t]*replay\?: boolean;\r?\n)(export interface HubClient\b)/;
+    /(\n\};\r?\n)(?:\r?\n)?((?:[ \t]*\/\/[^\r\n]*\r?\n)*[ \t]*replay\?: boolean;\r?\n)(export interface HubClient\b)/;
   if (orphanRe.test(text)) {
     text = text.replace(orphanRe, "$1\n$3");
     notes.push("api/common/hub/index.ts (removed orphaned replay field)");
