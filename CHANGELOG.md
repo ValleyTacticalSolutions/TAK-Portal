@@ -11,7 +11,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
-### v2.0.42 - IN PROGRESS
+### v2.0.42 - 11/24/26
 🐛 `Bug Fix` - Backend Change - CloudTAK Marketplace no longer runs a `<priv> -n true` probe before elevating on the host. Hosts with narrow grants refused it, which mailed a refusal notice to root on every run and skipped commands that were actually granted. The real command is now tried directly, and only a refusal moves on to the stored password (#178)<br>
 🐛 `Bug Fix` - Backend Change - CloudTAK Marketplace no longer keeps showing an old installed plugin version (e.g. Incident Manager stuck at v0.1.4-ccso) after a reinstall or update. Install now removes older copies of the plugin from every other CloudTAK plugin folder (the host scan listed the first copy it found), the cached version is only reused for the same installed commit, and the host scan keeps the plugin version (#177)<br>
 
