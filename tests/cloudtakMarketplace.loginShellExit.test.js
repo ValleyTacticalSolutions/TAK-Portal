@@ -93,6 +93,54 @@ const bash = resolveBash();
   assert.match(scanSrc, /completedRun/, "scanHost must require a completed run before trusting it");
 }
 
+// --- host scan: one docker exec, only in the API container (#165: 49 execs blew the 60s timeout) ---
+
+{
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "ctak-scan-docker-"));
+  const ct = path.join(base, "CloudTAK");
+  const bin = path.join(base, "bin");
+  const log = path.join(base, "exec.log");
+  fs.mkdirSync(path.join(ct, "api"), { recursive: true });
+  writeFile(
+    path.join(bin, "docker"),
+    [
+      "#!/bin/bash",
+      'if [ "$1" = ps ]; then printf "%s\\n" $FAKE_CONTAINERS; exit 0; fi',
+      `if [ "$1" = exec ]; then echo "$2" >> '${toBashPath(log)}'; printf '@@DIR app/plugins\\nmy-plugin\\nREADME.md\\n'; exit 0; fi`,
+      "exit 1",
+      "",
+    ].join("\n")
+  );
+  fs.chmodSync(path.join(bin, "docker"), 0o755);
+
+  function runScan(containers, svc) {
+    fs.rmSync(log, { force: true });
+    const script = marketplace.scanRemoteScript(toBashPath(ct), [], svc ? { composeService: svc } : undefined);
+    const r = spawnSync(bash, ["-c", `export PATH='${toBashPath(bin)}':"$PATH"\n${script}`], {
+      encoding: "utf8",
+      env: { ...process.env, FAKE_CONTAINERS: containers.join(" ") },
+    });
+    assert.strictEqual(r.status, 0, r.stderr || r.stdout);
+    const execs = fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split(/\r?\n/).filter(Boolean) : [];
+    return { stdout: r.stdout, execs };
+  }
+
+  const seven = ["api", "events", "media", "postgis", "retention", "store", "tiles"].map((s) => `cloudtak-${s}-1`);
+  const a = runScan(seven.concat(["unrelated-db-1"]));
+  assert.deepStrictEqual(a.execs, ["cloudtak-api-1"], "scan must exec only into the API container, once");
+  assert.match(a.stdout, /^CONTAINER cloudtak-api-1 dir=app\/plugins$/m);
+  assert.match(a.stdout, /^PLUGIN\tmy-plugin\tdir\t1\t/m);
+  assert.doesNotMatch(a.stdout, /PLUGIN\tREADME\.md/);
+
+  const b = runScan(["cloudtak_server_1", "cloudtak_events_1"], "server");
+  assert.deepStrictEqual(b.execs, ["cloudtak_server_1"], "custom compose service name is honored");
+
+  const c = runScan(["takwerx-cloudtak", "other-1"]);
+  assert.deepStrictEqual(c.execs, ["takwerx-cloudtak"], "falls back to every CloudTAK container when none is the API service");
+
+  fs.rmSync(base, { recursive: true, force: true });
+}
+
 // --- detect script ends by dropping errexit before exit 0 ---
 
 {

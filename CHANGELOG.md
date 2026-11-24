@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.43 - IN PROGRESS
+🐛 `Bug Fix` - Backend Change - CloudTAK Marketplace host scan no longer times out on hosts running many CloudTAK containers. It used to run one `docker exec` for each plugin folder in every CloudTAK container (49 calls on a typical host, over the 60-second limit). It now runs one per container and only checks the API service container, falling back to all CloudTAK containers when no API container is found (#165)<br>
+
 ### v2.0.42 - 11/24/26
 🐛 `Bug Fix` - Backend Change - CloudTAK Marketplace no longer runs a `<priv> -n true` probe before elevating on the host. Hosts with narrow grants refused it, which mailed a refusal notice to root on every run and skipped commands that were actually granted. The real command is now tried directly, and only a refusal moves on to the stored password (#178)<br>
 🐛 `Bug Fix` - Backend Change - CloudTAK Marketplace no longer keeps showing an old installed plugin version (e.g. Incident Manager stuck at v0.1.4-ccso) after a reinstall or update. Install now removes older copies of the plugin from every other CloudTAK plugin folder (the host scan listed the first copy it found), the cached version is only reused for the same installed commit, and the host scan keeps the plugin version (#177)<br>

@@ -1427,8 +1427,20 @@ function detectProbeLines(catalogPlugins) {
   return lines.join("\n");
 }
 
-function scanRemoteScript(ctPath, catalogPlugins) {
+const CONTAINER_PLUGIN_DIRS = [
+  "app/plugins",
+  "/home/etl/app/plugins",
+  "web/plugins",
+  "/home/node/web/plugins",
+  "/usr/src/app/web/plugins",
+  "/opt/app/web/plugins",
+  "api/web/plugins",
+];
+
+function scanRemoteScript(ctPath, catalogPlugins, options) {
   const ct = String(ctPath || "").replace(/'/g, "");
+  const rawSvc = String((options && options.composeService) || "api").trim();
+  const svc = /^[A-Za-z0-9_-]+$/.test(rawSvc) ? rawSvc : "api";
   return `
 set -eu
 CT='${ct}'
@@ -1507,32 +1519,38 @@ done
 printf 'WEB_PLUGINS %s\\n' "$web_plugins"
 ${detectProbeLines(catalogPlugins)}
 if command -v docker >/dev/null 2>&1; then
+  # Only the API service holds plugins. Scan its container(s) and fall back to every
+  # CloudTAK container only when none matches the service name. One docker exec per
+  # container lists every plugin folder (per-folder execs made the scan exceed its timeout).
+  SVC='${svc}'
+  all_ct=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -iE 'cloudtak|takwerx' || true)
+  scan_ct=$(printf '%s\\n' "$all_ct" | grep -E "[-_]\${SVC}([-_][0-9]+)?\\$" || true)
+  [ -n "$scan_ct" ] || scan_ct="$all_ct"
   while IFS= read -r c; do
     [ -n "$c" ] || continue
-    echo "$c" | grep -qiE 'cloudtak|takwerx' || continue
-    for inner in app/plugins /home/etl/app/plugins web/plugins /home/node/web/plugins /usr/src/app/web/plugins /opt/app/web/plugins api/web/plugins; do
-      # Capture only stdout; docker exec failures (no sh in distroless images) go to stderr.
-      # Also drop known runtime error text if a runtime still writes it on stdout.
-      listing=$(docker exec "$c" sh -c "ls -1 $inner 2>/dev/null" 2>/dev/null || true)
-      [ -n "$listing" ] || continue
-      echo "$listing" | grep -qiE 'OCI runtime|exec failed|executable file not found|no such file' && continue
-      printf 'CONTAINER %s dir=%s\\n' "$c" "$inner"
-      echo "$listing" | while IFS= read -r name; do
-        [ -n "$name" ] || continue
-        case "$name" in
-          .|..|.[!.]*|*[!A-Za-z0-9._-]*) continue ;;
-        esac
-        case "$name" in
-          example.ts|example.js|README.md|readme.md|README|LICENSE|.gitkeep|.DS_Store) continue ;;
-        esac
-        case "$name" in
-          *.md|*.txt) continue ;;
-        esac
-        printf 'PLUGIN\\t%s\\tdir\\t1\\t\\t\\t\\t\\n' "$name"
-      done
+    # Capture only stdout; docker exec failures (no sh in distroless images) go to stderr.
+    # Also drop known runtime error text if a runtime still writes it on stdout.
+    listing=$(docker exec "$c" sh -c 'for d in ${CONTAINER_PLUGIN_DIRS.join(" ")}; do if [ -d "$d" ]; then echo "@@DIR $d"; ls -1 "$d" 2>/dev/null; fi; done' 2>/dev/null || true)
+    [ -n "$listing" ] || continue
+    echo "$listing" | grep -qiE 'OCI runtime|exec failed|executable file not found|no such file' && continue
+    printf '%s\\n' "$listing" | while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      case "$name" in
+        "@@DIR "*) printf 'CONTAINER %s dir=%s\\n' "$c" "\${name#@@DIR }"; continue ;;
+      esac
+      case "$name" in
+        .|..|.[!.]*|*[!A-Za-z0-9._-]*) continue ;;
+      esac
+      case "$name" in
+        example.ts|example.js|README.md|readme.md|README|LICENSE|.gitkeep|.DS_Store) continue ;;
+      esac
+      case "$name" in
+        *.md|*.txt) continue ;;
+      esac
+      printf 'PLUGIN\\t%s\\tdir\\t1\\t\\t\\t\\t\\n' "$name"
     done
   done <<CONTAINERS
-$(docker ps --format '{{.Names}}' 2>/dev/null || true)
+$scan_ct
 CONTAINERS
 fi
 printf 'SCAN_END\\n'
@@ -1874,7 +1892,7 @@ async function scanHost() {
     store.writeScanCache(err);
     return err;
   }
-  const result = await ssh.runCommand(`bash -lc ${ssh.shellQuote(scanRemoteScript(loc.path, catalog.plugins))}`, 60000);
+  const result = await ssh.runCommand(`bash -lc ${ssh.shellQuote(scanRemoteScript(loc.path, catalog.plugins, { composeService: loc.composeService }))}`, 60000);
   // SCAN_END is the script's last output, so trust it when the run reached an exit
   // code even if a login-shell logout step made that code non-zero.
   const scanFinished = /^SCAN_END$/m.test(String(result.stdout || "")) && ssh.completedRun(result);
