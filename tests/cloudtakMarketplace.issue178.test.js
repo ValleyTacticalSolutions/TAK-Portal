@@ -9,7 +9,7 @@ const os = require("os");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
-const src = fs.readFileSync(path.join(__dirname, "../services/cloudtakMarketplace.service.js"), "utf8");
+const src = fs.readFileSync(path.join(__dirname, "../services/cloudtakMarketplace.service.js"), "utf8").replace(/\r\n/g, "\n"); // Windows autocrlf checkouts
 
 // 1. No code line probes `-n true` (comments excluded).
 const probes = src.split("\n").filter((l) => /"\$CTAK_PRIV"\s+-n\s+(-u\s+\S+\s+)?true\b/.test(l) && !/^\s*#/.test(l));
