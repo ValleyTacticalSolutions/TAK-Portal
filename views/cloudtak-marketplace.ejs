@@ -555,6 +555,8 @@
   var sessionExpired = false;
   var pollFailures = 0;
   var POLL_MAX_FAILURES = 5;
+  // During a job a server restart also rejects fetch, so allow ~3 minutes of network errors before giving up.
+  var POLL_MAX_NETWORK_FAILURES_BUSY = 90;
   var SESSION_EXPIRED_MSG = "Session expired, please reload this page to sign in again.";
   // Login lapsed: redirect to sign-in, 401/403, or an HTML page where JSON was expected.
   function isExpiredResponse(r) {
@@ -562,10 +564,14 @@
     return !!r.redirected || r.status === 401 || r.status === 403 ||
       (!!r.ok && ct.toLowerCase().indexOf("json") === -1);
   }
-  // While a job runs, 5xx/network failures (e.g. server restart) never count: keep polling.
-  function nextPollFailures(prev, failed, busy) {
+  // While a job runs, 5xx responses (e.g. server restart) never count. Network errors (rejected fetch or
+  // status 0, which is also what a blocked login redirect looks like) always count, with a longer cap.
+  function nextPollFailures(prev, failed, busy, network) {
     if (!failed) return 0;
-    return busy ? prev : prev + 1;
+    return busy && !network ? prev : prev + 1;
+  }
+  function pollFailureCap(busy) {
+    return busy ? POLL_MAX_NETWORK_FAILURES_BUSY : POLL_MAX_FAILURES;
   }
   function stopJobPoll() {
     if (jobPoll) clearInterval(jobPoll);
@@ -1413,7 +1419,9 @@
         setMsg(SESSION_EXPIRED_MSG, true);
         return;
       }
-      pollFailures = nextPollFailures(pollFailures, !snapRes.httpOk || !statusRes.httpOk, jobBusy);
+      pollFailures = nextPollFailures(
+        pollFailures, !snapRes.httpOk || !statusRes.httpOk, jobBusy, snapRes.status === 0 || statusRes.status === 0
+      );
       var snap = snapRes.json || {};
       var status = statusRes.json || null;
       lastStatus = status;
@@ -1452,15 +1460,15 @@
       document.querySelectorAll("[data-mp-filter]").forEach(function (btn) {
         btn.classList.toggle("is-filter-on", btn.getAttribute("data-mp-filter") === filter);
       });
-      if (jobBusy && pollFailures < POLL_MAX_FAILURES) {
+      if (jobBusy && pollFailures < pollFailureCap(true)) {
         if (!jobPoll) jobPoll = setInterval(loadAll, 2000);
       } else {
         stopJobPoll();
       }
     }).catch(function (err) {
       // Network error (e.g. a cross-origin login redirect blocked by CORS): stop after a few.
-      pollFailures = nextPollFailures(pollFailures, true, jobBusy);
-      if (pollFailures >= POLL_MAX_FAILURES) {
+      pollFailures = nextPollFailures(pollFailures, true, jobBusy, true);
+      if (pollFailures >= pollFailureCap(jobBusy)) {
         stopJobPoll();
         if (!sessionExpired) {
           sessionExpired = true;
