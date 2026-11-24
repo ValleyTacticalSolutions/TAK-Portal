@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 ## Version History
 
 ### v2.0.43 - IN PROGRESS
+🐛 `Bug Fix` - CloudTAK Marketplace page no longer keeps polling in the background after your login expires. It now stops, shows "Session expired, please reload this page to sign in again.", and also stops after repeated failed requests, so a forgotten tab no longer loads the sign-in server about once a second (#183)<br>
 🐛 `Bug Fix` - Backend Change - CloudTAK Marketplace host scan no longer times out on hosts running many CloudTAK containers. It used to run one `docker exec` for each plugin folder in every CloudTAK container (49 calls on a typical host, over the 60-second limit). It now runs one per container and only checks the API service container, falling back to all CloudTAK containers when no API container is found (#165)<br>
 🐛 `Bug Fix` - Backend Change - A failed CloudTAK Marketplace install (for example the Print image pull timing out during the rebuild) no longer leaves a half-installed plugin folder behind. The failed job now removes the partial folder, so a folder check cannot report the plugin as installed and it can be installed again cleanly (#181)<br>
 

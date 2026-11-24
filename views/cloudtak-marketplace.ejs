@@ -552,6 +552,14 @@
   var activeJobs = [];
   var jobBusy = false;
   var jobPoll = null;
+  var sessionExpired = false;
+  var pollFailures = 0;
+  var POLL_MAX_FAILURES = 5;
+  var SESSION_EXPIRED_MSG = "Session expired, please reload this page to sign in again.";
+  function stopJobPoll() {
+    if (jobPoll) clearInterval(jobPoll);
+    jobPoll = null;
+  }
   var lastStatus = null;
   var emailConfigured = <%= typeof emailConfigured !== "undefined" && emailConfigured ? "true" : "false" %>;
   var PORTAL_VERSION = <%- JSON.stringify(typeof APP_VERSION !== "undefined" ? String(APP_VERSION) : "") %>;
@@ -1372,6 +1380,10 @@
   function loadAll() {
     var gen = ++loadGen;
     function readJson(r) {
+      var ct = String((r.headers && r.headers.get && r.headers.get("content-type")) || "");
+      var expired = !!r.redirected || r.status === 401 || r.status === 403 ||
+        (r.ok && ct.toLowerCase().indexOf("json") === -1);
+      if (expired) return { httpOk: false, status: r.status, json: {}, expired: true };
       return r.json().then(function (j) {
         return { httpOk: r.ok, status: r.status, json: j || {} };
       }).catch(function () {
@@ -1387,6 +1399,13 @@
       if (gen !== loadGen) return;
       var snapRes = pair[0] || {};
       var statusRes = pair[1] || {};
+      if (snapRes.expired || statusRes.expired) {
+        stopJobPoll();
+        sessionExpired = true;
+        setMsg(SESSION_EXPIRED_MSG, true);
+        return;
+      }
+      pollFailures = (!snapRes.httpOk || !statusRes.httpOk) ? pollFailures + 1 : 0;
       var snap = snapRes.json || {};
       var status = statusRes.json || null;
       lastStatus = status;
@@ -1425,13 +1444,22 @@
       document.querySelectorAll("[data-mp-filter]").forEach(function (btn) {
         btn.classList.toggle("is-filter-on", btn.getAttribute("data-mp-filter") === filter);
       });
-      if (jobBusy) {
+      if (jobBusy && pollFailures < POLL_MAX_FAILURES) {
         if (!jobPoll) jobPoll = setInterval(loadAll, 2000);
-      } else if (jobPoll) {
-        clearInterval(jobPoll);
-        jobPoll = null;
+      } else {
+        stopJobPoll();
       }
     }).catch(function (err) {
+      // Network error (e.g. a cross-origin login redirect blocked by CORS): stop after a few.
+      pollFailures += 1;
+      if (pollFailures >= POLL_MAX_FAILURES) {
+        stopJobPoll();
+        if (!sessionExpired) {
+          sessionExpired = true;
+          setMsg(SESSION_EXPIRED_MSG, true);
+        }
+        return;
+      }
       if (jobPoll) return;
       setMsg(err.message || "Failed to load marketplace", true);
     });
