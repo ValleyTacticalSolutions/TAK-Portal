@@ -5521,6 +5521,29 @@ async function performRebuild(jobs, ctPath, service) {
   }
 }
 
+/**
+ * A failed fresh install must not leave app/plugins/<dest> behind: a folder-only check
+ * would call the plugin installed (#181). Update jobs keep their previous copy.
+ * Runs the normal uninstall, then the caller records the failure (error-only row).
+ */
+async function rollbackFailedInstall(job) {
+  if (!job || job.kind !== "install") return false;
+  const plugin = job.pluginId ? pluginById(job.pluginId) : null;
+  const dest = (job.extra && job.extra.dest) || (plugin && plugin.web && plugin.web.dest) || "";
+  if (!dest) return false;
+  try {
+    appendJobLog(job.id, `Install failed; removing the partial ${dest} folder so it can be installed again`);
+    await performUninstall(job, dest, plugin);
+    return true;
+  } catch (err) {
+    appendJobLog(
+      job.id,
+      `Could not remove the partial ${dest} folder: ${err && err.message ? err.message : err}. Uninstall it, then install again.`
+    );
+    return false;
+  }
+}
+
 async function runChangeBatch(jobs) {
   const expanded = [];
   for (const job of jobs) {
@@ -5596,6 +5619,7 @@ async function runChangeBatch(jobs) {
         });
         continue;
       }
+      await rollbackFailedInstall(job);
       recordCommandFailure(job, "FAILED ", err);
     }
   }
@@ -5632,6 +5656,7 @@ async function runChangeBatch(jobs) {
         const attributed = attributeRebuildFailure(raw);
         const culpritId = attributed && attributed.pluginId ? attributed.pluginId : "";
         for (const j of succeeded) {
+          await rollbackFailedInstall(j);
           if (culpritId && j.pluginId && j.pluginId === culpritId) {
             recordCommandFailure(j, "Rebuild failed: ", err);
             continue;
@@ -6044,6 +6069,8 @@ module.exports = {
   onEnabled,
   normalizeInstallScript,
   installRemoteScript,
+  rollbackFailedInstall,
+  runChangeBatch,
   guessPluginRouteFiles,
   uninstallRemoteScript,
   rebuildRemoteScript,

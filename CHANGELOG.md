@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ### v2.0.43 - IN PROGRESS
 🐛 `Bug Fix` - Backend Change - CloudTAK Marketplace host scan no longer times out on hosts running many CloudTAK containers. It used to run one `docker exec` for each plugin folder in every CloudTAK container (49 calls on a typical host, over the 60-second limit). It now runs one per container and only checks the API service container, falling back to all CloudTAK containers when no API container is found (#165)<br>
+🐛 `Bug Fix` - Backend Change - A failed CloudTAK Marketplace install (for example the Print image pull timing out during the rebuild) no longer leaves a half-installed plugin folder behind. The failed job now removes the partial folder, so a folder check cannot report the plugin as installed and it can be installed again cleanly (#181)<br>
 
 ### v2.0.42 - 11/24/26
 🐛 `Bug Fix` - Backend Change - CloudTAK Marketplace no longer runs a `<priv> -n true` probe before elevating on the host. Hosts with narrow grants refused it, which mailed a refusal notice to root on every run and skipped commands that were actually granted. The real command is now tried directly, and only a refusal moves on to the stored password (#178)<br>
