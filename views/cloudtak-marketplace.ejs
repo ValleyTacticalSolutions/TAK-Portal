@@ -556,6 +556,17 @@
   var pollFailures = 0;
   var POLL_MAX_FAILURES = 5;
   var SESSION_EXPIRED_MSG = "Session expired, please reload this page to sign in again.";
+  // Login lapsed: redirect to sign-in, 401/403, or an HTML page where JSON was expected.
+  function isExpiredResponse(r) {
+    var ct = String((r.headers && r.headers.get && r.headers.get("content-type")) || "");
+    return !!r.redirected || r.status === 401 || r.status === 403 ||
+      (!!r.ok && ct.toLowerCase().indexOf("json") === -1);
+  }
+  // While a job runs, 5xx/network failures (e.g. server restart) never count: keep polling.
+  function nextPollFailures(prev, failed, busy) {
+    if (!failed) return 0;
+    return busy ? prev : prev + 1;
+  }
   function stopJobPoll() {
     if (jobPoll) clearInterval(jobPoll);
     jobPoll = null;
@@ -1380,10 +1391,7 @@
   function loadAll() {
     var gen = ++loadGen;
     function readJson(r) {
-      var ct = String((r.headers && r.headers.get && r.headers.get("content-type")) || "");
-      var expired = !!r.redirected || r.status === 401 || r.status === 403 ||
-        (r.ok && ct.toLowerCase().indexOf("json") === -1);
-      if (expired) return { httpOk: false, status: r.status, json: {}, expired: true };
+      if (isExpiredResponse(r)) return { httpOk: false, status: r.status, json: {}, expired: true };
       return r.json().then(function (j) {
         return { httpOk: r.ok, status: r.status, json: j || {} };
       }).catch(function () {
@@ -1405,7 +1413,7 @@
         setMsg(SESSION_EXPIRED_MSG, true);
         return;
       }
-      pollFailures = (!snapRes.httpOk || !statusRes.httpOk) ? pollFailures + 1 : 0;
+      pollFailures = nextPollFailures(pollFailures, !snapRes.httpOk || !statusRes.httpOk, jobBusy);
       var snap = snapRes.json || {};
       var status = statusRes.json || null;
       lastStatus = status;
@@ -1451,7 +1459,7 @@
       }
     }).catch(function (err) {
       // Network error (e.g. a cross-origin login redirect blocked by CORS): stop after a few.
-      pollFailures += 1;
+      pollFailures = nextPollFailures(pollFailures, true, jobBusy);
       if (pollFailures >= POLL_MAX_FAILURES) {
         stopJobPoll();
         if (!sessionExpired) {
