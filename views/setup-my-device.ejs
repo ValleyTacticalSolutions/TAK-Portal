@@ -42,10 +42,20 @@
     const sshConfiguredForClients = typeof sshConfigured !== "undefined" && !!sshConfigured;
     const showDataPackage =
       allowedClientBool("ALLOWED_CLIENT_DATA_PACKAGE", false) && sshConfiguredForClients;
-    const showIosPlatform = showTakAware || showTakTracker || showITakLinks;
-    const showAndroidPlatform = showAtak || showTakBeacon;
-    const showWebPlatform = showLiveMap || showCloudTak;
-    const showPcPlatform = showDataPackage;
+    const customAll = (typeof customClients !== "undefined" && Array.isArray(customClients))
+      ? customClients.filter((c) => c && c.enabled)
+      : [];
+    const customIos = customAll.filter((c) => c.platform === "ios");
+    const customAndroid = customAll.filter((c) => c.platform === "android");
+    const customWeb = customAll.filter((c) => c.platform === "web");
+    const customPc = customAll.filter((c) => c.platform === "pc");
+    function customNames(list) {
+      return list.map((c) => c.name).join(", ");
+    }
+    const showIosPlatform = showTakAware || showTakTracker || showITakLinks || customIos.length > 0;
+    const showAndroidPlatform = showAtak || showTakBeacon || customAndroid.length > 0;
+    const showWebPlatform = showLiveMap || showCloudTak || customWeb.length > 0;
+    const showPcPlatform = showDataPackage || customPc.length > 0;
     const platformCount =
       (showIosPlatform ? 1 : 0) +
       (showAndroidPlatform ? 1 : 0) +
@@ -59,20 +69,23 @@
     const iosAppCount =
       (showTakAware ? 1 : 0) +
       (showTakTracker ? 1 : 0) +
-      (showITakLinks ? 1 : 0);
+      (showITakLinks ? 1 : 0) +
+      customIos.length;
     const iosGridClass =
       iosAppCount >= 3 ? "iosSetupGrid--three" :
       iosAppCount === 2 ? "iosSetupGrid--two" :
       "iosSetupGrid--one";
     const androidAppCount =
       (showAtak ? 1 : 0) +
-      (showTakBeacon ? 1 : 0);
+      (showTakBeacon ? 1 : 0) +
+      customAndroid.length;
     const androidGridClass =
       androidAppCount >= 2 ? "iosSetupGrid--two" :
       "iosSetupGrid--one";
     const webAppCount =
       (showLiveMap ? 1 : 0) +
-      (showCloudTak ? 1 : 0);
+      (showCloudTak ? 1 : 0) +
+      customWeb.length;
     const webGridClass =
       webAppCount >= 2 ? "iosSetupGrid--two" :
       "iosSetupGrid--one";
@@ -96,13 +109,17 @@
     const recommendCloudTak = recommendedWeb === "cloudtak";
     const recommendDataPackage = recommendedPc === "data_package";
     const webPlatformDesc =
-      showLiveMap && showCloudTak
+      !showLiveMap && !showCloudTak
+        ? "Use " + customNames(customWeb) + " in a web browser."
+        : showLiveMap && showCloudTak
         ? "Use TAK Portal Live Map or CloudTAK in a web browser."
         : showLiveMap
           ? "Use TAK Portal Live Map in a web browser."
           : "Use CloudTAK on web browsers.";
     const androidPlatformDesc =
-      showAtak && showTakBeacon
+      !showAtak && !showTakBeacon
+        ? "Use " + customNames(customAndroid) + " on Android devices."
+        : showAtak && showTakBeacon
         ? "Use ATAK or TAK Beacon on Android devices."
         : showTakBeacon
           ? "Use TAK Beacon on Android devices."
@@ -155,7 +172,7 @@
       <% if (showIosPlatform) { %>
       <button type="button" class="btn tile deviceTile deviceTile-ios" id="selectIOS">
         <span class="title">Apple (iPhone / iPad)</span>
-        <span class="desc">Use TAK Aware or TAK Tracker on iOS devices.</span>
+        <span class="desc"><%= (!showTakAware && !showTakTracker && !showITakLinks) ? "Use " + customNames(customIos) + " on iOS devices." : "Use TAK Aware or TAK Tracker on iOS devices." %></span>
       </button>
       <% } %>
 
@@ -176,7 +193,7 @@
       <% if (showPcPlatform) { %>
         <button type="button" class="btn tile deviceTile deviceTile-pc" id="selectPC">
           <span class="title">PC</span>
-          <span class="desc">Use a TAK data package on Windows.</span>
+          <span class="desc"><%= !showDataPackage ? "Use " + customNames(customPc) + " on PC." : "Use a TAK data package on Windows." %></span>
         </button>
       <% } %>
     </div>
@@ -299,6 +316,7 @@
         </div>
         <% } %>
       <% }); %>
+      <% customIos.forEach(function (c) { %><%- include("partials/custom_client_card", { c: c }) %><% }); %>
     </div>
   </div>
   <% } %>
@@ -402,6 +420,7 @@
     </div>
       <% } %>
     <% }); %>
+    <% customAndroid.forEach(function (c) { %><%- include("partials/custom_client_card", { c: c }) %><% }); %>
     </div>
   </div>
   <% } %>
@@ -442,12 +461,14 @@
       </div>
         <% } %>
       <% }); %>
+      <% customWeb.forEach(function (c) { %><%- include("partials/custom_client_card", { c: c }) %><% }); %>
     </div>
   </div>
   <% } %>
 
   <% if (showPcPlatform) { %>
   <div id="pcFlow" style="display:none;">
+    <% if (showDataPackage) { %>
     <div class="card iosAppGroup" style="margin-top: 0.5rem;">
       <h2 class="iosAppGroupTitle">Data Package</h2>
       <section class="iosStep">
@@ -462,6 +483,8 @@
         </a>
       </section>
     </div>
+    <% } %>
+    <% customPc.forEach(function (c) { %><%- include("partials/custom_client_card", { c: c }) %><% }); %>
   </div>
   <% } %>
 </main>
@@ -572,6 +595,8 @@
   const showAtak = <%- JSON.stringify(showAtak) %>;
   const showTakBeacon = <%- JSON.stringify(showTakBeacon) %>;
   const iosOrder = <%- JSON.stringify(iosOrder) %>;
+  const customClientsData = <%- JSON.stringify(customAll).replace(/</g, "\\u003c") %>;
+  let activeCustom = null;
 
   // --- device selection UI (NO persistence; forgets on reload) ---
   const iosFlow = document.getElementById("iosFlow");
@@ -1029,16 +1054,26 @@
     details.innerHTML = chips.join(" ");
   }
 
+  function buildCustomOpenUrl(c, obj) {
+    if (!c || !c.urlScheme) return "";
+    const vars = { host: obj.host || "", username: obj.username || "", token: obj.token || "" };
+    return String(c.urlScheme).replace(/\{(host|username|token)\}/g, (_, k) => encodeURIComponent(vars[k]));
+  }
+
   function syncQrActionButtons(mode, obj) {
-    const isItak = mode === "itak";
+    const isCustom = mode === "custom" && !!activeCustom;
+    const isItak = mode === "itak" || (isCustom && activeCustom.enrollQr === "itak");
     let url = (obj.enrollUrl && String(obj.enrollUrl).trim()) || "";
     if (isItak && obj.itakPayload) {
       url = String(obj.itakPayload).trim();
     }
     if (enrollUrlHolder) enrollUrlHolder.dataset.enrollUrl = url;
 
+    const customOpenUrl = isCustom ? buildCustomOpenUrl(activeCustom, obj) : "";
+    if (enrollUrlHolder) enrollUrlHolder.dataset.openUrl = customOpenUrl;
     if (openUrlBtn) {
-      openUrlBtn.disabled = isItak || !url;
+      // A custom client opens only through its own URL scheme, never another TAK app.
+      openUrlBtn.disabled = isCustom ? !customOpenUrl : (isItak || !url);
     }
     copyBtn.disabled = !url;
   }
@@ -1059,7 +1094,7 @@
     return "atak";
   }
 
-  async function fetchAndShowQr(app) {
+  async function fetchAndShowQr(app, customClientId) {
     app = resolveEnrollApp(app);
     const isItak = app === "itak";
     // UI reset
@@ -1075,7 +1110,7 @@
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(isItak ? { app } : {})
+      body: JSON.stringify(Object.assign({}, isItak ? { app } : {}, customClientId ? { customClientId } : {}))
     });
 
     const rawText = await res.text();
@@ -1090,6 +1125,7 @@
 
     const obj = {
       username: data.username,
+      host: data.host,
       tokenIdentifier: data.tokenIdentifier,
       token: data.token,
       expiresAt: data.expiresAt,
@@ -1114,6 +1150,7 @@
   }
 
   async function handleScanClick(mode) {
+    activeCustom = null;
     setScanInstructions(mode);
     setMsg(msg, "", true);
 
@@ -1127,6 +1164,33 @@
       if (mode === "takaware" || mode === "taktracker" || mode === "itak") {
         await applyIosQrEnrollmentPreferences(mode);
       }
+    } catch (err) {
+      setMsg(msg, err?.message || String(err), false);
+      openModal();
+    }
+  }
+
+  function findCustomClient(id) {
+    return customClientsData.find((c) => c && c.id === id) || null;
+  }
+
+  async function handleCustomScanClick(id) {
+    const c = findCustomClient(id);
+    if (!c) return;
+    activeCustom = c;
+    scanMode = "custom";
+    instructionsTitle.textContent = c.name + ": How to Scan";
+    const steps = [
+      "Open " + escapeHtml(c.name) + " on your device.",
+      c.urlScheme
+        ? "Tap Open In App, or scan this QR code from inside " + escapeHtml(c.name) + "."
+        : "Scan this QR code from inside " + escapeHtml(c.name) + "."
+    ];
+    if (c.instructions) steps.push(escapeHtml(c.instructions));
+    instructionsList.innerHTML = steps.map(s => `<li>${s}</li>`).join("");
+    setMsg(msg, "", true);
+    try {
+      await fetchAndShowQr(c.enrollQr === "itak" ? "itak" : "atak", c.id);
     } catch (err) {
       setMsg(msg, err?.message || String(err), false);
       openModal();
@@ -1233,7 +1297,18 @@
   }
 
   function setPreferenceConfigMode(mode) {
-    preferenceConfigMode = mode === "takaware" ? "takaware" : "atak";
+    preferenceConfigMode = mode === "takaware" ? "takaware" : mode === "custom" ? "custom" : "atak";
+    if (preferenceConfigMode === "custom" && activeCustom) {
+      if (preferenceQrTitle) preferenceQrTitle.textContent = "Configure " + activeCustom.name + " Preferences";
+      if (preferenceQrInstructions) {
+        preferenceQrInstructions.innerHTML = [
+          "Open the camera on your device.",
+          "Point your camera at the QR code and select the notification to open the link.",
+          "Accept the preference configuration inside " + escapeHtml(activeCustom.name) + " when prompted."
+        ].map(function (s) { return "<li>" + s + "</li>"; }).join("");
+      }
+      return;
+    }
     if (preferenceQrTitle) {
       preferenceQrTitle.textContent = preferenceConfigMode === "takaware"
         ? "Configure TAK Aware Preferences"
@@ -1370,6 +1445,16 @@
     manualLoginBtnITak.addEventListener("click", () => handleManualLoginClick("itak"));
   }
 
+  document.querySelectorAll("[data-custom-enroll]").forEach((b) => {
+    b.addEventListener("click", () => handleCustomScanClick(b.getAttribute("data-custom-enroll")));
+  });
+  document.querySelectorAll("[data-custom-pref]").forEach((b) => {
+    b.addEventListener("click", () => {
+      activeCustom = findCustomClient(b.getAttribute("data-custom-pref"));
+      handlePreferenceScanClick("custom");
+    });
+  });
+
   closeBtn.addEventListener("click", closeModal);
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) closeModal();
@@ -1390,7 +1475,7 @@
   });
 
   openUrlBtn.addEventListener("click", () => {
-    var url = getCurrentEnrollUrl();
+    var url = (enrollUrlHolder && enrollUrlHolder.dataset.openUrl) || getCurrentEnrollUrl();
     if (!url) return;
     var a = document.createElement("a");
     a.href = url;

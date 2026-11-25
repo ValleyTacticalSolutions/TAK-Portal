@@ -3903,6 +3903,187 @@
             <input type="hidden" name="settings[ALLOWED_CLIENT_ORDER_PC]" value="<%= pcOrder.join(',') %>" data-allowed-client-order-input="pc" />
           </div>
 
+          <h3 class="settings-allowed-client-platform">Custom Clients</h3>
+          <p class="settings-help" style="margin:0 0 0.5rem;">Add your own TAK client app. Each enabled client appears as a card on Setup My Device under its platform and reuses the standard enrollment QR, token lifetime and audit log. For an "Open In App" button that opens your app, set a URL scheme and use <code>{host}</code>, <code>{username}</code> and <code>{token}</code> where the values go, for example <code>myapp://enroll?host={host}&amp;username={username}&amp;token={token}</code>.</p>
+          <div class="settings-auto-create-section" id="customClientsSection" data-custom-clients-section>
+            <input type="hidden" name="settings[CUSTOM_TAK_CLIENTS]" id="customClientsJson" value="<%= String((settings && settings.CUSTOM_TAK_CLIENTS) || '[]') %>" />
+            <div id="customClientsList" class="customClientsList"></div>
+            <div class="customClientsEditor" id="customClientsEditor" style="display:none;">
+              <div class="customClientsGrid">
+                <label class="customClientsField"><span>Name</span><input type="text" id="ccName" maxlength="60" autocomplete="off" /></label>
+                <label class="customClientsField"><span>Platform</span>
+                  <select id="ccPlatform">
+                    <option value="ios">iOS</option>
+                    <option value="android">Android</option>
+                    <option value="web">Web</option>
+                    <option value="pc">PC</option>
+                  </select>
+                </label>
+                <label class="customClientsField"><span>Icon URL (optional)</span><input type="text" id="ccIcon" maxlength="2000" placeholder="https://..." autocomplete="off" /></label>
+                <label class="customClientsField"><span id="ccDownloadLabel">Download link (App Store, TestFlight, Play Store, APK)</span><input type="text" id="ccDownload" maxlength="2000" placeholder="https://..." autocomplete="off" /></label>
+                <label class="customClientsField" data-cc-mobile><span>Enrollment QR</span>
+                  <select id="ccEnroll">
+                    <option value="standard">Standard (ATAK / TAK Aware)</option>
+                    <option value="itak">iTAK</option>
+                    <option value="none">None</option>
+                  </select>
+                </label>
+                <label class="customClientsField" data-cc-mobile><span>URL scheme for Open In App (optional)</span><input type="text" id="ccScheme" maxlength="1000" placeholder="myapp://enroll?host={host}&amp;username={username}&amp;token={token}" autocomplete="off" /></label>
+                <label class="customClientsField customClientsCheck" data-cc-mobile><input type="checkbox" id="ccPref" /><span>Reads the preference QR</span></label>
+                <label class="customClientsField customClientsWide"><span>Instructions (optional)</span><textarea id="ccInstructions" rows="3" maxlength="1000"></textarea></label>
+              </div>
+              <div id="ccError" class="settings-help" style="color:var(--danger,#dc2626);display:none;"></div>
+              <div class="row" style="gap:0.5rem;margin-top:0.5rem;">
+                <button type="button" class="btn success" id="ccSave">Save client</button>
+                <button type="button" class="btn" id="ccCancel">Cancel</button>
+              </div>
+            </div>
+            <button type="button" class="btn" id="customClientsAdd" style="margin-top:0.5rem;">Add custom client</button>
+          </div>
+
+          <script>
+            (function () {
+              var hidden = document.getElementById("customClientsJson");
+              var list = document.getElementById("customClientsList");
+              var editor = document.getElementById("customClientsEditor");
+              var addBtn = document.getElementById("customClientsAdd");
+              if (!hidden || !list || !editor || !addBtn) return;
+              var PLATFORM_LABEL = { ios: "iOS", android: "Android", web: "Web", pc: "PC" };
+              var MAX = 25;
+              var clients = [];
+              var editingIndex = -1;
+              try { clients = JSON.parse(hidden.value || "[]"); } catch (e) { clients = []; }
+              if (!Array.isArray(clients)) clients = [];
+
+              function $(id) { return document.getElementById(id); }
+              function persist() {
+                hidden.value = JSON.stringify(clients);
+                if (typeof window.scheduleSettingsAutoSave === "function") window.scheduleSettingsAutoSave();
+              }
+              function validHttp(v) {
+                if (!v) return true;
+                try { var u = new URL(v); return u.protocol === "http:" || u.protocol === "https:"; } catch (e) { return false; }
+              }
+              function validScheme(v) {
+                if (!v) return true;
+                var m = /^([a-z][a-z0-9+.-]{1,31}):\/\/\S*$/i.exec(v);
+                if (!m) return false;
+                return ["javascript", "data", "vbscript", "file", "blob", "about", "http", "https"].indexOf(m[1].toLowerCase()) === -1;
+              }
+              function syncPlatformFields() {
+                var p = $("ccPlatform").value;
+                var mobile = p === "ios" || p === "android";
+                [].forEach.call(editor.querySelectorAll("[data-cc-mobile]"), function (el) {
+                  el.style.display = mobile ? "" : "none";
+                });
+                $("ccDownloadLabel").textContent = p === "web"
+                  ? "Address to open (required)"
+                  : "Download link (App Store, TestFlight, Play Store, APK)";
+              }
+              function render() {
+                list.innerHTML = "";
+                clients.forEach(function (c, i) {
+                  var row = document.createElement("div");
+                  row.className = "customClientsRow";
+                  var title = document.createElement("div");
+                  title.className = "customClientsTitle";
+                  title.textContent = c.name + " (" + (PLATFORM_LABEL[c.platform] || c.platform) + ")" + (c.recommended ? " - Recommended" : "");
+                  row.appendChild(title);
+                  var actions = document.createElement("div");
+                  actions.className = "customClientsActions";
+                  function btn(label, fn, extra) {
+                    var b = document.createElement("button");
+                    b.type = "button";
+                    b.className = "btn" + (extra ? " " + extra : "");
+                    b.textContent = label;
+                    b.addEventListener("click", fn);
+                    actions.appendChild(b);
+                    return b;
+                  }
+                  btn(c.enabled ? "Enabled" : "Disabled", function () { c.enabled = !c.enabled; persist(); render(); }, c.enabled ? "success" : "");
+                  btn(c.recommended ? "Recommended" : "Recommend", function () {
+                    var next = !c.recommended;
+                    clients.forEach(function (o) { if (o.platform === c.platform) o.recommended = false; });
+                    c.recommended = next;
+                    persist(); render();
+                  });
+                  var up = btn("Up", function () { if (i > 0) { var t = clients[i - 1]; clients[i - 1] = c; clients[i] = t; persist(); render(); } });
+                  up.disabled = i === 0;
+                  var down = btn("Down", function () { if (i < clients.length - 1) { var t = clients[i + 1]; clients[i + 1] = c; clients[i] = t; persist(); render(); } });
+                  down.disabled = i === clients.length - 1;
+                  btn("Edit", function () { openEditor(i); });
+                  btn("Remove", function () {
+                    if (!window.confirm("Remove " + c.name + "?")) return;
+                    clients.splice(i, 1); persist(); render();
+                  }, "danger");
+                  row.appendChild(actions);
+                  list.appendChild(row);
+                });
+                addBtn.disabled = clients.length >= MAX;
+              }
+              function openEditor(index) {
+                editingIndex = index;
+                var c = index >= 0 ? clients[index] : { platform: "ios", enrollQr: "standard" };
+                $("ccName").value = c.name || "";
+                $("ccPlatform").value = c.platform || "ios";
+                $("ccIcon").value = c.iconUrl || "";
+                $("ccDownload").value = c.downloadUrl || "";
+                $("ccEnroll").value = c.enrollQr || "standard";
+                $("ccScheme").value = c.urlScheme || "";
+                $("ccPref").checked = !!c.prefQr;
+                $("ccInstructions").value = c.instructions || "";
+                $("ccError").style.display = "none";
+                syncPlatformFields();
+                editor.style.display = "block";
+                addBtn.style.display = "none";
+                $("ccName").focus();
+              }
+              function closeEditor() {
+                editor.style.display = "none";
+                addBtn.style.display = "";
+                editingIndex = -1;
+              }
+              function fail(msg) {
+                var el = $("ccError");
+                el.textContent = msg;
+                el.style.display = "block";
+              }
+              $("ccPlatform").addEventListener("change", syncPlatformFields);
+              addBtn.addEventListener("click", function () { openEditor(-1); });
+              $("ccCancel").addEventListener("click", closeEditor);
+              $("ccSave").addEventListener("click", function () {
+                var name = $("ccName").value.trim();
+                var platform = $("ccPlatform").value;
+                var download = $("ccDownload").value.trim();
+                var icon = $("ccIcon").value.trim();
+                var scheme = $("ccScheme").value.trim();
+                if (!name) return fail("Name is required.");
+                if (platform === "web" && !download) return fail("Web clients need an address to open.");
+                if (!validHttp(download)) return fail("Download link must start with http:// or https://.");
+                if (!validHttp(icon)) return fail("Icon URL must start with http:// or https://.");
+                var mobile = platform === "ios" || platform === "android";
+                if (mobile && !validScheme(scheme)) return fail("URL scheme must look like myapp://... (not http, https or javascript).");
+                var prev = editingIndex >= 0 ? clients[editingIndex] : {};
+                var next = {
+                  id: prev.id || "",
+                  name: name,
+                  platform: platform,
+                  iconUrl: icon,
+                  downloadUrl: download,
+                  enrollQr: mobile ? $("ccEnroll").value : "none",
+                  prefQr: mobile ? $("ccPref").checked : false,
+                  urlScheme: mobile ? scheme : "",
+                  instructions: $("ccInstructions").value.trim(),
+                  enabled: prev.enabled !== false,
+                  recommended: !!prev.recommended && prev.platform === platform
+                };
+                if (editingIndex >= 0) clients[editingIndex] = next; else clients.push(next);
+                persist(); render(); closeEditor();
+              });
+              render();
+            })();
+          </script>
+
           <script>
             (function () {
               var modal = document.getElementById("settingsModal-allowed-client-devices");

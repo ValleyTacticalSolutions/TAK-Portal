@@ -1428,6 +1428,9 @@ app.get("/setup-my-device", async (req, res) => {
     takHost,
     enrollQrBootstrap,
     sshConfigured: !!takSshSvc.isPrivilegedSshReady(),
+    customClients: require("./services/customTakClients.service").normalizeCustomClients(
+      settingsSvc.getSettings().CUSTOM_TAK_CLIENTS
+    ),
     atakApk: atakApkSvc.getApkInfo(),
     agreementSummary: mouSvc.getAgreementSummaryForUser(req.authentikUser, {
       acceptedForSession: hasAcceptedAgreementForSession(
@@ -2116,6 +2119,12 @@ app.post(
       if (key === "SERVER_NAME") {
         const raw = String(bodySettings[key] || "").trim();
         merged[key] = raw ? raw.toUpperCase() : "";
+        return;
+      }
+      if (key === "CUSTOM_TAK_CLIENTS") {
+        merged[key] = require("./services/customTakClients.service").serializeCustomClients(
+          bodySettings[key]
+        );
         return;
       }
       if (key === "DEFAULT_MAP_SOURCE") {

@@ -7,6 +7,8 @@ const tokensSvc = require("../services/authentikTokens.service");
 const usersSvc = require("../services/users.service");
 const auditSvc = require("../services/auditLog.service");
 const enrollmentPkg = require("../services/enrollmentPackage.service");
+const customClientsSvc = require("../services/customTakClients.service");
+const settingsSvc = require("../services/settings.service");
 
 function requireLoggedIn(req, res) {
   const u = req.authentikUser;
@@ -47,6 +49,21 @@ router.post("/enroll-qr", async (req, res) => {
     }
 
     const isItak = req.body && String(req.body.app || "").toLowerCase() === "itak";
+
+    // Optional: which admin-defined custom client asked (only used for the audit log).
+    let customClient = null;
+    const customId = String((req.body && req.body.customClientId) || "").trim().toLowerCase();
+    if (customId) {
+      try {
+        const cfg = settingsSvc.getSettings();
+        customClient =
+          customClientsSvc
+            .normalizeCustomClients(cfg && cfg[customClientsSvc.SETTINGS_KEY])
+            .find((c) => c.id === customId && c.enabled) || null;
+      } catch (_) {
+        customClient = null;
+      }
+    }
 
     const { identifier, key, expiresAt } =
       await tokensSvc.getOrCreateEnrollmentAppPassword({
@@ -99,13 +116,17 @@ router.post("/enroll-qr", async (req, res) => {
         tokenIdentifier: identifier,
         expiresAt,
         itak: isItak,
-        summary: `User generated own enrollment QR (${isItak ? "iTAK" : "standard"}).`,
+        ...(customClient ? { customClient: customClient.name } : {}),
+        summary: `User generated own enrollment QR (${isItak ? "iTAK" : "standard"})${
+          customClient ? ` for custom client ${customClient.name}` : ""
+        }.`,
       },
     });
 
     return res.json({
       ok: true,
       username: user.username,
+      host: qrSvc.getTakHost() || "",
       tokenIdentifier: identifier,
       token: key,
       expiresAt,
