@@ -236,9 +236,7 @@
         "REQUEST_ACCESS_REQUIRE_ALL_AGENCY_DETAILS",
         "BETA_MODE",
         "USER_PHONE_NUMBER_FIELD_ENABLED",
-        "USER_PHONE_NUMBER_CONSENT_TEXT",
-        "USER_PHONE_NUMBER_CONSENT_PRIVACY_URL",
-        "USER_PHONE_NUMBER_CONSENT_TERMS_URL",
+        "SMS_CONSENT_ENABLED",
         "LIVE_MAP_ENABLED",
         "MOU_ENABLED",
         "MOU_SEND_EMAILS",
@@ -445,9 +443,6 @@
         "REQUEST_ACCESS_REQUIRE_ALL_AGENCY_DETAILS",
         "BETA_MODE",
         "USER_PHONE_NUMBER_FIELD_ENABLED",
-        "USER_PHONE_NUMBER_CONSENT_TEXT",
-        "USER_PHONE_NUMBER_CONSENT_PRIVACY_URL",
-        "USER_PHONE_NUMBER_CONSENT_TERMS_URL",
         "DEFAULT_THEME_MODE",
         "LIVE_MAP_ENABLED",
         "DEFAULT_MAP_SOURCE",
@@ -463,6 +458,7 @@
         "SMS_BREVO_API_KEY",
         "SMS_BREVO_SENDER",
         "SMS_TEST_TO",
+        "SMS_CONSENT_TEXT",
 
         ...bookmarkKeys,
         ...additionalAgencyTypeKeys,
@@ -1197,6 +1193,14 @@
             </div>
           </div>
 
+          <div style="margin-top:1rem;">
+            <% renderField("SMS_CONSENT_ENABLED","SMS Consent Notice","When on, Request Access shows your notice under the Phone Number field with a checkbox the user must tick to agree when they enter a phone number. Needs the User's Phone Number Field setting on.","false"); %>
+          </div>
+          <label class="settings-field" id="smsConsentTextField" style="margin-top:.5rem;max-width:100%;<%= String(settings.SMS_CONSENT_ENABLED || '').toLowerCase() === 'true' ? '' : 'display:none;' %>">
+            <span class="settings-label">Consent notice text</span>
+            <textarea name="settings[SMS_CONSENT_TEXT]" rows="4" maxlength="1000" style="width:100%;" placeholder="e.g. I agree to receive text messages from this agency. Message and data rates may apply. Reply STOP to opt out."><%= settings.SMS_CONSENT_TEXT || '' %></textarea>
+          </label>
+
           <label class="settings-field" style="margin-top:1rem;max-width:100%;">
             <span class="settings-label">SMS test recipient(s)</span>
             <input type="text" name="settings[SMS_TEST_TO]" value="<%= settings.SMS_TEST_TO || '' %>" placeholder="To number(s), comma-separated — used by Send test SMS" autocomplete="off" />
@@ -1233,6 +1237,16 @@
         }
         if (sel) sel.addEventListener("change", syncSmsPanels);
         syncSmsPanels();
+        var consentField = document.getElementById("smsConsentTextField");
+        var consentToggle = document.querySelector('input[name="settings[SMS_CONSENT_ENABLED]"]');
+        if (consentField && consentToggle) {
+          document.addEventListener("click", function (ev) {
+            if (!ev.target.closest || !ev.target.closest("[data-settings-bool-toggle]")) return;
+            setTimeout(function () {
+              consentField.style.display = consentToggle.value === "true" ? "" : "none";
+            }, 0);
+          });
+        }
         var brevoBtn = document.getElementById("smsBrevoDeliveryBtn");
         if (brevoBtn) {
           brevoBtn.addEventListener("click", function () {
@@ -2537,9 +2551,6 @@
             <% renderField("USERNAME_PREFIX_LABEL","Username Descriptor Text","Displayed on Users, Pending User Requests, Request Access, and the user CSV import template. Default: Badge Number / Username","Badge Number / Username"); %>
             <% renderField("BETA_MODE","Enable Beta Features","Shows in-development features for global admins (e.g. Getting Started). Also selects the update channel: on tracks the latest main branch; off updates to the last GitHub Release (including rolling back if you were on main). Settings and other data in the Docker volume are kept. Data Package, Locate Persons, and Data Sync are available regardless of this setting."); %>
             <% renderField("USER_PHONE_NUMBER_FIELD_ENABLED","User's Phone Number Field","When on, shows an optional phone number field on the Users create form and edit modal, the request access page, and the pending user request approve form (after radio callsign). Also includes a phone column in the user CSV import template. Stored on the Authentik user as attribute phone."); %>
-            <% renderField("USER_PHONE_NUMBER_CONSENT_TEXT","SMS Consent Notice","Shown under the Phone Number field on Request Access. Blank = hidden."); %>
-            <% renderField("USER_PHONE_NUMBER_CONSENT_PRIVACY_URL","SMS Privacy Policy URL","Optional. Must start with http:// or https://."); %>
-            <% renderField("USER_PHONE_NUMBER_CONSENT_TERMS_URL","SMS Terms URL","Optional. Must start with http:// or https://."); %>
           </div>
           <script>
             (function () {

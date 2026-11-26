@@ -119,19 +119,31 @@ function renderView(view, phoneEnabled, extraSettings = {}) {
     assert.ok(!noNotice.includes("data-sms-consent-notice"), "blank consent text must hide the notice");
 
     const consent = {
-      USER_PHONE_NUMBER_CONSENT_TEXT: "You agree to texts. <b>STOP</b> to cancel.",
-      USER_PHONE_NUMBER_CONSENT_PRIVACY_URL: "https://example.org/privacy",
-      USER_PHONE_NUMBER_CONSENT_TERMS_URL: "javascript:alert(1)",
+      SMS_CONSENT_ENABLED: "true",
+      SMS_CONSENT_TEXT: "You agree to texts. <b>STOP</b> to cancel.",
     };
+    const offToggle = await renderView("request-access.ejs", true, { ...consent, SMS_CONSENT_ENABLED: "false" });
+    assert.ok(!offToggle.includes("data-sms-consent-notice"), "toggle off must hide the notice");
     const withNotice = await renderView("request-access.ejs", true, consent);
     const phoneAt = withNotice.indexOf(inputTag(withNotice, "phone"));
     const noticeAt = withNotice.indexOf("data-sms-consent-notice");
     assert.ok(noticeAt > phoneAt && phoneAt > 0, "consent notice should sit under the phone input");
+    assert.ok(/<input[^>]*type="checkbox"[^>]*name="smsConsent"/.test(withNotice), "consent checkbox should render");
     assert.ok(withNotice.includes("&lt;b&gt;STOP&lt;/b&gt;"), "consent text must be escaped");
-    assert.ok(withNotice.includes('href="https://example.org/privacy"'), "privacy link should render");
-    assert.ok(!withNotice.includes("javascript:alert"), "non-http links must be dropped");
     const offNotice = await renderView("request-access.ejs", false, consent);
     assert.ok(!offNotice.includes("data-sms-consent-notice"), "notice hidden when phone field is off");
+
+    settingsSvc.updateSettings({ ...consent });
+    assert.throws(() => validateCreate(basePayload({ phone: "555-555-0123" })), /SMS consent/);
+    assert.strictEqual(validateCreate(basePayload({ phone: "555-555-0123", smsConsent: "1" })).phone, "555-555-0123");
+    assert.strictEqual(validateCreate(basePayload({ phone: "" })).phone, "");
+    settingsSvc.updateSettings({ SMS_CONSENT_ENABLED: "false", SMS_CONSENT_TEXT: "" });
+
+    const settingsHtml = require("fs").readFileSync(path.join(__dirname, "..", "views", "settings.ejs"), "utf8");
+    const smsAt = settingsHtml.indexOf('id="settingsModal-sms"');
+    const consentAt = settingsHtml.indexOf('renderField("SMS_CONSENT_ENABLED"');
+    assert.ok(smsAt > 0 && consentAt > smsAt, "consent toggle belongs in the SMS settings modal");
+    assert.ok(!settingsHtml.includes("USER_PHONE_NUMBER_CONSENT"), "old consent settings are gone");
 
     settingsSvc.updateSettings({ USER_PHONE_NUMBER_FIELD_ENABLED: "false" });
     const dropped = validateCreate(basePayload({ phone: "555-555-0123" }));
@@ -151,6 +163,8 @@ function renderView(view, phoneEnabled, extraSettings = {}) {
   } finally {
     settingsSvc.updateSettings({
       USER_PHONE_NUMBER_FIELD_ENABLED: priorPhone,
+      SMS_CONSENT_ENABLED: "false",
+      SMS_CONSENT_TEXT: "",
       REQUEST_ACCESS_REQUIRE_ALL_AGENCY_DETAILS: priorRequireAll,
     });
   }
