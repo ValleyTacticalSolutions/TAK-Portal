@@ -117,4 +117,10 @@ assert.ok(
   "settings modal is capped to the overlay; only its body scrolls"
 );
 
+// Issue #147: no nested "?" button inside the Add button, Title Case labels
+assert.ok(!/<button[^>]*id="customClientsAdd"[^>]*>[^<]*<span class="settings-help-tip|<button[^>]*id="customClientsAdd">[^]*?ccTip[^]*?<\/button>/.test(settings.replace(/\r/g, "")) || /id="customClientsAdd">Add Custom Client<\/button>/.test(settings), "Add button holds no help tip");
+assert.ok(/id="customClientsAdd">Add Custom Client<\/button>/.test(settings), "Add Custom Client is Title Case");
+assert.ok(/id="customClientsAddRow"/.test(settings) && /addRow\.style\.display = "none"/.test(settings), "help tip hides with the Add button while editing");
+assert.ok(settings.includes('id="ccSave">Save Client<') && settings.includes('id="ccUpload">Upload File<') && settings.includes('Remove File</button>'), "editor buttons are Title Case");
+
 console.log("customTakClients tests passed");

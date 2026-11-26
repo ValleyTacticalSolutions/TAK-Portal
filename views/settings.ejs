@@ -3971,8 +3971,8 @@
                   <input type="text" id="ccDownload" maxlength="2000" placeholder="https://..." autocomplete="off" />
                   <div class="customClientsFileRow">
                     <input type="file" id="ccFile" accept=".apk,.aab,.ipa,.zip,.exe,.msi,.dmg,.pkg,.deb,.appimage" style="display:none;" tabindex="-1" />
-                    <button type="button" class="btn" id="ccUpload">Upload file</button>
-                    <button type="button" class="btn" id="ccFileRemove" style="display:none;">Remove file</button>
+                    <button type="button" class="btn" id="ccUpload">Upload File</button>
+                    <button type="button" class="btn" id="ccFileRemove" style="display:none;">Remove File</button>
                     <span class="settings-help customClientsFileName" id="ccFileName"></span>
                   </div>
                 </div>
@@ -3983,17 +3983,17 @@
                     <option value="none">None</option>
                   </select>
                 </label>
-                <label class="customClientsField" data-cc-mobile><span>Open In App link <%- ccTip("Optional. A URL scheme that opens your app, for example myapp://enroll?host={host}&username={username}&token={token}. Without it the button is not shown.") %></span><input type="text" id="ccScheme" maxlength="1000" placeholder="myapp://enroll?host={host}&amp;username={username}&amp;token={token}" autocomplete="off" /></label>
+                <label class="customClientsField" data-cc-mobile><span>Open In App Link <%- ccTip("Optional. A URL scheme that opens your app, for example myapp://enroll?host={host}&username={username}&token={token}. Without it the button is not shown.") %></span><input type="text" id="ccScheme" maxlength="1000" placeholder="myapp://enroll?host={host}&amp;username={username}&amp;token={token}" autocomplete="off" /></label>
                 <label class="customClientsField customClientsCheck" data-cc-mobile><input type="checkbox" id="ccPref" /><span>Preference QR <%- ccTip("Show a Scan QR step that configures device preferences.") %></span></label>
                 <label class="customClientsField customClientsWide"><span>Instructions <%- ccTip("Optional short text shown on the card.") %></span><textarea id="ccInstructions" rows="3" maxlength="1000"></textarea></label>
               </div>
               <div id="ccError" class="settings-help" style="color:var(--danger,#dc2626);display:none;"></div>
               <div class="row" style="gap:0.5rem;margin-top:0.5rem;">
-                <button type="button" class="btn success" id="ccSave">Save client</button>
+                <button type="button" class="btn success" id="ccSave">Save Client</button>
                 <button type="button" class="btn" id="ccCancel">Cancel</button>
               </div>
             </div>
-            <button type="button" class="btn" id="customClientsAdd">Add custom client <%- ccTip("Add your own TAK client app. It appears in its platform block above, where you can star, reorder, toggle, edit or remove it. Enabled clients show as cards on Setup My Device.") %></button>
+            <span id="customClientsAddRow"><button type="button" class="btn" id="customClientsAdd">Add Custom Client</button> <%- ccTip("Add your own TAK client app. It appears in its platform block above, where you can star, reorder, toggle, edit or remove it. Enabled clients show as cards on Setup My Device.") %></span>
           </div>
 
           <script>
@@ -4002,6 +4002,7 @@
               var hidden = document.getElementById("customClientsJson");
               var editor = document.getElementById("customClientsEditor");
               var addBtn = document.getElementById("customClientsAdd");
+              var addRow = document.getElementById("customClientsAddRow");
               var tpl = document.getElementById("ccItemTemplate");
               if (!modal || !hidden || !editor || !addBtn || !tpl) return;
               var clients = [];
@@ -4063,7 +4064,7 @@
                 $("ccDownload").style.display = has ? "none" : "";
                 $("ccFileName").textContent = has ? "Uploaded: " + fileName : "";
                 $("ccFileRemove").style.display = has ? "" : "none";
-                $("ccUpload").textContent = has ? "Replace file" : "Upload file";
+                $("ccUpload").textContent = has ? "Replace File" : "Upload File";
               }
               function validHttp(v) {
                 if (!v) return true;
@@ -4081,7 +4082,7 @@
                 [].forEach.call(editor.querySelectorAll("[data-cc-mobile]"), function (el) {
                   el.style.display = mobile ? "" : "none";
                 });
-                $("ccDownloadLabel").textContent = p === "web" ? "Address to open" : "Download link or file";
+                $("ccDownloadLabel").textContent = p === "web" ? "Address to Open" : "Download Link or File";
                 $("ccUpload").style.display = p === "web" ? "none" : "";
                 if (p === "web") setFile("", "");
               }
@@ -4101,12 +4102,12 @@
                 $("ccError").style.display = "none";
                 syncPlatformFields();
                 editor.style.display = "block";
-                addBtn.style.display = "none";
+                addRow.style.display = "none";
                 $("ccName").focus();
               }
               function closeEditor() {
                 editor.style.display = "none";
-                addBtn.style.display = "";
+                addRow.style.display = "";
                 editingId = "";
               }
               function fail(msg) {
