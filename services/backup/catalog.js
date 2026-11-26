@@ -119,6 +119,8 @@ const SETTINGS_SUBCATEGORIES = [
       "SMS_BREVO_API_KEY",
       "SMS_BREVO_SENDER",
       "SMS_TEST_TO",
+      "SMS_CONSENT_ENABLED",
+      "SMS_CONSENT_TEXT",
     ],
   },
   {

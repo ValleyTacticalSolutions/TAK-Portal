@@ -470,6 +470,15 @@ function validateCreate(input) {
   );
   const radioCallsign = normalizeStr(input.radioCallsign);
   const phone = normalizeRequestPhone(input.phone);
+  if (phone) {
+    const consentOn =
+      String(settingsSvc.get("SMS_CONSENT_ENABLED", "false")).toLowerCase() === "true" &&
+      String(settingsSvc.get("SMS_CONSENT_TEXT", "")).trim() !== "";
+    const agreed = ["1", "true", "on", "yes"].includes(String(input.smsConsent ?? "").toLowerCase());
+    if (consentOn && !agreed) {
+      throw new Error("Please agree to the SMS consent notice to provide a phone number");
+    }
+  }
   const otherAgency = normalizeStr(input.otherAgency);
   const otherReason = normalizeStr(input.otherReason);
   const requestedAgency = normalizeRequestedAgencyFields(input || {});
