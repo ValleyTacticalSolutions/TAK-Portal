@@ -11,7 +11,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
-### v2.0.43 - IN PROGRESS
+### v2.0.43 - 11/25/26
 ✨ `Enhancement` - Settings → SMS now has an SMS Consent Notice toggle. When on, you type your own notice and Request Access shows it under the optional Phone Number field with a checkbox the user must tick to agree before submitting a phone number (#142)<br>
 ✨ `Enhancement` - TAK Server SSH setup and CloudTAK Marketplace SSH setup now have a Key Type choice: RSA 4096 (default), ECDSA P-256, P-384 or P-521, so FIPS-mode hosts that block other key types can be used. Picking a different type replaces the saved key and installs the new one on the host (#60)<br>
 ✨ `Enhancement` - Settings → Supported TAK Clients lets you add your own TAK client app with a name, platform (iOS, Android, Web or PC), download link (or the address to open for Web), which enrollment QR it reads (Standard / ATAK or iTAK), whether it reads the preference QR, an optional URL scheme for "Open In App" (use `{host}`, `{username}` and `{token}`), and short instructions. Each custom client appears in its platform block with the handle, star, toggle, Edit and Remove like the built-in clients, and shows as a card on Setup My Device with the usual steps, reusing the existing enrollment QR, token lifetime and audit log (#147)<br>
