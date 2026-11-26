@@ -1,0 +1,52 @@
+<%
+  /* One Setup My Device card for an admin-defined custom client (Settings > Supported TAK Clients).
+     Locals: c (normalized client). Admin text is always HTML-escaped. */
+  var ccPlatformWord = c.platform === "ios" ? "iOS" : c.platform === "android" ? "Android" : c.platform === "web" ? "Web" : "PC";
+  var ccStep = 0;
+%>
+<div class="card iosAppGroup" data-custom-client="<%= c.id %>">
+  <h2 class="iosAppGroupTitle">
+    <%= c.name %><%= (c.recommended && !c.downloadUrl) ? ' (Recommended)' : '' %>
+  </h2>
+
+  <% if (c.instructions) { %>
+  <section class="iosStep">
+    <p class="customClientInstructions"><%= c.instructions %></p>
+  </section>
+  <% } %>
+
+  <% if (c.downloadUrl) { ccStep++; %>
+  <section class="iosStep">
+    <h3 class="iosStepHeading">Step <%= ccStep %>: <%= c.platform === "web" ? "Open in browser" : "Download " + c.name %></h3>
+    <a
+      href="<%= c.downloadUrl %>"
+      target="_blank"
+      rel="noopener noreferrer"
+      class="btn tile<%= c.recommended ? ' success' : '' %>"
+    >
+      <span class="title"><%= ccPlatformWord %> - <%= c.name %><%= c.recommended ? ' (Recommended)' : '' %></span>
+      <span class="desc"><%= c.platform === "web" ? "Open " + c.name + " in a web browser." : "Download " + c.name + "." %></span>
+    </a>
+  </section>
+  <% } %>
+
+  <% if (c.enrollQr !== "none") { ccStep++; %>
+  <section class="iosStep">
+    <h3 class="iosStepHeading">Step <%= ccStep %>: Enroll your device</h3>
+    <button type="button" class="btn tile" data-custom-enroll="<%= c.id %>">
+      <span class="title"><%= c.urlScheme ? "Open In App or Scan QR (Recommended)" : "Scan QR" %></span>
+      <span class="desc">Scan an enrollment QR code to automatically connect <%= c.name %>.</span>
+    </button>
+  </section>
+  <% } %>
+
+  <% if (c.prefQr) { ccStep++; %>
+  <section class="iosStep">
+    <h3 class="iosStepHeading">Step <%= ccStep %>: Configure device preferences</h3>
+    <button type="button" class="btn tile" data-custom-pref="<%= c.id %>">
+      <span class="title">Scan QR</span>
+      <span class="desc">Scan a QR code to automatically configure <%= c.name %> preferences.</span>
+    </button>
+  </section>
+  <% } %>
+</div>

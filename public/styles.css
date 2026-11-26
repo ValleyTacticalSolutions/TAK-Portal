@@ -3135,18 +3135,16 @@ a.settings-hub-card:visited {
     }
 }
 
+/* Short desktop windows: keep the dialog inside the screen (same approach as the Users edit modal).
+   The overlay never scrolls; only the modal body does. */
 @media (max-height: 900px) and (min-width: 991px) {
     .settings-modal-overlay {
-        align-items: flex-start;
-        overflow-x: hidden;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-        overscroll-behavior: contain;
+        overflow: hidden;
+        box-sizing: border-box;
     }
 
     .settings-modal {
-        margin-block: auto;
-        max-height: none;
+        max-height: 100%;
     }
 
     .settings-modal .modalBody,
@@ -4171,3 +4169,78 @@ body.theme-light #connectedClientsStatCard[role="button"]:hover {
     border-color: color-mix(in srgb, var(--btn) 42%, var(--line));
 }
 
+
+/* Custom TAK clients (Settings > Supported TAK Clients) */
+.settings-custom-client-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.customClientsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.customClientsField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.customClientsField input[type="text"],
+.customClientsField select,
+.customClientsField textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.customClientsFileRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.customClientsFileName {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.customClientsCheck {
+  flex-direction: row;
+  align-items: center;
+}
+
+.customClientsWide {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 640px) {
+  .customClientsGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-custom-client-actions .btn {
+    min-height: 2.25rem;
+  }
+  .customClientsFileRow .btn,
+  .customClientsEditor .row .btn {
+    flex: 1 1 auto;
+    min-height: 2.5rem;
+  }
+}
+
+/* Custom client cards on Setup My Device */
+.customClientInstructions {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+
+.settings-allowed-client-item[data-custom-client-id] .settings-allowed-client-row {
+  flex-wrap: wrap;
+}

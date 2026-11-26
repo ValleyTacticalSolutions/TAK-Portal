@@ -3677,9 +3677,21 @@
             const sshPrivilegedReadyForClients =
               typeof sshPrivilegedReady !== "undefined" ? !!sshPrivilegedReady : false;
 
-            function parseClientOrder(key, defaults, insertMissingAtStart) {
+            let customClientList = [];
+            try { customClientList = JSON.parse(String((settings && settings.CUSTOM_TAK_CLIENTS) || "[]")); } catch (_) { customClientList = []; }
+            if (!Array.isArray(customClientList)) customClientList = [];
+            customClientList = customClientList.filter(function (c) { return c && c.id && c.name; });
+            function customIdsFor(platform) {
+              return customClientList.filter(function (c) { return c.platform === platform; }).map(function (c) { return "custom:" + c.id; });
+            }
+            function customById(appId) {
+              return customClientList.find(function (c) { return "custom:" + c.id === appId; }) || null;
+            }
+
+            function parseClientOrder(key, defaults, insertMissingAtStart, extraIds) {
+              const extra = extraIds || [];
               const known = defaults.slice();
-              const knownSet = new Set(known);
+              const knownSet = new Set(known.concat(extra));
               const raw = (settings && typeof settings[key] === "string")
                 ? settings[key]
                 : "";
@@ -3688,7 +3700,8 @@
                 .map((s) => s.trim())
                 .filter((id) => id && knownSet.has(id));
               const missing = known.filter((id) => !parsed.includes(id));
-              return insertMissingAtStart ? missing.concat(parsed) : parsed.concat(missing);
+              const base = insertMissingAtStart ? missing.concat(parsed) : parsed.concat(missing);
+              return base.concat(extra.filter((id) => !base.includes(id)));
             }
             const iosAppDefs = {
               tak_aware: { key: "ALLOWED_CLIENT_TAK_AWARE", label: "TAK Aware", defaultOn: "true" },
@@ -3703,9 +3716,9 @@
               live_map: { key: "ALLOWED_CLIENT_LIVE_MAP", label: "TAK Portal Live Map", defaultOn: "true" },
               cloudtak: { key: "ALLOWED_CLIENT_CLOUDTAK", label: "CloudTAK", defaultOn: cloudtakDefaultOn },
             };
-            const iosOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_IOS", ["tak_aware", "tak_tracker", "itak"]);
-            const androidOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_ANDROID", ["atak", "tak_beacon"]);
-            const webOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_WEB", ["live_map", "cloudtak"], true);
+            const iosOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_IOS", ["tak_aware", "tak_tracker", "itak"], false, customIdsFor("ios"));
+            const androidOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_ANDROID", ["atak", "tak_beacon"], false, customIdsFor("android"));
+            const webOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_WEB", ["live_map", "cloudtak"], true, customIdsFor("web"));
 
             function renderAllowedClientApp(opts) {
               const key = opts.key;
@@ -3718,14 +3731,15 @@
               const showAtakApkUpload = !!opts.showAtakApkUpload;
               const locked = !!opts.locked;
               const requiresLiveMap = !!opts.requiresLiveMap;
-              const rawVal = (settings && typeof settings[key] === "string")
+              const custom = opts.custom || null;
+              const rawVal = (!custom && settings && typeof settings[key] === "string")
                 ? settings[key].toLowerCase()
                 : "";
               const currentVal =
                 rawVal === "true" ? "true" :
                 rawVal === "false" ? "false" :
                 defaultOn;
-              const isOn = locked ? false : currentVal === "true";
+              const isOn = locked ? false : (custom ? custom.enabled !== false : currentVal === "true");
               const isRecommended = recommended === appId;
               const atakApkInfo =
                 typeof atakApk !== "undefined" && atakApk && typeof atakApk === "object"
@@ -3739,6 +3753,7 @@
               data-allowed-client-section="<%= section %>"
               data-allowed-client-app="<%= appId %>"
               <% if (locked) { %>data-allowed-client-locked="1"<% } %>
+              <% if (custom) { %>data-custom-client-id="<%= custom.id %>"<% } %>
               <% if (requiresLiveMap) { %>data-allowed-client-requires-live-map="1" aria-hidden="<%= unavailable ? 'true' : 'false' %>"<% } %>
               draggable="true"
             >
@@ -3793,6 +3808,12 @@
                     </span>
                   <% } %>
                 </span>
+                <% if (custom) { %>
+                  <span class="settings-custom-client-actions" data-custom-client-actions>
+                    <button type="button" class="btn" data-custom-client-edit>Edit</button>
+                    <button type="button" class="btn danger" data-custom-client-remove>Remove</button>
+                  </span>
+                <% } %>
                 <button
                   type="button"
                   class="settings-toggle <%= isOn ? 'is-on' : 'is-off' %>"
@@ -3803,7 +3824,7 @@
                 ></button>
                 <input
                   type="hidden"
-                  name="settings[<%= key %>]"
+                  <% if (!custom) { %>name="settings[<%= key %>]"<% } %>
                   value="<%= isOn ? 'true' : 'false' %>"
                   data-settings-bool-input
                 />
@@ -3821,6 +3842,11 @@
           <h3 class="settings-allowed-client-platform">iOS</h3>
           <div class="settings-auto-create-section" data-allowed-client-section-group="ios">
             <% iosOrder.forEach(function (appId) {
+              const customDef = customById(appId);
+              if (customDef) {
+                renderAllowedClientApp({ label: customDef.name, section: "ios", appId: appId, recommended: recommendedIos, custom: customDef });
+                return;
+              }
               const def = iosAppDefs[appId];
               if (!def) return;
               renderAllowedClientApp({
@@ -3839,6 +3865,11 @@
           <h3 class="settings-allowed-client-platform">Android</h3>
           <div class="settings-auto-create-section" data-allowed-client-section-group="android">
             <% androidOrder.forEach(function (appId) {
+              const customDef = customById(appId);
+              if (customDef) {
+                renderAllowedClientApp({ label: customDef.name, section: "android", appId: appId, recommended: recommendedAndroid, custom: customDef });
+                return;
+              }
               const def = androidAppDefs[appId];
               if (!def) return;
               renderAllowedClientApp({
@@ -3858,6 +3889,11 @@
           <h3 class="settings-allowed-client-platform">Web Browser</h3>
           <div class="settings-auto-create-section" data-allowed-client-section-group="web">
             <% webOrder.forEach(function (appId) {
+              const customDef = customById(appId);
+              if (customDef) {
+                renderAllowedClientApp({ label: customDef.name, section: "web", appId: appId, recommended: recommendedWeb, custom: customDef });
+                return;
+              }
               const def = webAppDefs[appId];
               if (!def) return;
               renderAllowedClientApp({
@@ -3881,8 +3917,13 @@
               const pcAppDefs = {
                 data_package: { key: "ALLOWED_CLIENT_DATA_PACKAGE", label: "Data Package", defaultOn: "false" },
               };
-              const pcOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_PC", ["data_package"]);
+              const pcOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_PC", ["data_package"], false, customIdsFor("pc"));
               pcOrder.forEach(function (appId) {
+                const customDef = customById(appId);
+                if (customDef) {
+                  renderAllowedClientApp({ label: customDef.name, section: "pc", appId: appId, recommended: recommendedPc, custom: customDef });
+                  return;
+                }
                 const def = pcAppDefs[appId];
                 if (!def) return;
                 renderAllowedClientApp({
@@ -3902,6 +3943,308 @@
             <input type="hidden" name="settings[ALLOWED_CLIENT_RECOMMENDED_PC]" value="<%= recommendedPc %>" data-allowed-client-recommended-input="pc" />
             <input type="hidden" name="settings[ALLOWED_CLIENT_ORDER_PC]" value="<%= pcOrder.join(',') %>" data-allowed-client-order-input="pc" />
           </div>
+
+          <%
+            const ccTip = function (text) {
+              return '<span class="settings-help-tip"><button type="button" class="settings-help-btn" aria-label="Help" aria-expanded="false">?</button><span class="settings-help-popover" role="tooltip">' +
+                String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + '</span></span>';
+            };
+          %>
+          <div class="settings-auto-create-section" id="customClientsSection" data-custom-clients-section>
+            <input type="hidden" name="settings[CUSTOM_TAK_CLIENTS]" id="customClientsJson" value="<%= JSON.stringify(customClientList) %>" />
+            <template id="ccItemTemplate">
+              <% renderAllowedClientApp({ label: "__NAME__", section: "__SECTION__", appId: "custom:__ID__", recommended: "", custom: { id: "__ID__", name: "__NAME__", enabled: true } }); %>
+            </template>
+            <div class="customClientsEditor" id="customClientsEditor" style="display:none;">
+              <div class="customClientsGrid">
+                <label class="customClientsField"><span>Name</span><input type="text" id="ccName" maxlength="60" autocomplete="off" /></label>
+                <label class="customClientsField"><span>Platform</span>
+                  <select id="ccPlatform">
+                    <option value="ios">iOS</option>
+                    <option value="android">Android</option>
+                    <option value="web">Web</option>
+                    <option value="pc">PC</option>
+                  </select>
+                </label>
+                <div class="customClientsField customClientsWide">
+                  <span><span id="ccDownloadLabel">Download</span> <%- ccTip("A link (App Store, TestFlight, Play Store) or an uploaded file such as an APK. For Web, the address to open.") %></span>
+                  <input type="text" id="ccDownload" maxlength="2000" placeholder="https://..." autocomplete="off" />
+                  <div class="customClientsFileRow">
+                    <input type="file" id="ccFile" accept=".apk,.aab,.ipa,.zip,.exe,.msi,.dmg,.pkg,.deb,.appimage" style="display:none;" tabindex="-1" />
+                    <button type="button" class="btn" id="ccUpload">Upload File</button>
+                    <button type="button" class="btn" id="ccFileRemove" style="display:none;">Remove File</button>
+                    <span class="settings-help customClientsFileName" id="ccFileName"></span>
+                  </div>
+                </div>
+                <label class="customClientsField" data-cc-mobile><span>Enrollment QR <%- ccTip("Which enrollment QR the app reads. Standard works with ATAK and TAK Aware.") %></span>
+                  <select id="ccEnroll">
+                    <option value="standard">Standard / ATAK</option>
+                    <option value="itak">iTAK</option>
+                    <option value="none">None</option>
+                  </select>
+                </label>
+                <label class="customClientsField" data-cc-mobile><span>Open In App Link <%- ccTip("Optional. A URL scheme that opens your app, for example myapp://enroll?host={host}&username={username}&token={token}. Without it the button is not shown.") %></span><input type="text" id="ccScheme" maxlength="1000" placeholder="myapp://enroll?host={host}&amp;username={username}&amp;token={token}" autocomplete="off" /></label>
+                <label class="customClientsField customClientsCheck" data-cc-mobile><input type="checkbox" id="ccPref" /><span>Preference QR <%- ccTip("Show a Scan QR step that configures device preferences.") %></span></label>
+                <label class="customClientsField customClientsWide"><span>Instructions <%- ccTip("Optional short text shown on the card.") %></span><textarea id="ccInstructions" rows="3" maxlength="1000"></textarea></label>
+              </div>
+              <div id="ccError" class="settings-help" style="color:var(--danger,#dc2626);display:none;"></div>
+              <div class="row" style="gap:0.5rem;margin-top:0.5rem;">
+                <button type="button" class="btn success" id="ccSave">Save Client</button>
+                <button type="button" class="btn" id="ccCancel">Cancel</button>
+              </div>
+            </div>
+            <span id="customClientsAddRow"><button type="button" class="btn" id="customClientsAdd">Add Custom Client</button> <%- ccTip("Add your own TAK client app. It appears in its platform block above, where you can star, reorder, toggle, edit or remove it. Enabled clients show as cards on Setup My Device.") %></span>
+          </div>
+
+          <script>
+            (function () {
+              var modal = document.getElementById("settingsModal-allowed-client-devices");
+              var hidden = document.getElementById("customClientsJson");
+              var editor = document.getElementById("customClientsEditor");
+              var addBtn = document.getElementById("customClientsAdd");
+              var addRow = document.getElementById("customClientsAddRow");
+              var tpl = document.getElementById("ccItemTemplate");
+              if (!modal || !hidden || !editor || !addBtn || !tpl) return;
+              var clients = [];
+              try { clients = JSON.parse(hidden.value || "[]"); } catch (e) { clients = []; }
+              if (!Array.isArray(clients)) clients = [];
+              var MAX = 25;
+              var editingId = "";
+
+              function $(id) { return document.getElementById(id); }
+              function persist() {
+                hidden.value = JSON.stringify(clients);
+                if (typeof window.scheduleSettingsAutoSave === "function") window.scheduleSettingsAutoSave();
+              }
+              function find(id) { return clients.find(function (c) { return c.id === id; }) || null; }
+              function group(platform) { return modal.querySelector('[data-allowed-client-section-group="' + platform + '"]'); }
+              function rowFor(id) { return modal.querySelector('[data-custom-client-id="' + id + '"]'); }
+              function recInput(platform) { return modal.querySelector('[data-allowed-client-recommended-input="' + platform + '"]'); }
+              function syncOrder(platform) {
+                var g = group(platform);
+                var h = modal.querySelector('[data-allowed-client-order-input="' + platform + '"]');
+                if (!g || !h) return;
+                h.value = [].slice.call(g.querySelectorAll("[data-allowed-client-item]")).map(function (el) {
+                  return el.getAttribute("data-allowed-client-app");
+                }).filter(Boolean).join(",");
+              }
+              function clearStarIfCustom(platform, id) {
+                var r = recInput(platform);
+                if (r && r.value === "custom:" + id) r.value = "";
+              }
+              function placeRow(row, platform) {
+                var g = group(platform);
+                if (!g) return;
+                var anchor = g.querySelector("[data-allowed-client-recommended-input]") || g.querySelector("[data-allowed-client-order-input]");
+                row.setAttribute("data-allowed-client-section", platform);
+                if (anchor) g.insertBefore(row, anchor); else g.appendChild(row);
+              }
+              function setRowName(row, name) {
+                var label = row.querySelector(".settings-label span");
+                if (label) label.textContent = name;
+                var toggle = row.querySelector("[data-settings-bool-toggle]");
+                if (toggle) toggle.setAttribute("aria-label", name);
+              }
+              function addRow(c) {
+                if (!/^[a-z0-9_-]{1,40}$/.test(String(c.id)) || !/^(ios|android|web|pc)$/.test(String(c.platform))) return;
+                var frag = tpl.content.cloneNode(true);
+                var fill = function (v) {
+                  return v.replace(/__ID__/g, String(c.id)).replace(/__SECTION__/g, String(c.platform)).replace(/__NAME__/g, "");
+                };
+                [].slice.call(frag.querySelectorAll("*")).forEach(function (el) {
+                  [].slice.call(el.attributes).forEach(function (a) {
+                    if (a.value.indexOf("__") !== -1) el.setAttribute(a.name, fill(a.value));
+                  });
+                  [].slice.call(el.childNodes).forEach(function (n) {
+                    if (n.nodeType === 3 && n.nodeValue.indexOf("__") !== -1) n.nodeValue = fill(n.nodeValue);
+                  });
+                });
+                var row = frag.querySelector("[data-allowed-client-item]");
+                if (!row) return;
+                setRowName(row, c.name);
+                placeRow(row, c.platform);
+                if (typeof modal.bindAllowedClientItem === "function") modal.bindAllowedClientItem(row);
+              }
+
+              var fileUrl = "";
+              var fileName = "";
+              function setFile(url, name) {
+                fileUrl = url || "";
+                fileName = name || "";
+                var has = !!fileUrl;
+                $("ccDownload").style.display = has ? "none" : "";
+                $("ccFileName").textContent = has ? "Uploaded: " + fileName : "";
+                $("ccFileRemove").style.display = has ? "" : "none";
+                $("ccUpload").textContent = has ? "Replace File" : "Upload File";
+              }
+              function validHttp(v) {
+                if (!v) return true;
+                try { var u = new URL(v); return u.protocol === "http:" || u.protocol === "https:"; } catch (e) { return false; }
+              }
+              function validScheme(v) {
+                if (!v) return true;
+                var m = /^([a-z][a-z0-9+.-]{1,31}):\/\/\S*$/i.exec(v);
+                if (!m) return false;
+                return ["javascript", "data", "vbscript", "file", "blob", "about", "http", "https"].indexOf(m[1].toLowerCase()) === -1;
+              }
+              function syncPlatformFields() {
+                var p = $("ccPlatform").value;
+                var mobile = p === "ios" || p === "android";
+                [].forEach.call(editor.querySelectorAll("[data-cc-mobile]"), function (el) {
+                  el.style.display = mobile ? "" : "none";
+                });
+                $("ccDownloadLabel").textContent = p === "web" ? "Address to Open" : "Download Link or File";
+                $("ccUpload").style.display = p === "web" ? "none" : "";
+                if (p === "web") setFile("", "");
+              }
+              function openEditor(id) {
+                editingId = id || "";
+                var c = id ? find(id) : null;
+                c = c || { platform: "ios", enrollQr: "standard" };
+                $("ccName").value = c.name || "";
+                $("ccPlatform").value = c.platform || "ios";
+                var isFile = /^\/api\/custom-clients\/file\//.test(c.downloadUrl || "");
+                $("ccDownload").value = isFile ? "" : (c.downloadUrl || "");
+                setFile(isFile ? c.downloadUrl : "", isFile ? (c.fileName || "file") : "");
+                $("ccEnroll").value = c.enrollQr || "standard";
+                $("ccScheme").value = c.urlScheme || "";
+                $("ccPref").checked = !!c.prefQr;
+                $("ccInstructions").value = c.instructions || "";
+                $("ccError").style.display = "none";
+                syncPlatformFields();
+                editor.style.display = "block";
+                addRow.style.display = "none";
+                $("ccName").focus();
+              }
+              function closeEditor() {
+                editor.style.display = "none";
+                addRow.style.display = "";
+                editingId = "";
+              }
+              function fail(msg) {
+                var el = $("ccError");
+                el.textContent = msg;
+                el.style.display = "block";
+              }
+              function updateAddState() { addBtn.disabled = clients.length >= MAX; }
+
+              $("ccPlatform").addEventListener("change", syncPlatformFields);
+              $("ccFileRemove").addEventListener("click", function () { setFile("", ""); });
+              $("ccUpload").addEventListener("click", function () { $("ccFile").click(); });
+              $("ccFile").addEventListener("change", function () {
+                var input = $("ccFile");
+                if (!input.files || !input.files.length) return;
+                var file = input.files[0];
+                input.value = "";
+                var btn = $("ccUpload");
+                btn.disabled = true;
+                btn.textContent = "Uploading… 0%";
+                $("ccError").style.display = "none";
+                var fd = new FormData();
+                fd.append("file", file);
+                var xhr = new XMLHttpRequest();
+                xhr.open("POST", "/api/settings/custom-clients/upload");
+                xhr.withCredentials = true;
+                xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
+                xhr.setRequestHeader("Accept", "application/json");
+                xhr.upload.onprogress = function (evt) {
+                  if (evt.lengthComputable && evt.total) btn.textContent = "Uploading… " + Math.round((evt.loaded / evt.total) * 100) + "%";
+                };
+                xhr.onload = function () {
+                  btn.disabled = false;
+                  var data = null;
+                  try { data = JSON.parse(xhr.responseText); } catch (e) { data = null; }
+                  if (xhr.status >= 200 && xhr.status < 300 && data && data.ok) {
+                    setFile(data.downloadUrl, data.fileName);
+                  } else {
+                    setFile(fileUrl, fileName);
+                    fail((data && data.error) || "Upload failed.");
+                  }
+                };
+                xhr.onerror = function () { btn.disabled = false; setFile(fileUrl, fileName); fail("Upload failed."); };
+                xhr.send(fd);
+              });
+              addBtn.addEventListener("click", function () { openEditor(""); });
+              $("ccCancel").addEventListener("click", closeEditor);
+              $("ccSave").addEventListener("click", function () {
+                var name = $("ccName").value.trim();
+                var platform = $("ccPlatform").value;
+                var download = fileUrl || $("ccDownload").value.trim();
+                var scheme = $("ccScheme").value.trim();
+                if (!name) return fail("Name is required.");
+                if (platform === "web" && !download) return fail("Web clients need an address to open.");
+                if (!fileUrl && !validHttp(download)) return fail("Download link must start with http:// or https://.");
+                var mobile = platform === "ios" || platform === "android";
+                if (mobile && !validScheme(scheme)) return fail("URL scheme must look like myapp://... (not http, https or javascript).");
+                var prev = editingId ? find(editingId) : null;
+                var next = {
+                  id: prev ? prev.id : "c" + Math.random().toString(16).slice(2, 12).padEnd(10, "0"),
+                  name: name,
+                  platform: platform,
+                  downloadUrl: download,
+                  fileName: fileUrl ? fileName : "",
+                  enrollQr: mobile ? $("ccEnroll").value : "none",
+                  prefQr: mobile ? $("ccPref").checked : false,
+                  urlScheme: mobile ? scheme : "",
+                  instructions: $("ccInstructions").value.trim(),
+                  enabled: prev ? prev.enabled !== false : true
+                };
+                if (prev) {
+                  clients[clients.indexOf(prev)] = next;
+                  var row = rowFor(next.id);
+                  if (row) {
+                    setRowName(row, name);
+                    if (prev.platform !== platform) {
+                      clearStarIfCustom(prev.platform, next.id);
+                      var star = row.querySelector("[data-allowed-client-star]");
+                      if (star) { star.classList.remove("is-filled"); star.classList.add("is-empty"); star.setAttribute("aria-pressed", "false"); }
+                      placeRow(row, platform);
+                      syncOrder(prev.platform);
+                      syncOrder(platform);
+                    }
+                  }
+                } else {
+                  clients.push(next);
+                  addRow(next);
+                  syncOrder(platform);
+                }
+                updateAddState();
+                persist();
+                closeEditor();
+              });
+
+              modal.addEventListener("click", function (e) {
+                var t = e.target;
+                if (!t || !t.closest) return;
+                var row = t.closest("[data-custom-client-id]");
+                if (!row) return;
+                var id = row.getAttribute("data-custom-client-id");
+                var c = find(id);
+                if (!c) return;
+                if (t.closest("[data-custom-client-edit]")) {
+                  e.preventDefault();
+                  openEditor(id);
+                } else if (t.closest("[data-custom-client-remove]")) {
+                  e.preventDefault();
+                  if (!window.confirm("Remove " + c.name + "?")) return;
+                  clearStarIfCustom(c.platform, id);
+                  clients.splice(clients.indexOf(c), 1);
+                  row.parentNode.removeChild(row);
+                  syncOrder(c.platform);
+                  if (editingId === id) closeEditor();
+                  updateAddState();
+                  persist();
+                } else if (t.closest("[data-settings-bool-toggle]")) {
+                  setTimeout(function () {
+                    var toggle = row.querySelector("[data-settings-bool-toggle]");
+                    c.enabled = !!(toggle && toggle.classList.contains("is-on"));
+                    persist();
+                  }, 0);
+                }
+              });
+              updateAddState();
+            })();
+          </script>
 
           <script>
             (function () {
@@ -3985,7 +4328,7 @@
                 }, { offset: Number.NEGATIVE_INFINITY, element: null }).element;
               }
 
-              modal.querySelectorAll("[data-allowed-client-item]").forEach(function (item) {
+              function bindAllowedClientItem(item) {
                 item.addEventListener("dragstart", function (e) {
                   if (item.classList.contains("is-unavailable")) {
                     e.preventDefault();
@@ -3995,6 +4338,7 @@
                     e.target.closest("[data-allowed-client-star]") ||
                     e.target.closest("[data-settings-bool-toggle]") ||
                     e.target.closest("[data-atak-apk-actions]") ||
+                    e.target.closest("[data-custom-client-actions]") ||
                     e.target.closest("input") ||
                     e.target.closest("label.settings-field")
                   )) {
@@ -4012,7 +4356,9 @@
                     window.scheduleSettingsAutoSave();
                   }
                 });
-              });
+              }
+              modal.bindAllowedClientItem = bindAllowedClientItem;
+              modal.querySelectorAll("[data-allowed-client-item]").forEach(bindAllowedClientItem);
 
               modal.querySelectorAll("[data-allowed-client-section-group]").forEach(function (group) {
                 group.addEventListener("dragover", function (e) {
