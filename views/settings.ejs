@@ -855,7 +855,8 @@
           <label class="settings-field">
             <span class="settings-label">Key Type</span>
             <select id="sshKeyTypeSelect" class="input">
-              <option value="rsa">RSA 4096 (Default)</option>
+              <option value="" selected>Keep Current Key (new RSA 4096 if none)</option>
+              <option value="rsa">RSA 4096</option>
               <option value="ecdsa-256">ECDSA P-256 (FIPS)</option>
               <option value="ecdsa-384">ECDSA P-384 (FIPS)</option>
               <option value="ecdsa-521">ECDSA P-521 (FIPS)</option>
@@ -5358,7 +5359,8 @@
               <label class="settings-field">
             <span class="settings-label">Key Type</span>
             <select id="cloudtakSshKeyTypeSelect" class="input">
-              <option value="rsa">RSA 4096 (Default)</option>
+              <option value="" selected>Keep Current Key (new RSA 4096 if none)</option>
+              <option value="rsa">RSA 4096</option>
               <option value="ecdsa-256">ECDSA P-256 (FIPS)</option>
               <option value="ecdsa-384">ECDSA P-384 (FIPS)</option>
               <option value="ecdsa-521">ECDSA P-521 (FIPS)</option>
@@ -6422,7 +6424,7 @@
             port: port,
             username: sshUser,
             password: password,
-            keyType: ((document.getElementById("cloudtakSshKeyTypeSelect") || {}).value || "rsa"),
+            keyType: ((document.getElementById("cloudtakSshKeyTypeSelect") || {}).value || ""),
           }),
         })
           .then(function (r) { return r.json(); })
@@ -6616,7 +6618,7 @@
             username,
             password,
             privilegeCmd: getSshPrivilegeCmd(),
-            keyType: ((document.getElementById("sshKeyTypeSelect") || {}).value || "rsa"),
+            keyType: ((document.getElementById("sshKeyTypeSelect") || {}).value || ""),
           });
           if (passInput) passInput.value = "";
           lastSshTestPassed = !!data.testPassed;

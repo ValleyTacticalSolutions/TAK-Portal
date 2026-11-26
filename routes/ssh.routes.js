@@ -220,7 +220,8 @@ router.post("/setup", async (req, res) => {
       });
     }
 
-    const keyType = takSshSvc.normalizeSshKeyType(body.keyType);
+    // Blank means "keep the current key" (null); only a chosen type forces a new key.
+    const keyType = String(body.keyType || "").trim() ? takSshSvc.normalizeSshKeyType(body.keyType) : null;
     const keyStatus = takSshSvc.ensureLocalSshKeyPair(keyType);
     const handshake = await takSshSvc.onboardTakSshWithPassword({
       host,
