@@ -176,6 +176,7 @@
         <% } %>
       </div>
       <% if (smsConsentOn) { %>
+      <div class="smsConsentNotice" data-sms-consent-intro style="grid-column: 1 / -1;">By checking the box below, you agree to the following SMS terms and conditions.</div>
       <label class="smsConsentNotice" data-sms-consent-notice style="grid-column: 1 / -1;">
         <input type="checkbox" name="smsConsent" value="1" id="smsConsentBox" <%= (form && form.smsConsent) ? 'checked' : '' %> style="width:auto;margin-right:8px;" />
         <%= String(settings.SMS_CONSENT_TEXT).trim() %>

@@ -129,6 +129,10 @@ function renderView(view, phoneEnabled, extraSettings = {}) {
     const noticeAt = withNotice.indexOf("data-sms-consent-notice");
     assert.ok(noticeAt > phoneAt && phoneAt > 0, "consent notice should sit under the phone input");
     assert.ok(/<input[^>]*type="checkbox"[^>]*name="smsConsent"/.test(withNotice), "consent checkbox should render");
+    const introText = "By checking the box below, you agree to the following SMS terms and conditions.";
+    const introAt = withNotice.indexOf(introText);
+    assert.ok(introAt > phoneAt && introAt < noticeAt, "consent intro line should sit above the checkbox");
+    assert.ok(!offToggle.includes(introText), "toggle off must hide the intro line");
     assert.ok(withNotice.includes("&lt;b&gt;STOP&lt;/b&gt;"), "consent text must be escaped");
     const offNotice = await renderView("request-access.ejs", false, consent);
     assert.ok(!offNotice.includes("data-sms-consent-notice"), "notice hidden when phone field is off");
