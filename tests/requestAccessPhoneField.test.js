@@ -42,13 +42,14 @@ function inputTag(html, name) {
   return match ? match[0] : "";
 }
 
-function renderView(view, phoneEnabled) {
+function renderView(view, phoneEnabled, extraSettings = {}) {
   const file = path.join(__dirname, "..", "views", view);
   return ejs.renderFile(
     file,
     {
       settings: {
         USER_PHONE_NUMBER_FIELD_ENABLED: phoneEnabled ? "true" : "false",
+        ...extraSettings,
         USERNAME_PREFIX_LABEL: "Badge Number / Username",
       },
       agencies: [],
@@ -113,6 +114,24 @@ function renderView(view, phoneEnabled) {
       inputTag(requestHtml, "phone").includes('value="555-0100"'),
       "request access should keep a submitted phone when the form is re-shown"
     );
+
+    const noNotice = await renderView("request-access.ejs", true);
+    assert.ok(!noNotice.includes("data-sms-consent-notice"), "blank consent text must hide the notice");
+
+    const consent = {
+      USER_PHONE_NUMBER_CONSENT_TEXT: "You agree to texts. <b>STOP</b> to cancel.",
+      USER_PHONE_NUMBER_CONSENT_PRIVACY_URL: "https://example.org/privacy",
+      USER_PHONE_NUMBER_CONSENT_TERMS_URL: "javascript:alert(1)",
+    };
+    const withNotice = await renderView("request-access.ejs", true, consent);
+    const phoneAt = withNotice.indexOf(inputTag(withNotice, "phone"));
+    const noticeAt = withNotice.indexOf("data-sms-consent-notice");
+    assert.ok(noticeAt > phoneAt && phoneAt > 0, "consent notice should sit under the phone input");
+    assert.ok(withNotice.includes("&lt;b&gt;STOP&lt;/b&gt;"), "consent text must be escaped");
+    assert.ok(withNotice.includes('href="https://example.org/privacy"'), "privacy link should render");
+    assert.ok(!withNotice.includes("javascript:alert"), "non-http links must be dropped");
+    const offNotice = await renderView("request-access.ejs", false, consent);
+    assert.ok(!offNotice.includes("data-sms-consent-notice"), "notice hidden when phone field is off");
 
     settingsSvc.updateSettings({ USER_PHONE_NUMBER_FIELD_ENABLED: "false" });
     const dropped = validateCreate(basePayload({ phone: "555-555-0123" }));

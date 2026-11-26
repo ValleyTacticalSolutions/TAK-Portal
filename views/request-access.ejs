@@ -12,6 +12,7 @@
         grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 14px;
       }
+      .smsConsentNotice { display: block; margin-top: 6px; font-size: 0.85em; font-weight: normal; overflow-wrap: anywhere; }
       .requestAccessContactRow.hasPhone {
         grid-template-columns: repeat(4, minmax(0, 1fr));
       }
@@ -103,6 +104,13 @@
     const requireAllDetailsForNewAgency = !!requireAllAgencyDetails;
     const userPhoneFieldEnabled =
       String((settings && settings.USER_PHONE_NUMBER_FIELD_ENABLED) || "").toLowerCase() === "true";
+    const smsConsentText = String((settings && settings.USER_PHONE_NUMBER_CONSENT_TEXT) || "").trim();
+    const safeHttpUrl = (v) => {
+      const t = String(v || "").trim();
+      return /^https?:\/\//i.test(t) ? t : "";
+    };
+    const smsPrivacyUrl = safeHttpUrl(settings && settings.USER_PHONE_NUMBER_CONSENT_PRIVACY_URL);
+    const smsTermsUrl = safeHttpUrl(settings && settings.USER_PHONE_NUMBER_CONSENT_TERMS_URL);
   %>
   <h1>Request <%= brandedPortalTitle %> Access</h1>
 
@@ -167,6 +175,13 @@
             maxlength="40"
             value="<%= (form && form.phone) ? form.phone : '' %>"
           />
+          <% if (smsConsentText) { %>
+          <span class="smsConsentNotice" data-sms-consent-notice>
+            <%= smsConsentText %>
+            <% if (smsPrivacyUrl) { %> <a href="<%= smsPrivacyUrl %>" target="_blank" rel="noopener noreferrer">Privacy Policy</a><% } %>
+            <% if (smsTermsUrl) { %> <a href="<%= smsTermsUrl %>" target="_blank" rel="noopener noreferrer">SMS Terms</a><% } %>
+          </span>
+          <% } %>
         </label>
         <% } %>
       </div>
