@@ -12,8 +12,8 @@ const read = (...p) => fs.readFileSync(path.join(root, ...p), "utf8");
 // --- normalization ---
 const list = svc.normalizeCustomClients(
   JSON.stringify([
-    { name: "Acme TAK", platform: "ios", downloadUrl: "https://testflight.apple.com/join/x", enrollQr: "itak", prefQr: true, urlScheme: "acme://enroll?host={host}&username={username}&token={token}", recommended: true },
-    { name: "Second", platform: "ios", recommended: true },
+    { name: "Acme TAK", platform: "ios", downloadUrl: "https://testflight.apple.com/join/x", enrollQr: "itak", prefQr: true, urlScheme: "acme://enroll?host={host}&username={username}&token={token}" },
+    { name: "Second", platform: "ios" },
     { name: "", platform: "ios" },
     { name: "No web address", platform: "web" },
     { name: "Bad platform", platform: "toaster" },
@@ -24,8 +24,7 @@ const list = svc.normalizeCustomClients(
 assert.deepStrictEqual(list.map((c) => c.name), ["Acme TAK", "Second", "Evil", "Site"]);
 assert.strictEqual(list[0].enrollQr, "itak");
 assert.strictEqual(list[0].prefQr, true);
-assert.strictEqual(list[0].recommended, true);
-assert.strictEqual(list[1].recommended, false, "only one recommended per platform");
+assert.strictEqual("recommended" in list[0], false, "star lives in the platform recommended setting");
 assert.strictEqual(list[2].downloadUrl, "", "javascript: download link dropped");
 assert.strictEqual(list[2].urlScheme, "", "javascript: scheme dropped");
 assert.strictEqual("iconUrl" in list[2], false, "icons are not supported");
@@ -66,9 +65,11 @@ const server = read("server.js");
 assert.ok(/key === "CUSTOM_TAK_CLIENTS"[\s\S]{0,200}serializeCustomClients/.test(server), "settings save normalizes custom clients");
 assert.ok(/customClients:[\s\S]{0,200}normalizeCustomClients/.test(server), "setup page gets custom clients");
 const view = read("views", "setup-my-device.ejs");
-for (const k of ["customIos", "customAndroid", "customWeb", "customPc"]) {
-  assert.ok(view.includes(`${k}.forEach`), `${k} cards are rendered`);
+for (const k of ["ALLOWED_CLIENT_ORDER_IOS", "ALLOWED_CLIENT_ORDER_ANDROID", "ALLOWED_CLIENT_ORDER_WEB", "ALLOWED_CLIENT_ORDER_PC"]) {
+  assert.ok(view.includes(k), `${k} orders cards`);
 }
+assert.strictEqual((view.match(/customByAppId\[appId\]\) \{ %>/g) || []).length, 4, "custom cards render inside each platform's ordered loop");
+assert.ok(view.includes('recommendedByPlatform[c.platform] === "custom:" + c.id'), "star picks the recommended custom card");
 assert.ok(view.includes('replace(/</g, "\\\\u003c")'), "embedded custom client JSON escapes <");
 const settings = read("views", "settings.ejs");
 assert.ok(settings.includes('name="settings[CUSTOM_TAK_CLIENTS]"'));
@@ -79,7 +80,8 @@ assert.ok(read("services", "backup", "catalog.js").includes('"CUSTOM_TAK_CLIENTS
 // --- mobile CSS ---
 const css = read("public", "styles.css");
 assert.ok(/@media \(max-width: 640px\)\s*\{\s*\.customClientsGrid\s*\{\s*grid-template-columns: minmax\(0, 1fr\)/.test(css));
-assert.ok(/\.customClientsTitle\s*\{[^}]*overflow-wrap: anywhere/.test(css));
+assert.ok(/\.settings-custom-client-actions\s*\{[^}]*flex-wrap: wrap/.test(css));
+assert.ok(/data-custom-client-id\]\s*\.settings-allowed-client-row\s*\{[^}]*flex-wrap: wrap/.test(css), "custom rows wrap on phones");
 
 // --- uploaded file as download source ---
 const up = svc.normalizeCustomClients([
@@ -99,6 +101,15 @@ assert.ok(/custom-clients\/file\/:id/.test(server) && /pruneUnreferencedFiles/.t
 assert.ok(/\/api\/settings\/custom-clients"[\s\S]{0,120}requirePermission\("page\.settings"\)/.test(server), "upload route is admin only");
 assert.ok(settings.includes('id="ccUpload"') && settings.includes("/api/settings/custom-clients/upload"), "editor has file upload");
 assert.ok(!/Add your own TAK client app\. Each enabled client appears[\s\S]{0,60}<\/p>/.test(settings) && settings.includes("ccTip("), "help text lives in ? hovers");
+
+// --- custom clients live in the platform blocks like built-in clients ---
+assert.ok(!/id="customClientsList"|Custom Clients <%-/.test(settings), "no separate Custom Clients list");
+assert.strictEqual((settings.match(/const customDef = customById\(appId\)/g) || []).length, 4, "custom rows render in each platform block");
+assert.ok(settings.includes('"custom:" + c.id') && settings.includes("custom: customDef"), "custom rows use the same star/order ids");
+const rowTpl = settings.slice(settings.indexOf("renderAllowedClientApp(opts)") === -1 ? settings.indexOf("function renderAllowedClientApp") : settings.indexOf("function renderAllowedClientApp"));
+assert.ok(rowTpl.includes("data-allowed-client-star") && rowTpl.includes("settings-allowed-client-grip") && rowTpl.includes("data-settings-bool-toggle"), "same handle, star and toggle");
+assert.ok(rowTpl.includes("data-custom-client-edit") && rowTpl.includes("data-custom-client-remove"), "custom rows have Edit and Remove");
+assert.ok(!/Up<\/|"Down"|btn\("Up"/.test(settings), "no Up/Down buttons, the handle moves them");
 
 // --- settings modal stays inside the screen on short windows ---
 assert.ok(

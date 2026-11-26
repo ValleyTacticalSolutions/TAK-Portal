@@ -4171,33 +4171,11 @@ body.theme-light #connectedClientsStatCard[role="button"]:hover {
 
 
 /* Custom TAK clients (Settings > Supported TAK Clients) */
-.customClientsList {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.customClientsRow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.customClientsTitle {
-  flex: 1 1 12rem;
-  min-width: 0;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.customClientsActions {
-  display: flex;
+.settings-custom-client-actions {
+  display: inline-flex;
   flex-wrap: wrap;
   gap: 0.35rem;
+  margin-left: auto;
 }
 
 .customClientsGrid {
@@ -4246,7 +4224,9 @@ body.theme-light #connectedClientsStatCard[role="button"]:hover {
   .customClientsGrid {
     grid-template-columns: minmax(0, 1fr);
   }
-  .customClientsActions .btn,
+  .settings-custom-client-actions .btn {
+    min-height: 2.25rem;
+  }
   .customClientsFileRow .btn,
   .customClientsEditor .row .btn {
     flex: 1 1 auto;
@@ -4259,4 +4239,8 @@ body.theme-light #connectedClientsStatCard[role="button"]:hover {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   margin: 0;
+}
+
+.settings-allowed-client-item[data-custom-client-id] .settings-allowed-client-row {
+  flex-wrap: wrap;
 }

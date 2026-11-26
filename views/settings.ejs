@@ -3677,9 +3677,21 @@
             const sshPrivilegedReadyForClients =
               typeof sshPrivilegedReady !== "undefined" ? !!sshPrivilegedReady : false;
 
-            function parseClientOrder(key, defaults, insertMissingAtStart) {
+            let customClientList = [];
+            try { customClientList = JSON.parse(String((settings && settings.CUSTOM_TAK_CLIENTS) || "[]")); } catch (_) { customClientList = []; }
+            if (!Array.isArray(customClientList)) customClientList = [];
+            customClientList = customClientList.filter(function (c) { return c && c.id && c.name; });
+            function customIdsFor(platform) {
+              return customClientList.filter(function (c) { return c.platform === platform; }).map(function (c) { return "custom:" + c.id; });
+            }
+            function customById(appId) {
+              return customClientList.find(function (c) { return "custom:" + c.id === appId; }) || null;
+            }
+
+            function parseClientOrder(key, defaults, insertMissingAtStart, extraIds) {
+              const extra = extraIds || [];
               const known = defaults.slice();
-              const knownSet = new Set(known);
+              const knownSet = new Set(known.concat(extra));
               const raw = (settings && typeof settings[key] === "string")
                 ? settings[key]
                 : "";
@@ -3688,7 +3700,8 @@
                 .map((s) => s.trim())
                 .filter((id) => id && knownSet.has(id));
               const missing = known.filter((id) => !parsed.includes(id));
-              return insertMissingAtStart ? missing.concat(parsed) : parsed.concat(missing);
+              const base = insertMissingAtStart ? missing.concat(parsed) : parsed.concat(missing);
+              return base.concat(extra.filter((id) => !base.includes(id)));
             }
             const iosAppDefs = {
               tak_aware: { key: "ALLOWED_CLIENT_TAK_AWARE", label: "TAK Aware", defaultOn: "true" },
@@ -3703,9 +3716,9 @@
               live_map: { key: "ALLOWED_CLIENT_LIVE_MAP", label: "TAK Portal Live Map", defaultOn: "true" },
               cloudtak: { key: "ALLOWED_CLIENT_CLOUDTAK", label: "CloudTAK", defaultOn: cloudtakDefaultOn },
             };
-            const iosOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_IOS", ["tak_aware", "tak_tracker", "itak"]);
-            const androidOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_ANDROID", ["atak", "tak_beacon"]);
-            const webOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_WEB", ["live_map", "cloudtak"], true);
+            const iosOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_IOS", ["tak_aware", "tak_tracker", "itak"], false, customIdsFor("ios"));
+            const androidOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_ANDROID", ["atak", "tak_beacon"], false, customIdsFor("android"));
+            const webOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_WEB", ["live_map", "cloudtak"], true, customIdsFor("web"));
 
             function renderAllowedClientApp(opts) {
               const key = opts.key;
@@ -3718,14 +3731,15 @@
               const showAtakApkUpload = !!opts.showAtakApkUpload;
               const locked = !!opts.locked;
               const requiresLiveMap = !!opts.requiresLiveMap;
-              const rawVal = (settings && typeof settings[key] === "string")
+              const custom = opts.custom || null;
+              const rawVal = (!custom && settings && typeof settings[key] === "string")
                 ? settings[key].toLowerCase()
                 : "";
               const currentVal =
                 rawVal === "true" ? "true" :
                 rawVal === "false" ? "false" :
                 defaultOn;
-              const isOn = locked ? false : currentVal === "true";
+              const isOn = locked ? false : (custom ? custom.enabled !== false : currentVal === "true");
               const isRecommended = recommended === appId;
               const atakApkInfo =
                 typeof atakApk !== "undefined" && atakApk && typeof atakApk === "object"
@@ -3739,6 +3753,7 @@
               data-allowed-client-section="<%= section %>"
               data-allowed-client-app="<%= appId %>"
               <% if (locked) { %>data-allowed-client-locked="1"<% } %>
+              <% if (custom) { %>data-custom-client-id="<%= custom.id %>"<% } %>
               <% if (requiresLiveMap) { %>data-allowed-client-requires-live-map="1" aria-hidden="<%= unavailable ? 'true' : 'false' %>"<% } %>
               draggable="true"
             >
@@ -3793,6 +3808,12 @@
                     </span>
                   <% } %>
                 </span>
+                <% if (custom) { %>
+                  <span class="settings-custom-client-actions" data-custom-client-actions>
+                    <button type="button" class="btn" data-custom-client-edit>Edit</button>
+                    <button type="button" class="btn danger" data-custom-client-remove>Remove</button>
+                  </span>
+                <% } %>
                 <button
                   type="button"
                   class="settings-toggle <%= isOn ? 'is-on' : 'is-off' %>"
@@ -3803,7 +3824,7 @@
                 ></button>
                 <input
                   type="hidden"
-                  name="settings[<%= key %>]"
+                  <% if (!custom) { %>name="settings[<%= key %>]"<% } %>
                   value="<%= isOn ? 'true' : 'false' %>"
                   data-settings-bool-input
                 />
@@ -3821,6 +3842,11 @@
           <h3 class="settings-allowed-client-platform">iOS</h3>
           <div class="settings-auto-create-section" data-allowed-client-section-group="ios">
             <% iosOrder.forEach(function (appId) {
+              const customDef = customById(appId);
+              if (customDef) {
+                renderAllowedClientApp({ label: customDef.name, section: "ios", appId: appId, recommended: recommendedIos, custom: customDef });
+                return;
+              }
               const def = iosAppDefs[appId];
               if (!def) return;
               renderAllowedClientApp({
@@ -3839,6 +3865,11 @@
           <h3 class="settings-allowed-client-platform">Android</h3>
           <div class="settings-auto-create-section" data-allowed-client-section-group="android">
             <% androidOrder.forEach(function (appId) {
+              const customDef = customById(appId);
+              if (customDef) {
+                renderAllowedClientApp({ label: customDef.name, section: "android", appId: appId, recommended: recommendedAndroid, custom: customDef });
+                return;
+              }
               const def = androidAppDefs[appId];
               if (!def) return;
               renderAllowedClientApp({
@@ -3858,6 +3889,11 @@
           <h3 class="settings-allowed-client-platform">Web Browser</h3>
           <div class="settings-auto-create-section" data-allowed-client-section-group="web">
             <% webOrder.forEach(function (appId) {
+              const customDef = customById(appId);
+              if (customDef) {
+                renderAllowedClientApp({ label: customDef.name, section: "web", appId: appId, recommended: recommendedWeb, custom: customDef });
+                return;
+              }
               const def = webAppDefs[appId];
               if (!def) return;
               renderAllowedClientApp({
@@ -3881,8 +3917,13 @@
               const pcAppDefs = {
                 data_package: { key: "ALLOWED_CLIENT_DATA_PACKAGE", label: "Data Package", defaultOn: "false" },
               };
-              const pcOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_PC", ["data_package"]);
+              const pcOrder = parseClientOrder("ALLOWED_CLIENT_ORDER_PC", ["data_package"], false, customIdsFor("pc"));
               pcOrder.forEach(function (appId) {
+                const customDef = customById(appId);
+                if (customDef) {
+                  renderAllowedClientApp({ label: customDef.name, section: "pc", appId: appId, recommended: recommendedPc, custom: customDef });
+                  return;
+                }
                 const def = pcAppDefs[appId];
                 if (!def) return;
                 renderAllowedClientApp({
@@ -3909,10 +3950,11 @@
                 String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + '</span></span>';
             };
           %>
-          <h3 class="settings-allowed-client-platform">Custom Clients <%- ccTip("Add your own TAK client app. Each enabled client shows as a card on Setup My Device and uses the standard enrollment QR.") %></h3>
           <div class="settings-auto-create-section" id="customClientsSection" data-custom-clients-section>
-            <input type="hidden" name="settings[CUSTOM_TAK_CLIENTS]" id="customClientsJson" value="<%= String((settings && settings.CUSTOM_TAK_CLIENTS) || '[]') %>" />
-            <div id="customClientsList" class="customClientsList"></div>
+            <input type="hidden" name="settings[CUSTOM_TAK_CLIENTS]" id="customClientsJson" value="<%= JSON.stringify(customClientList) %>" />
+            <template id="ccItemTemplate">
+              <% renderAllowedClientApp({ label: "__NAME__", section: "__SECTION__", appId: "custom:__ID__", recommended: "", custom: { id: "__ID__", name: "__NAME__", enabled: true } }); %>
+            </template>
             <div class="customClientsEditor" id="customClientsEditor" style="display:none;">
               <div class="customClientsGrid">
                 <label class="customClientsField"><span>Name</span><input type="text" id="ccName" maxlength="60" autocomplete="off" /></label>
@@ -3951,28 +3993,67 @@
                 <button type="button" class="btn" id="ccCancel">Cancel</button>
               </div>
             </div>
-            <button type="button" class="btn" id="customClientsAdd" style="margin-top:0.5rem;">Add custom client</button>
+            <button type="button" class="btn" id="customClientsAdd">Add custom client <%- ccTip("Add your own TAK client app. It appears in its platform block above, where you can star, reorder, toggle, edit or remove it. Enabled clients show as cards on Setup My Device.") %></button>
           </div>
 
           <script>
             (function () {
+              var modal = document.getElementById("settingsModal-allowed-client-devices");
               var hidden = document.getElementById("customClientsJson");
-              var list = document.getElementById("customClientsList");
               var editor = document.getElementById("customClientsEditor");
               var addBtn = document.getElementById("customClientsAdd");
-              if (!hidden || !list || !editor || !addBtn) return;
-              var PLATFORM_LABEL = { ios: "iOS", android: "Android", web: "Web", pc: "PC" };
-              var MAX = 25;
+              var tpl = document.getElementById("ccItemTemplate");
+              if (!modal || !hidden || !editor || !addBtn || !tpl) return;
               var clients = [];
-              var editingIndex = -1;
               try { clients = JSON.parse(hidden.value || "[]"); } catch (e) { clients = []; }
               if (!Array.isArray(clients)) clients = [];
+              var MAX = 25;
+              var editingId = "";
 
               function $(id) { return document.getElementById(id); }
               function persist() {
                 hidden.value = JSON.stringify(clients);
                 if (typeof window.scheduleSettingsAutoSave === "function") window.scheduleSettingsAutoSave();
               }
+              function find(id) { return clients.find(function (c) { return c.id === id; }) || null; }
+              function group(platform) { return modal.querySelector('[data-allowed-client-section-group="' + platform + '"]'); }
+              function rowFor(id) { return modal.querySelector('[data-custom-client-id="' + id + '"]'); }
+              function recInput(platform) { return modal.querySelector('[data-allowed-client-recommended-input="' + platform + '"]'); }
+              function syncOrder(platform) {
+                var g = group(platform);
+                var h = modal.querySelector('[data-allowed-client-order-input="' + platform + '"]');
+                if (!g || !h) return;
+                h.value = [].slice.call(g.querySelectorAll("[data-allowed-client-item]")).map(function (el) {
+                  return el.getAttribute("data-allowed-client-app");
+                }).filter(Boolean).join(",");
+              }
+              function clearStarIfCustom(platform, id) {
+                var r = recInput(platform);
+                if (r && r.value === "custom:" + id) r.value = "";
+              }
+              function placeRow(row, platform) {
+                var g = group(platform);
+                if (!g) return;
+                var anchor = g.querySelector("[data-allowed-client-recommended-input]") || g.querySelector("[data-allowed-client-order-input]");
+                row.setAttribute("data-allowed-client-section", platform);
+                if (anchor) g.insertBefore(row, anchor); else g.appendChild(row);
+              }
+              function setRowName(row, name) {
+                var label = row.querySelector(".settings-label span");
+                if (label) label.textContent = name;
+                var toggle = row.querySelector("[data-settings-bool-toggle]");
+                if (toggle) toggle.setAttribute("aria-label", name);
+              }
+              function addRow(c) {
+                var holder = document.createElement("div");
+                holder.innerHTML = tpl.innerHTML.replace(/__ID__/g, c.id).replace(/__SECTION__/g, c.platform).replace(/__NAME__/g, "");
+                var row = holder.querySelector("[data-allowed-client-item]");
+                if (!row) return;
+                setRowName(row, c.name);
+                placeRow(row, c.platform);
+                if (typeof modal.bindAllowedClientItem === "function") modal.bindAllowedClientItem(row);
+              }
+
               var fileUrl = "";
               var fileName = "";
               function setFile(url, name) {
@@ -4004,50 +4085,10 @@
                 $("ccUpload").style.display = p === "web" ? "none" : "";
                 if (p === "web") setFile("", "");
               }
-              function render() {
-                list.innerHTML = "";
-                clients.forEach(function (c, i) {
-                  var row = document.createElement("div");
-                  row.className = "customClientsRow";
-                  var title = document.createElement("div");
-                  title.className = "customClientsTitle";
-                  title.textContent = c.name + " (" + (PLATFORM_LABEL[c.platform] || c.platform) + ")" + (c.recommended ? " - Recommended" : "");
-                  row.appendChild(title);
-                  var actions = document.createElement("div");
-                  actions.className = "customClientsActions";
-                  function btn(label, fn, extra) {
-                    var b = document.createElement("button");
-                    b.type = "button";
-                    b.className = "btn" + (extra ? " " + extra : "");
-                    b.textContent = label;
-                    b.addEventListener("click", fn);
-                    actions.appendChild(b);
-                    return b;
-                  }
-                  btn(c.enabled ? "Enabled" : "Disabled", function () { c.enabled = !c.enabled; persist(); render(); }, c.enabled ? "success" : "");
-                  btn(c.recommended ? "Recommended" : "Recommend", function () {
-                    var next = !c.recommended;
-                    clients.forEach(function (o) { if (o.platform === c.platform) o.recommended = false; });
-                    c.recommended = next;
-                    persist(); render();
-                  });
-                  var up = btn("Up", function () { if (i > 0) { var t = clients[i - 1]; clients[i - 1] = c; clients[i] = t; persist(); render(); } });
-                  up.disabled = i === 0;
-                  var down = btn("Down", function () { if (i < clients.length - 1) { var t = clients[i + 1]; clients[i + 1] = c; clients[i] = t; persist(); render(); } });
-                  down.disabled = i === clients.length - 1;
-                  btn("Edit", function () { openEditor(i); });
-                  btn("Remove", function () {
-                    if (!window.confirm("Remove " + c.name + "?")) return;
-                    clients.splice(i, 1); persist(); render();
-                  }, "danger");
-                  row.appendChild(actions);
-                  list.appendChild(row);
-                });
-                addBtn.disabled = clients.length >= MAX;
-              }
-              function openEditor(index) {
-                editingIndex = index;
-                var c = index >= 0 ? clients[index] : { platform: "ios", enrollQr: "standard" };
+              function openEditor(id) {
+                editingId = id || "";
+                var c = id ? find(id) : null;
+                c = c || { platform: "ios", enrollQr: "standard" };
                 $("ccName").value = c.name || "";
                 $("ccPlatform").value = c.platform || "ios";
                 var isFile = /^\/api\/custom-clients\/file\//.test(c.downloadUrl || "");
@@ -4066,13 +4107,15 @@
               function closeEditor() {
                 editor.style.display = "none";
                 addBtn.style.display = "";
-                editingIndex = -1;
+                editingId = "";
               }
               function fail(msg) {
                 var el = $("ccError");
                 el.textContent = msg;
                 el.style.display = "block";
               }
+              function updateAddState() { addBtn.disabled = clients.length >= MAX; }
+
               $("ccPlatform").addEventListener("change", syncPlatformFields);
               $("ccFileRemove").addEventListener("click", function () { setFile("", ""); });
               $("ccUpload").addEventListener("click", function () { $("ccFile").click(); });
@@ -4109,7 +4152,7 @@
                 xhr.onerror = function () { btn.disabled = false; setFile(fileUrl, fileName); fail("Upload failed."); };
                 xhr.send(fd);
               });
-              addBtn.addEventListener("click", function () { openEditor(-1); });
+              addBtn.addEventListener("click", function () { openEditor(""); });
               $("ccCancel").addEventListener("click", closeEditor);
               $("ccSave").addEventListener("click", function () {
                 var name = $("ccName").value.trim();
@@ -4121,9 +4164,9 @@
                 if (!fileUrl && !validHttp(download)) return fail("Download link must start with http:// or https://.");
                 var mobile = platform === "ios" || platform === "android";
                 if (mobile && !validScheme(scheme)) return fail("URL scheme must look like myapp://... (not http, https or javascript).");
-                var prev = editingIndex >= 0 ? clients[editingIndex] : {};
+                var prev = editingId ? find(editingId) : null;
                 var next = {
-                  id: prev.id || "",
+                  id: prev ? prev.id : "c" + Math.random().toString(16).slice(2, 12).padEnd(10, "0"),
                   name: name,
                   platform: platform,
                   downloadUrl: download,
@@ -4132,13 +4175,62 @@
                   prefQr: mobile ? $("ccPref").checked : false,
                   urlScheme: mobile ? scheme : "",
                   instructions: $("ccInstructions").value.trim(),
-                  enabled: prev.enabled !== false,
-                  recommended: !!prev.recommended && prev.platform === platform
+                  enabled: prev ? prev.enabled !== false : true
                 };
-                if (editingIndex >= 0) clients[editingIndex] = next; else clients.push(next);
-                persist(); render(); closeEditor();
+                if (prev) {
+                  clients[clients.indexOf(prev)] = next;
+                  var row = rowFor(next.id);
+                  if (row) {
+                    setRowName(row, name);
+                    if (prev.platform !== platform) {
+                      clearStarIfCustom(prev.platform, next.id);
+                      var star = row.querySelector("[data-allowed-client-star]");
+                      if (star) { star.classList.remove("is-filled"); star.classList.add("is-empty"); star.setAttribute("aria-pressed", "false"); }
+                      placeRow(row, platform);
+                      syncOrder(prev.platform);
+                      syncOrder(platform);
+                    }
+                  }
+                } else {
+                  clients.push(next);
+                  addRow(next);
+                  syncOrder(platform);
+                }
+                updateAddState();
+                persist();
+                closeEditor();
               });
-              render();
+
+              modal.addEventListener("click", function (e) {
+                var t = e.target;
+                if (!t || !t.closest) return;
+                var row = t.closest("[data-custom-client-id]");
+                if (!row) return;
+                var id = row.getAttribute("data-custom-client-id");
+                var c = find(id);
+                if (!c) return;
+                if (t.closest("[data-custom-client-edit]")) {
+                  e.preventDefault();
+                  openEditor(id);
+                } else if (t.closest("[data-custom-client-remove]")) {
+                  e.preventDefault();
+                  if (!window.confirm("Remove " + c.name + "?")) return;
+                  clearStarIfCustom(c.platform, id);
+                  clients.splice(clients.indexOf(c), 1);
+                  row.parentNode.removeChild(row);
+                  syncOrder(c.platform);
+                  if (editingId === id) closeEditor();
+                  updateAddState();
+                  persist();
+                } else if (t.closest("[data-settings-bool-toggle]")) {
+                  setTimeout(function () {
+                    var toggle = row.querySelector("[data-settings-bool-toggle]");
+                    c.enabled = !!(toggle && toggle.classList.contains("is-on"));
+                    persist();
+                  }, 0);
+                }
+              });
+              updateAddState();
             })();
           </script>
 
@@ -4224,7 +4316,7 @@
                 }, { offset: Number.NEGATIVE_INFINITY, element: null }).element;
               }
 
-              modal.querySelectorAll("[data-allowed-client-item]").forEach(function (item) {
+              function bindAllowedClientItem(item) {
                 item.addEventListener("dragstart", function (e) {
                   if (item.classList.contains("is-unavailable")) {
                     e.preventDefault();
@@ -4234,6 +4326,7 @@
                     e.target.closest("[data-allowed-client-star]") ||
                     e.target.closest("[data-settings-bool-toggle]") ||
                     e.target.closest("[data-atak-apk-actions]") ||
+                    e.target.closest("[data-custom-client-actions]") ||
                     e.target.closest("input") ||
                     e.target.closest("label.settings-field")
                   )) {
@@ -4251,7 +4344,9 @@
                     window.scheduleSettingsAutoSave();
                   }
                 });
-              });
+              }
+              modal.bindAllowedClientItem = bindAllowedClientItem;
+              modal.querySelectorAll("[data-allowed-client-item]").forEach(bindAllowedClientItem);
 
               modal.querySelectorAll("[data-allowed-client-section-group]").forEach(function (group) {
                 group.addEventListener("dragover", function (e) {

@@ -110,13 +110,13 @@ function normalizeClient(raw) {
       platform === "ios" || platform === "android" ? cleanUrlScheme(raw.urlScheme) : "",
     instructions: cleanText(raw.instructions, 1000),
     enabled: toBool(raw.enabled, true),
-    recommended: toBool(raw.recommended, false),
   };
 }
 
 /**
  * Accepts the stored JSON string or an array. Always returns a clean array:
- * invalid entries dropped, duplicate ids made unique, at most one recommended per platform.
+ * invalid entries dropped, duplicate ids made unique.
+ * Order and the recommended star live in the ALLOWED_CLIENT_ORDER_* / ALLOWED_CLIENT_RECOMMENDED_* settings as `custom:<id>`.
  */
 function normalizeCustomClients(input) {
   let arr = input;
@@ -130,17 +130,12 @@ function normalizeCustomClients(input) {
   if (!Array.isArray(arr)) return [];
   const out = [];
   const seenIds = new Set();
-  const recommendedPlatforms = new Set();
   for (const item of arr) {
     if (out.length >= MAX_CLIENTS) break;
     const c = normalizeClient(item);
     if (!c) continue;
     while (seenIds.has(c.id)) c.id = "c" + crypto.randomBytes(5).toString("hex");
     seenIds.add(c.id);
-    if (c.recommended) {
-      if (recommendedPlatforms.has(c.platform)) c.recommended = false;
-      else recommendedPlatforms.add(c.platform);
-    }
     out.push(c);
   }
   return out;

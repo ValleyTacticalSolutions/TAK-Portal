@@ -125,39 +125,70 @@
           ? "Use TAK Beacon on Android devices."
           : "Use ATAK on Android devices.";
 
-    function parseClientOrder(key, defaults, insertMissingAtStart) {
+    function customIdsFor(list) {
+      return list.map((c) => "custom:" + c.id);
+    }
+    const customByAppId = {};
+    customAll.forEach((c) => { customByAppId["custom:" + c.id] = c; });
+    const recommendedByPlatform = {
+      ios: recommendedIos, android: recommendedAndroid, web: recommendedWeb, pc: recommendedPc,
+    };
+    // The star set in Settings picks the recommended client, built-in or custom.
+    function customCardData(c) {
+      return Object.assign({}, c, { recommended: recommendedByPlatform[c.platform] === "custom:" + c.id });
+    }
+    function parseClientOrder(key, defaults, insertMissingAtStart, extraIds) {
+      const extra = extraIds || [];
       const known = defaults.slice();
-      const knownSet = new Set(known);
+      const knownSet = new Set(known.concat(extra));
       const raw = (settings && typeof settings[key] === "string") ? settings[key] : "";
       const parsed = String(raw)
         .split(",")
         .map((s) => s.trim())
         .filter((id) => id && knownSet.has(id));
       const missing = known.filter((id) => !parsed.includes(id));
-      return insertMissingAtStart ? missing.concat(parsed) : parsed.concat(missing);
+      const base = insertMissingAtStart ? missing.concat(parsed) : parsed.concat(missing);
+      return base.concat(extra.filter((id) => !base.includes(id)));
     }
     const iosOrder = parseClientOrder(
       "ALLOWED_CLIENT_ORDER_IOS",
-      ["tak_aware", "tak_tracker", "itak"]
+      ["tak_aware", "tak_tracker", "itak"],
+      false,
+      customIdsFor(customIos)
     ).filter((id) =>
       (id === "tak_aware" && showTakAware) ||
       (id === "tak_tracker" && showTakTracker) ||
-      (id === "itak" && showITakLinks)
+      (id === "itak" && showITakLinks) ||
+      !!customByAppId[id]
     );
     const androidOrder = parseClientOrder(
       "ALLOWED_CLIENT_ORDER_ANDROID",
-      ["atak", "tak_beacon"]
+      ["atak", "tak_beacon"],
+      false,
+      customIdsFor(customAndroid)
     ).filter((id) =>
       (id === "atak" && showAtak) ||
-      (id === "tak_beacon" && showTakBeacon)
+      (id === "tak_beacon" && showTakBeacon) ||
+      !!customByAppId[id]
     );
     const webOrder = parseClientOrder(
       "ALLOWED_CLIENT_ORDER_WEB",
       ["live_map", "cloudtak"],
-      true
+      true,
+      customIdsFor(customWeb)
     ).filter((id) =>
       (id === "live_map" && showLiveMap) ||
-      (id === "cloudtak" && showCloudTak)
+      (id === "cloudtak" && showCloudTak) ||
+      !!customByAppId[id]
+    );
+    const pcOrder = parseClientOrder(
+      "ALLOWED_CLIENT_ORDER_PC",
+      ["data_package"],
+      false,
+      customIdsFor(customPc)
+    ).filter((id) =>
+      (id === "data_package" && showDataPackage) ||
+      !!customByAppId[id]
     );
   %>
 
@@ -314,9 +345,10 @@
             </div>
           </section>
         </div>
+        <% } else if (customByAppId[appId]) { %>
+        <%- include("partials/custom_client_card", { c: customCardData(customByAppId[appId]) }) %>
         <% } %>
       <% }); %>
-      <% customIos.forEach(function (c) { %><%- include("partials/custom_client_card", { c: c }) %><% }); %>
     </div>
   </div>
   <% } %>
@@ -418,9 +450,10 @@
         </button>
       </section>
     </div>
+      <% } else if (customByAppId[appId]) { %>
+    <%- include("partials/custom_client_card", { c: customCardData(customByAppId[appId]) }) %>
       <% } %>
     <% }); %>
-    <% customAndroid.forEach(function (c) { %><%- include("partials/custom_client_card", { c: c }) %><% }); %>
     </div>
   </div>
   <% } %>
@@ -459,16 +492,18 @@
           </a>
         </section>
       </div>
+        <% } else if (customByAppId[appId]) { %>
+        <%- include("partials/custom_client_card", { c: customCardData(customByAppId[appId]) }) %>
         <% } %>
       <% }); %>
-      <% customWeb.forEach(function (c) { %><%- include("partials/custom_client_card", { c: c }) %><% }); %>
     </div>
   </div>
   <% } %>
 
   <% if (showPcPlatform) { %>
   <div id="pcFlow" style="display:none;">
-    <% if (showDataPackage) { %>
+    <% pcOrder.forEach(function (appId) { %>
+    <% if (appId === "data_package") { %>
     <div class="card iosAppGroup" style="margin-top: 0.5rem;">
       <h2 class="iosAppGroupTitle">Data Package</h2>
       <section class="iosStep">
@@ -483,8 +518,10 @@
         </a>
       </section>
     </div>
+    <% } else if (customByAppId[appId]) { %>
+    <%- include("partials/custom_client_card", { c: customCardData(customByAppId[appId]) }) %>
     <% } %>
-    <% customPc.forEach(function (c) { %><%- include("partials/custom_client_card", { c: c }) %><% }); %>
+    <% }); %>
   </div>
   <% } %>
 </main>
