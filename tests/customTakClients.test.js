@@ -17,7 +17,7 @@ const list = svc.normalizeCustomClients(
     { name: "", platform: "ios" },
     { name: "No web address", platform: "web" },
     { name: "Bad platform", platform: "toaster" },
-    { name: "Evil", platform: "android", downloadUrl: "javascript:alert(1)", urlScheme: "javascript://x", iconUrl: "data:text/html,x" },
+    { name: "Evil", platform: "android", downloadUrl: "javascript:alert(1)", urlScheme: "javascript://x", iconUrl: "https://x.example/i.png" },
     { name: "Site", platform: "web", downloadUrl: "https://acme.example/app", enrollQr: "standard", prefQr: true, urlScheme: "acme://x" },
   ])
 );
@@ -28,7 +28,10 @@ assert.strictEqual(list[0].recommended, true);
 assert.strictEqual(list[1].recommended, false, "only one recommended per platform");
 assert.strictEqual(list[2].downloadUrl, "", "javascript: download link dropped");
 assert.strictEqual(list[2].urlScheme, "", "javascript: scheme dropped");
-assert.strictEqual(list[2].iconUrl, "", "data: icon dropped");
+assert.strictEqual("iconUrl" in list[2], false, "icons are not supported");
+const settingsView = fs.readFileSync(path.join(__dirname, "..", "views", "settings.ejs"), "utf8");
+assert.ok(!/ccIcon|Icon URL/.test(settingsView), "no icon field in custom client editor");
+assert.ok(settingsView.includes('<option value="standard">Standard / ATAK</option>'), "enrollment QR option reads Standard / ATAK");
 assert.strictEqual(list[3].enrollQr, "none", "web clients have no enrollment QR");
 assert.strictEqual(list[3].prefQr, false);
 assert.strictEqual(list[3].urlScheme, "");

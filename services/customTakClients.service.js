@@ -102,7 +102,6 @@ function normalizeClient(raw) {
     id: cleanId(raw.id) || "c" + crypto.randomBytes(5).toString("hex"),
     name,
     platform,
-    iconUrl: cleanHttpUrl(raw.iconUrl),
     downloadUrl,
     fileName: FILE_URL_RE.test(downloadUrl) ? cleanFileName(raw.fileName) : "",
     enrollQr: platform === "web" || platform === "pc" ? "none" : enrollQr,

@@ -6,7 +6,7 @@
 %>
 <div class="card iosAppGroup" data-custom-client="<%= c.id %>">
   <h2 class="iosAppGroupTitle">
-    <% if (c.iconUrl) { %><img class="customClientIcon" src="<%= c.iconUrl %>" alt="" loading="lazy" referrerpolicy="no-referrer" /><% } %><%= c.name %><%= (c.recommended && !c.downloadUrl) ? ' (Recommended)' : '' %>
+    <%= c.name %><%= (c.recommended && !c.downloadUrl) ? ' (Recommended)' : '' %>
   </h2>
 
   <% if (c.instructions) { %>

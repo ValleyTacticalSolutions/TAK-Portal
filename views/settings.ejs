@@ -3936,14 +3936,13 @@
                 </div>
                 <label class="customClientsField" data-cc-mobile><span>Enrollment QR <%- ccTip("Which enrollment QR the app reads. Standard works with ATAK and TAK Aware.") %></span>
                   <select id="ccEnroll">
-                    <option value="standard">Standard</option>
+                    <option value="standard">Standard / ATAK</option>
                     <option value="itak">iTAK</option>
                     <option value="none">None</option>
                   </select>
                 </label>
                 <label class="customClientsField" data-cc-mobile><span>Open In App link <%- ccTip("Optional. A URL scheme that opens your app, for example myapp://enroll?host={host}&username={username}&token={token}. Without it the button is not shown.") %></span><input type="text" id="ccScheme" maxlength="1000" placeholder="myapp://enroll?host={host}&amp;username={username}&amp;token={token}" autocomplete="off" /></label>
                 <label class="customClientsField customClientsCheck" data-cc-mobile><input type="checkbox" id="ccPref" /><span>Preference QR <%- ccTip("Show a Scan QR step that configures device preferences.") %></span></label>
-                <label class="customClientsField"><span>Icon URL <%- ccTip("Optional. An https link to a small image shown on the card.") %></span><input type="text" id="ccIcon" maxlength="2000" placeholder="https://..." autocomplete="off" /></label>
                 <label class="customClientsField customClientsWide"><span>Instructions <%- ccTip("Optional short text shown on the card.") %></span><textarea id="ccInstructions" rows="3" maxlength="1000"></textarea></label>
               </div>
               <div id="ccError" class="settings-help" style="color:var(--danger,#dc2626);display:none;"></div>
@@ -4051,7 +4050,6 @@
                 var c = index >= 0 ? clients[index] : { platform: "ios", enrollQr: "standard" };
                 $("ccName").value = c.name || "";
                 $("ccPlatform").value = c.platform || "ios";
-                $("ccIcon").value = c.iconUrl || "";
                 var isFile = /^\/api\/custom-clients\/file\//.test(c.downloadUrl || "");
                 $("ccDownload").value = isFile ? "" : (c.downloadUrl || "");
                 setFile(isFile ? c.downloadUrl : "", isFile ? (c.fileName || "file") : "");
@@ -4117,12 +4115,10 @@
                 var name = $("ccName").value.trim();
                 var platform = $("ccPlatform").value;
                 var download = fileUrl || $("ccDownload").value.trim();
-                var icon = $("ccIcon").value.trim();
                 var scheme = $("ccScheme").value.trim();
                 if (!name) return fail("Name is required.");
                 if (platform === "web" && !download) return fail("Web clients need an address to open.");
                 if (!fileUrl && !validHttp(download)) return fail("Download link must start with http:// or https://.");
-                if (!validHttp(icon)) return fail("Icon URL must start with http:// or https://.");
                 var mobile = platform === "ios" || platform === "android";
                 if (mobile && !validScheme(scheme)) return fail("URL scheme must look like myapp://... (not http, https or javascript).");
                 var prev = editingIndex >= 0 ? clients[editingIndex] : {};
@@ -4130,7 +4126,6 @@
                   id: prev.id || "",
                   name: name,
                   platform: platform,
-                  iconUrl: icon,
                   downloadUrl: download,
                   fileName: fileUrl ? fileName : "",
                   enrollQr: mobile ? $("ccEnroll").value : "none",

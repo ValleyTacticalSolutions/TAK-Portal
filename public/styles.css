@@ -4255,15 +4255,6 @@ body.theme-light #connectedClientsStatCard[role="button"]:hover {
 }
 
 /* Custom client cards on Setup My Device */
-.customClientIcon {
-  width: 2.5rem;
-  height: 2.5rem;
-  object-fit: contain;
-  border-radius: 8px;
-  vertical-align: middle;
-  margin-right: 0.5rem;
-}
-
 .customClientInstructions {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
