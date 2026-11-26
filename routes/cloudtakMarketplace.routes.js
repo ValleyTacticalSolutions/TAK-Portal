@@ -391,7 +391,13 @@ router.post("/ssh/setup", async (req, res) => {
       });
     }
 
-    const handshake = await ssh.onboardWithPassword({ host, port, username: sshUser, password });
+    const handshake = await ssh.onboardWithPassword({
+      host,
+      port,
+      username: sshUser,
+      password,
+      keyType: body.keyType,
+    });
     const test = await ssh.testConnection();
     if (!test.ok) {
       return res.status(400).json({

@@ -142,11 +142,16 @@ function persistKeyPaths(keyStatus) {
   if (changed) settingsSvc.saveSettings(next);
 }
 
-function ensureCloudtakSshKeyPair() {
+function ensureCloudtakSshKeyPair(keyType) {
+  const wantType = keyType ? takSshSvc.normalizeSshKeyType(keyType) : null;
   ensureDir(DATA_SSH_DIR);
 
   const existingPrivate = readKeyFile(DEFAULT_CLOUDTAK_KEY);
-  if (existingPrivate && isUsablePrivateKey(existingPrivate, undefined)) {
+  if (
+    existingPrivate &&
+    isUsablePrivateKey(existingPrivate, undefined) &&
+    (!wantType || takSshSvc.detectSshKeyType(existingPrivate) === wantType)
+  ) {
     if (!fs.existsSync(DEFAULT_CLOUDTAK_PUB)) {
       const derived = opensshPublicFromPrivate(existingPrivate, undefined, "tak-portal-cloudtak");
       if (derived) {
@@ -158,16 +163,12 @@ function ensureCloudtakSshKeyPair() {
     return status;
   }
 
-  const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
-    modulusLength: 4096,
-    publicExponent: 0x10001,
-  });
-  const privatePem = privateKey.export({ format: "pem", type: "pkcs1" });
-  fs.writeFileSync(DEFAULT_CLOUDTAK_KEY, String(privatePem), { mode: 0o600 });
-
-  const jwk = publicKey.export({ format: "jwk" });
-  const opensshPublic = buildSshRsaPublicFromJwk(jwk, "tak-portal-cloudtak");
-  fs.writeFileSync(DEFAULT_CLOUDTAK_PUB, `${String(opensshPublic).trim()}\n`, { mode: 0o644 });
+  const { privatePem, publicOpenssh } = takSshSvc.generateSshKeyMaterial(
+    wantType || "rsa",
+    "tak-portal-cloudtak"
+  );
+  fs.writeFileSync(DEFAULT_CLOUDTAK_KEY, privatePem, { mode: 0o600 });
+  fs.writeFileSync(DEFAULT_CLOUDTAK_PUB, `${String(publicOpenssh).trim()}\n`, { mode: 0o644 });
 
   const verifyPrivate = fs.readFileSync(DEFAULT_CLOUDTAK_KEY, "utf8");
   if (!isUsablePrivateKey(verifyPrivate, undefined)) {
@@ -193,7 +194,7 @@ function readPublicKeyText(keyStatus) {
   return "";
 }
 
-async function onboardWithPassword({ host, port, username, password }) {
+async function onboardWithPassword({ host, port, username, password, keyType }) {
   const h = String(host || "").trim();
   const u = String(username || "").trim();
   const p = String(password || "");
@@ -203,7 +204,7 @@ async function onboardWithPassword({ host, port, username, password }) {
   if (!u) throw new Error("CloudTAK SSH username is required.");
   if (!p) throw new Error("SSH password is required to generate and install the key.");
 
-  const keyStatus = ensureCloudtakSshKeyPair();
+  const keyStatus = ensureCloudtakSshKeyPair(keyType);
   const pubKey = readPublicKeyText(keyStatus);
   if (!pubKey) throw new Error("Generated public key is empty.");
 

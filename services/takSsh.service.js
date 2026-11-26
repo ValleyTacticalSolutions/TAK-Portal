@@ -790,6 +790,55 @@ function buildSshRsaPublicFromJwk(jwk, comment) {
   return `ssh-rsa ${payload.toString("base64")} ${comment || "tak-portal"}`;
 }
 
+const SSH_KEY_TYPES = {
+  rsa: { label: "RSA 4096", sshType: "ssh-rsa" },
+  "ecdsa-256": { label: "ECDSA P-256", sshType: "ecdsa-sha2-nistp256", curve: "prime256v1" },
+  "ecdsa-384": { label: "ECDSA P-384", sshType: "ecdsa-sha2-nistp384", curve: "secp384r1" },
+  "ecdsa-521": { label: "ECDSA P-521", sshType: "ecdsa-sha2-nistp521", curve: "secp521r1" },
+};
+
+function normalizeSshKeyType(value) {
+  const v = String(value || "").trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(SSH_KEY_TYPES, v) ? v : "rsa";
+}
+
+// Which of our key types a private key is (null when unknown or unreadable).
+function detectSshKeyType(privateKeyText) {
+  try {
+    const parsed = sshUtils.parseKey(String(privateKeyText || ""));
+    const key = Array.isArray(parsed) ? parsed[0] : parsed;
+    if (!key || key instanceof Error) return null;
+    const hit = Object.keys(SSH_KEY_TYPES).find((k) => SSH_KEY_TYPES[k].sshType === key.type);
+    return hit || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Generates a key pair of the chosen type: { privatePem, publicOpenssh }.
+function generateSshKeyMaterial(keyType, comment) {
+  const t = normalizeSshKeyType(keyType);
+  if (t === "rsa") {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
+      modulusLength: 4096,
+      publicExponent: 0x10001,
+    });
+    return {
+      privatePem: String(privateKey.export({ format: "pem", type: "pkcs1" })),
+      publicOpenssh: buildSshRsaPublicFromJwk(publicKey.export({ format: "jwk" }), comment),
+    };
+  }
+  const { privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: SSH_KEY_TYPES[t].curve });
+  const privatePem = String(privateKey.export({ format: "pem", type: "sec1" }));
+  const parsed = sshUtils.parseKey(privatePem);
+  if (!parsed || parsed instanceof Error) throw new Error("Generated EC key is not parseable by ssh2.");
+  const pub = parsed.getPublicSSH();
+  return {
+    privatePem,
+    publicOpenssh: `${SSH_KEY_TYPES[t].sshType} ${Buffer.from(pub).toString("base64")} ${comment || "tak-portal"}`,
+  };
+}
+
 function getTakUrlHostname() {
   const raw = String(getString("TAK_URL", "")).trim();
   if (!raw) return null;
@@ -869,31 +918,28 @@ function getLocalKeyStatus() {
   };
 }
 
-function ensureLocalSshKeyPair() {
+function ensureLocalSshKeyPair(keyType) {
+  const wantType = keyType ? normalizeSshKeyType(keyType) : null;
   ensureDir(DATA_SSH_DIR);
 
   if (fs.existsSync(DEFAULT_PRIVATE_KEY_PATH) && fs.existsSync(DEFAULT_PUBLIC_KEY_PATH)) {
     try {
       const existingPrivate = fs.readFileSync(DEFAULT_PRIVATE_KEY_PATH, "utf8");
-      if (isUsablePrivateKey(existingPrivate, undefined)) {
+      if (
+        isUsablePrivateKey(existingPrivate, undefined) &&
+        (!wantType || detectSshKeyType(existingPrivate) === wantType)
+      ) {
         return getLocalKeyStatus();
       }
-      console.warn("[TAK SSH] Existing private key is invalid. Regenerating.");
+      console.warn("[TAK SSH] Existing private key is invalid or a different type. Regenerating.");
     } catch (_) {
       // Regenerate below.
     }
   }
 
-  const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
-    modulusLength: 4096,
-    publicExponent: 0x10001,
-  });
-  const privatePem = privateKey.export({ format: "pem", type: "pkcs1" });
-  fs.writeFileSync(DEFAULT_PRIVATE_KEY_PATH, String(privatePem), { mode: 0o600 });
-
-  const jwk = publicKey.export({ format: "jwk" });
-  const opensshPublic = buildSshRsaPublicFromJwk(jwk, "tak-portal");
-  fs.writeFileSync(DEFAULT_PUBLIC_KEY_PATH, String(opensshPublic).trim() + "\n", {
+  const { privatePem, publicOpenssh } = generateSshKeyMaterial(wantType || "rsa", "tak-portal");
+  fs.writeFileSync(DEFAULT_PRIVATE_KEY_PATH, privatePem, { mode: 0o600 });
+  fs.writeFileSync(DEFAULT_PUBLIC_KEY_PATH, String(publicOpenssh).trim() + "\n", {
     mode: 0o644,
   });
 
@@ -1139,7 +1185,7 @@ function execOverSsh(connectConfig, command, timeoutMs = 30000) {
   });
 }
 
-async function onboardTakSshWithPassword({ host, port, username, password, privilegeCmd }) {
+async function onboardTakSshWithPassword({ host, port, username, password, privilegeCmd, keyType }) {
   const h = String(host || "").trim();
   const u = String(username || "").trim();
   const p = String(password || "");
@@ -1150,7 +1196,7 @@ async function onboardTakSshWithPassword({ host, port, username, password, privi
   if (!u) throw new Error("SSH username is required.");
   if (!p) throw new Error("SSH password is required for first-time handshake.");
 
-  const keyStatus = ensureLocalSshKeyPair();
+  const keyStatus = ensureLocalSshKeyPair(keyType);
   const pubKeyAbs = path.resolve(process.cwd(), keyStatus.publicKeyPath);
   const pubKey = fs.readFileSync(pubKeyAbs, "utf8").trim();
   if (!pubKey) throw new Error("Generated public key is empty.");
@@ -2049,6 +2095,10 @@ module.exports = {
   readMarketplaceHelperSource,
   getLocalKeyStatus,
   ensureLocalSshKeyPair,
+  SSH_KEY_TYPES,
+  normalizeSshKeyType,
+  detectSshKeyType,
+  generateSshKeyMaterial,
   onboardTakSshWithPassword,
   configureRemoteSudoAccessAfterHandshake,
   testSshConnectionAndPrivilegedAccess,

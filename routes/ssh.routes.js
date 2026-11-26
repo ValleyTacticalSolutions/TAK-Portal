@@ -32,7 +32,7 @@ router.get("/status", (req, res) => {
 
 router.post("/generate-key", (req, res) => {
   try {
-    const keyStatus = takSshSvc.ensureLocalSshKeyPair();
+    const keyStatus = takSshSvc.ensureLocalSshKeyPair(req.body?.keyType);
     auditSvc.auditFromRequest(req, {
       action: "SSH_GENERATE_KEY",
       targetType: "ssh",
@@ -220,13 +220,15 @@ router.post("/setup", async (req, res) => {
       });
     }
 
-    const keyStatus = takSshSvc.ensureLocalSshKeyPair();
+    const keyType = takSshSvc.normalizeSshKeyType(body.keyType);
+    const keyStatus = takSshSvc.ensureLocalSshKeyPair(keyType);
     const handshake = await takSshSvc.onboardTakSshWithPassword({
       host,
       port,
       username,
       password,
       privilegeCmd: body.privilegeCmd,
+      keyType,
     });
     if (!handshake?.ok) {
       return res.status(400).json({
