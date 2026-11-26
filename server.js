@@ -2598,6 +2598,11 @@ async function boot() {
     refreshAppUpdateLocals();
     setInterval(refreshAppUpdateLocals, 60 * 1000).unref?.();
     try {
+      require("./services/iconsetAutoImport.service").startWebWatcher();
+    } catch (e) {
+      console.log("⚠️ Custom icon set watcher failed", e?.message || e);
+    }
+    try {
       applyLiveMapRuntime();
     } catch (e) {
       console.log("⚠️ Geofence evaluator init failed", e?.message || e);

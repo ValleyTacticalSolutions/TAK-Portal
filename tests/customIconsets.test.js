@@ -120,3 +120,63 @@ main().catch((e) => {
   console.error(e);
   process.exit(1);
 });
+
+// --- auto-import from data packages / data syncs (#143) ---
+(async () => {
+  const autoImport = require("../services/iconsetAutoImport.service");
+  assert.strictEqual(autoImport.isEnabled({}), false);
+  assert.strictEqual(autoImport.isEnabled({ AUTO_IMPORT_ICONSETS_ENABLED: "true" }), true);
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "custom-iconsets-auto-"));
+  const UID2 = "aaaaaaaa-1111-4222-8333-444455556666";
+  const good = await zip({
+    "iconset.xml": `<iconset name="Auto" uid="${UID2}"><icon name="a.png"/></iconset>`,
+    "a.png": PNG,
+  });
+  const notIconset = await zip({ "readme.txt": Buffer.from("hi") });
+  const files = { h1: good, h2: notIconset, h3: good };
+  const downloads = [];
+  let imported = 0;
+  const deps = {
+    root,
+    packages: {
+      list: async () => ({
+        items: [
+          { hash: "H1", filename: "traffic.zip", size: 10 },
+          { hash: "h2", filename: "other.zip" },
+          { hash: "h4", filename: "photo.jpg" },
+        ],
+      }),
+      download: async (h) => {
+        downloads.push(h);
+        return files[h];
+      },
+    },
+    missions: {
+      list: async () => ({ data: [{ name: "m1" }] }),
+      get: async () => ({ data: { contents: [{ data: { hash: "h3", name: "set.zip" } }] } }),
+    },
+    reservedUids: async () => [],
+    onImported: async () => {
+      imported++;
+    },
+  };
+  const first = await autoImport.runOnce(deps);
+  assert.strictEqual(first.imported.length, 2, "package and mission zips import");
+  assert.deepStrictEqual(downloads.sort(), ["h1", "h2", "h3"], "non-zip files are never downloaded");
+  assert(customIconsets.listDirs(root).includes(UID2));
+  assert.strictEqual(imported, 1);
+
+  downloads.length = 0;
+  const second = await autoImport.runOnce(deps);
+  assert.strictEqual(second.tried, 0, "each hash is tried once");
+  assert.deepStrictEqual(downloads, []);
+  console.log("auto-import ok");
+})().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
+
+const settingsView = fs.readFileSync(path.join(__dirname, "..", "views", "settings.ejs"), "utf8");
+assert(/renderField\("AUTO_IMPORT_ICONSETS_ENABLED"/.test(settingsView), "settings has auto-import toggle");
+assert(/"AUTO_IMPORT_ICONSETS_ENABLED",\n\s+"MOU_ENABLED"/.test(settingsView), "toggle is a boolean key");

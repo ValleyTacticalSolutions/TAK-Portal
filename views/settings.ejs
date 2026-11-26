@@ -238,6 +238,7 @@
         "USER_PHONE_NUMBER_FIELD_ENABLED",
         "SMS_CONSENT_ENABLED",
         "LIVE_MAP_ENABLED",
+        "AUTO_IMPORT_ICONSETS_ENABLED",
         "MOU_ENABLED",
         "MOU_SEND_EMAILS",
         "CLOUDTAK_MARKETPLACE_ENABLED",
@@ -445,6 +446,7 @@
         "USER_PHONE_NUMBER_FIELD_ENABLED",
         "DEFAULT_THEME_MODE",
         "LIVE_MAP_ENABLED",
+        "AUTO_IMPORT_ICONSETS_ENABLED",
         "DEFAULT_MAP_SOURCE",
         "OPENADDRESSES_TOKEN",
         "PRIMARY_BUTTON_COLOR",
@@ -4740,6 +4742,10 @@
               </select>
               
             </label>
+          </div>
+
+          <div class="grid2">
+            <% renderField("AUTO_IMPORT_ICONSETS_ENABLED","Auto-Import Icon Sets","When on, iconset ZIPs found in TAK Server data packages and Data Sync missions are imported automatically (checked every few minutes). Each file is tried once; invalid files are skipped.","false"); %>
           </div>
 
           <div class="settings-oa-section" data-icon-sets-section>
