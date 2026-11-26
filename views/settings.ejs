@@ -4046,8 +4046,9 @@
                 if (toggle) toggle.setAttribute("aria-label", name);
               }
               function addRow(c) {
+                if (!/^[a-z0-9_-]{1,40}$/.test(String(c.id)) || !/^(ios|android|web|pc)$/.test(String(c.platform))) return;
                 var holder = document.createElement("div");
-                holder.innerHTML = tpl.innerHTML.replace(/__ID__/g, c.id).replace(/__SECTION__/g, c.platform).replace(/__NAME__/g, "");
+                holder.innerHTML = tpl.innerHTML.replace(/__ID__/g, String(c.id)).replace(/__SECTION__/g, String(c.platform)).replace(/__NAME__/g, "");
                 var row = holder.querySelector("[data-allowed-client-item]");
                 if (!row) return;
                 setRowName(row, c.name);

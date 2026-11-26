@@ -719,7 +719,7 @@ app.get("/api/custom-clients/file/:id", (req, res) => {
     const safe = String(found.fileName).replace(/["\\\r\n]/g, "_");
     res.setHeader("Content-Disposition", `attachment; filename="${safe}"`);
     res.setHeader("Content-Type", "application/octet-stream");
-    return res.sendFile(found.filePath);
+    return res.sendFile(resolveInside(path.join(__dirname, "data", "custom-clients"), found.filePath));
   } catch (err) {
     return res.status(500).json({ error: toSafeApiError(err) });
   }

@@ -177,7 +177,7 @@ function saveUploadedFile(tempPath, originalName) {
   if (!fs.existsSync(src)) throw new Error("Uploaded file not found.");
   fs.mkdirSync(FILES_DIR, { recursive: true });
   const id = crypto.randomBytes(8).toString("hex");
-  const dest = path.join(FILES_DIR, id);
+  const dest = resolveInside(FILES_DIR, id);
   try {
     fs.renameSync(src, dest);
   } catch (_) {
@@ -193,7 +193,7 @@ function getFileForDownload(fileId, clients) {
   const url = FILE_URL_PREFIX + fileId;
   const client = normalizeCustomClients(clients).find((c) => c.enabled && c.downloadUrl === url);
   if (!client) return null;
-  const filePath = path.join(FILES_DIR, fileId);
+  const filePath = resolveInside(FILES_DIR, fileId);
   if (!fs.existsSync(filePath)) return null;
   return { filePath, fileName: client.fileName || "client-download" };
 }
@@ -205,7 +205,7 @@ function pruneUnreferencedFiles(clients) {
     if (!fs.existsSync(FILES_DIR)) return;
     for (const f of fs.readdirSync(FILES_DIR)) {
       if (/^[a-f0-9]{16}$/.test(f) && !keep.has(f)) {
-        const fp = path.join(FILES_DIR, f);
+        const fp = resolveInside(FILES_DIR, f);
         try {
           // Keep fresh uploads: the admin may not have saved the client yet.
           if (Date.now() - fs.statSync(fp).mtimeMs < 60 * 60 * 1000) continue;

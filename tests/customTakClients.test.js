@@ -123,4 +123,11 @@ assert.ok(/id="customClientsAdd">Add Custom Client<\/button>/.test(settings), "A
 assert.ok(/id="customClientsAddRow"/.test(settings) && /addRow\.style\.display = "none"/.test(settings), "help tip hides with the Add button while editing");
 assert.ok(settings.includes('id="ccSave">Save Client<') && settings.includes('id="ccUpload">Upload File<') && settings.includes('Remove File</button>'), "editor buttons are Title Case");
 
+// CodeQL: file paths are confined with resolveInside; template ids are validated before innerHTML
+const svcSrc = fs.readFileSync(path.join(__dirname, "..", "services", "customTakClients.service.js"), "utf8");
+assert.ok(!/path\.join\(FILES_DIR/.test(svcSrc), "service resolves file paths with resolveInside");
+assert.ok(/resolveInside\(path\.join\(__dirname, "\.\.", "data", "uploads"\), req\.file\.path\)/.test(fs.readFileSync(path.join(__dirname, "..", "routes", "customClientFiles.routes.js"), "utf8")), "upload cleanup confined to uploads dir");
+assert.ok(/resolveInside\(path\.join\(__dirname, "data", "custom-clients"\), found\.filePath\)/.test(fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8")), "download confined to custom-clients dir");
+assert.ok(settings.includes("(ios|android|web|pc)$/.test(String(c.platform))"), "addRow validates id and platform before innerHTML");
+
 console.log("customTakClients tests passed");

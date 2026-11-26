@@ -8,6 +8,7 @@ const fs = require("fs");
 const multer = require("multer");
 const svc = require("../services/customTakClients.service");
 const auditSvc = require("../services/auditLog.service");
+const { resolveInside } = require("../services/safePath");
 const { toSafeApiError } = require("../services/apiErrorPayload.service");
 
 const upload = multer({
@@ -56,7 +57,7 @@ router.post("/upload", (req, res) => {
       }
       return res.json({ ok: true, ...info });
     } catch (e) {
-      try { fs.unlinkSync(req.file.path); } catch (_) { /* ignore */ }
+      try { fs.unlinkSync(resolveInside(path.join(__dirname, "..", "data", "uploads"), req.file.path)); } catch (_) { /* ignore */ }
       return res.status(400).json({ ok: false, error: toSafeApiError(e) });
     }
   });
