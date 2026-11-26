@@ -4047,9 +4047,19 @@
               }
               function addRow(c) {
                 if (!/^[a-z0-9_-]{1,40}$/.test(String(c.id)) || !/^(ios|android|web|pc)$/.test(String(c.platform))) return;
-                var holder = document.createElement("div");
-                holder.innerHTML = tpl.innerHTML.replace(/__ID__/g, String(c.id)).replace(/__SECTION__/g, String(c.platform)).replace(/__NAME__/g, "");
-                var row = holder.querySelector("[data-allowed-client-item]");
+                var frag = tpl.content.cloneNode(true);
+                var fill = function (v) {
+                  return v.replace(/__ID__/g, String(c.id)).replace(/__SECTION__/g, String(c.platform)).replace(/__NAME__/g, "");
+                };
+                [].slice.call(frag.querySelectorAll("*")).forEach(function (el) {
+                  [].slice.call(el.attributes).forEach(function (a) {
+                    if (a.value.indexOf("__") !== -1) el.setAttribute(a.name, fill(a.value));
+                  });
+                  [].slice.call(el.childNodes).forEach(function (n) {
+                    if (n.nodeType === 3 && n.nodeValue.indexOf("__") !== -1) n.nodeValue = fill(n.nodeValue);
+                  });
+                });
+                var row = frag.querySelector("[data-allowed-client-item]");
                 if (!row) return;
                 setRowName(row, c.name);
                 placeRow(row, c.platform);

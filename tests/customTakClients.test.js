@@ -130,4 +130,8 @@ assert.ok(/resolveInside\(path\.join\(__dirname, "\.\.", "data", "uploads"\), re
 assert.ok(/resolveInside\(path\.join\(__dirname, "data", "custom-clients"\), found\.filePath\)/.test(fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8")), "download confined to custom-clients dir");
 assert.ok(settings.includes("(ios|android|web|pc)$/.test(String(c.platform))"), "addRow validates id and platform before innerHTML");
 
+// CodeQL "DOM text reinterpreted as HTML": addRow clones the <template> content, never re-parses it via innerHTML
+assert.ok(settings.includes("tpl.content.cloneNode(true)"), "addRow clones template content");
+assert.ok(!/tpl\.innerHTML/.test(settings), "addRow must not re-parse template text as HTML");
+
 console.log("customTakClients tests passed");
