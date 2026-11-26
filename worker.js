@@ -153,6 +153,16 @@ async function main() {
     console.warn("[worker] hidden-prefix migration:", e?.message || e);
   }
 
+  try {
+    const iconsetAutoImport = require("./services/iconsetAutoImport.service");
+    every(5 * 60 * 1000, () => iconsetAutoImport.runIfEnabled());
+    setTimeout(() => {
+      void iconsetAutoImport.runIfEnabled().catch(() => {});
+    }, 60 * 1000).unref?.();
+  } catch (e) {
+    console.warn("[worker] iconset auto-import:", e?.message || e);
+  }
+
   every(15 * 1000, writeTakDashboard);
   void writeTakDashboard();
 

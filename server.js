@@ -772,6 +772,11 @@ app.use(
   require("./routes/atakApk.routes")
 );
 app.use(
+  "/api/settings/icon-sets",
+  requirePermission("page.settings"),
+  require("./routes/customIconsets.routes")
+);
+app.use(
   "/api/settings/custom-clients",
   requirePermission("page.settings"),
   require("./routes/customClientFiles.routes")
@@ -2592,6 +2597,11 @@ async function boot() {
     );
     refreshAppUpdateLocals();
     setInterval(refreshAppUpdateLocals, 60 * 1000).unref?.();
+    try {
+      require("./services/iconsetAutoImport.service").startWebWatcher();
+    } catch (e) {
+      console.log("⚠️ Custom icon set watcher failed", e?.message || e);
+    }
     try {
       applyLiveMapRuntime();
     } catch (e) {

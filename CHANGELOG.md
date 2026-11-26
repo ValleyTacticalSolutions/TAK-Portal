@@ -11,6 +11,8 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.44 - IN PROGRESS
+🎉 `New Feature` - Live Map can use your own ATAK-style icon sets. Settings → Live Map → Custom Icon Sets lets an admin import an iconset ZIP (PNG icons plus `iconset.xml`) and remove it again. Markers whose `usericon` path points at the imported set show its icons, other markers keep the generic fallback, and imported sets are stored on the data volume so they survive restarts and updates. Uploads are admin-only and checked for safe paths, PNG-only files and size limits. An optional Auto-Import Icon Sets switch also imports iconset ZIPs found in data packages and Data Sync missions (#143)<br>
 ### v2.0.43 - 11/25/26
 ✨ `Enhancement` - Settings → SMS now has an SMS Consent Notice toggle. When on, you type your own notice and Request Access shows it under the optional Phone Number field with a checkbox the user must tick to agree before submitting a phone number (#142)<br>
 ✨ `Enhancement` - TAK Server SSH setup and CloudTAK Marketplace SSH setup now have a Key Type choice: RSA 4096 (default), ECDSA P-256, P-384 or P-521, so FIPS-mode hosts that block other key types can be used. Picking a different type replaces the saved key and installs the new one on the host (#60)<br>
