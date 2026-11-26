@@ -1194,10 +1194,10 @@
           </div>
 
           <div style="margin-top:1rem;">
-            <% renderField("SMS_CONSENT_ENABLED","SMS Consent Notice","When on, Request Access shows your notice under the Phone Number field with a checkbox the user must tick to agree when they enter a phone number. Needs the User's Phone Number Field setting on.","false"); %>
+            <% renderField("SMS_CONSENT_ENABLED","SMS Consent Notice","","false"); %>
           </div>
           <label class="settings-field" id="smsConsentTextField" style="margin-top:.5rem;max-width:100%;<%= String(settings.SMS_CONSENT_ENABLED || '').toLowerCase() === 'true' ? '' : 'display:none;' %>">
-            <span class="settings-label">Consent notice text</span>
+            <span class="settings-label">Consent Notice Text</span>
             <textarea name="settings[SMS_CONSENT_TEXT]" rows="4" maxlength="1000" style="width:100%;" placeholder="e.g. I agree to receive text messages from this agency. Message and data rates may apply. Reply STOP to opt out."><%= settings.SMS_CONSENT_TEXT || '' %></textarea>
           </label>
 
