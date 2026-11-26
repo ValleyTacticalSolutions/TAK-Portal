@@ -3903,8 +3903,13 @@
             <input type="hidden" name="settings[ALLOWED_CLIENT_ORDER_PC]" value="<%= pcOrder.join(',') %>" data-allowed-client-order-input="pc" />
           </div>
 
-          <h3 class="settings-allowed-client-platform">Custom Clients</h3>
-          <p class="settings-help" style="margin:0 0 0.5rem;">Add your own TAK client app. Each enabled client appears as a card on Setup My Device under its platform and reuses the standard enrollment QR, token lifetime and audit log. For an "Open In App" button that opens your app, set a URL scheme and use <code>{host}</code>, <code>{username}</code> and <code>{token}</code> where the values go, for example <code>myapp://enroll?host={host}&amp;username={username}&amp;token={token}</code>.</p>
+          <%
+            const ccTip = function (text) {
+              return '<span class="settings-help-tip"><button type="button" class="settings-help-btn" aria-label="Help" aria-expanded="false">?</button><span class="settings-help-popover" role="tooltip">' +
+                String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + '</span></span>';
+            };
+          %>
+          <h3 class="settings-allowed-client-platform">Custom Clients <%- ccTip("Add your own TAK client app. Each enabled client shows as a card on Setup My Device and uses the standard enrollment QR.") %></h3>
           <div class="settings-auto-create-section" id="customClientsSection" data-custom-clients-section>
             <input type="hidden" name="settings[CUSTOM_TAK_CLIENTS]" id="customClientsJson" value="<%= String((settings && settings.CUSTOM_TAK_CLIENTS) || '[]') %>" />
             <div id="customClientsList" class="customClientsList"></div>
@@ -3919,18 +3924,27 @@
                     <option value="pc">PC</option>
                   </select>
                 </label>
-                <label class="customClientsField"><span>Icon URL (optional)</span><input type="text" id="ccIcon" maxlength="2000" placeholder="https://..." autocomplete="off" /></label>
-                <label class="customClientsField"><span id="ccDownloadLabel">Download link (App Store, TestFlight, Play Store, APK)</span><input type="text" id="ccDownload" maxlength="2000" placeholder="https://..." autocomplete="off" /></label>
-                <label class="customClientsField" data-cc-mobile><span>Enrollment QR</span>
+                <div class="customClientsField customClientsWide">
+                  <span><span id="ccDownloadLabel">Download</span> <%- ccTip("A link (App Store, TestFlight, Play Store) or an uploaded file such as an APK. For Web, the address to open.") %></span>
+                  <input type="text" id="ccDownload" maxlength="2000" placeholder="https://..." autocomplete="off" />
+                  <div class="customClientsFileRow">
+                    <input type="file" id="ccFile" accept=".apk,.aab,.ipa,.zip,.exe,.msi,.dmg,.pkg,.deb,.appimage" style="display:none;" tabindex="-1" />
+                    <button type="button" class="btn" id="ccUpload">Upload file</button>
+                    <button type="button" class="btn" id="ccFileRemove" style="display:none;">Remove file</button>
+                    <span class="settings-help customClientsFileName" id="ccFileName"></span>
+                  </div>
+                </div>
+                <label class="customClientsField" data-cc-mobile><span>Enrollment QR <%- ccTip("Which enrollment QR the app reads. Standard works with ATAK and TAK Aware.") %></span>
                   <select id="ccEnroll">
-                    <option value="standard">Standard (ATAK / TAK Aware)</option>
+                    <option value="standard">Standard</option>
                     <option value="itak">iTAK</option>
                     <option value="none">None</option>
                   </select>
                 </label>
-                <label class="customClientsField" data-cc-mobile><span>URL scheme for Open In App (optional)</span><input type="text" id="ccScheme" maxlength="1000" placeholder="myapp://enroll?host={host}&amp;username={username}&amp;token={token}" autocomplete="off" /></label>
-                <label class="customClientsField customClientsCheck" data-cc-mobile><input type="checkbox" id="ccPref" /><span>Reads the preference QR</span></label>
-                <label class="customClientsField customClientsWide"><span>Instructions (optional)</span><textarea id="ccInstructions" rows="3" maxlength="1000"></textarea></label>
+                <label class="customClientsField" data-cc-mobile><span>Open In App link <%- ccTip("Optional. A URL scheme that opens your app, for example myapp://enroll?host={host}&username={username}&token={token}. Without it the button is not shown.") %></span><input type="text" id="ccScheme" maxlength="1000" placeholder="myapp://enroll?host={host}&amp;username={username}&amp;token={token}" autocomplete="off" /></label>
+                <label class="customClientsField customClientsCheck" data-cc-mobile><input type="checkbox" id="ccPref" /><span>Preference QR <%- ccTip("Show a Scan QR step that configures device preferences.") %></span></label>
+                <label class="customClientsField"><span>Icon URL <%- ccTip("Optional. An https link to a small image shown on the card.") %></span><input type="text" id="ccIcon" maxlength="2000" placeholder="https://..." autocomplete="off" /></label>
+                <label class="customClientsField customClientsWide"><span>Instructions <%- ccTip("Optional short text shown on the card.") %></span><textarea id="ccInstructions" rows="3" maxlength="1000"></textarea></label>
               </div>
               <div id="ccError" class="settings-help" style="color:var(--danger,#dc2626);display:none;"></div>
               <div class="row" style="gap:0.5rem;margin-top:0.5rem;">
@@ -3960,6 +3974,17 @@
                 hidden.value = JSON.stringify(clients);
                 if (typeof window.scheduleSettingsAutoSave === "function") window.scheduleSettingsAutoSave();
               }
+              var fileUrl = "";
+              var fileName = "";
+              function setFile(url, name) {
+                fileUrl = url || "";
+                fileName = name || "";
+                var has = !!fileUrl;
+                $("ccDownload").style.display = has ? "none" : "";
+                $("ccFileName").textContent = has ? "Uploaded: " + fileName : "";
+                $("ccFileRemove").style.display = has ? "" : "none";
+                $("ccUpload").textContent = has ? "Replace file" : "Upload file";
+              }
               function validHttp(v) {
                 if (!v) return true;
                 try { var u = new URL(v); return u.protocol === "http:" || u.protocol === "https:"; } catch (e) { return false; }
@@ -3976,9 +4001,9 @@
                 [].forEach.call(editor.querySelectorAll("[data-cc-mobile]"), function (el) {
                   el.style.display = mobile ? "" : "none";
                 });
-                $("ccDownloadLabel").textContent = p === "web"
-                  ? "Address to open (required)"
-                  : "Download link (App Store, TestFlight, Play Store, APK)";
+                $("ccDownloadLabel").textContent = p === "web" ? "Address to open" : "Download link or file";
+                $("ccUpload").style.display = p === "web" ? "none" : "";
+                if (p === "web") setFile("", "");
               }
               function render() {
                 list.innerHTML = "";
@@ -4027,7 +4052,9 @@
                 $("ccName").value = c.name || "";
                 $("ccPlatform").value = c.platform || "ios";
                 $("ccIcon").value = c.iconUrl || "";
-                $("ccDownload").value = c.downloadUrl || "";
+                var isFile = /^\/api\/custom-clients\/file\//.test(c.downloadUrl || "");
+                $("ccDownload").value = isFile ? "" : (c.downloadUrl || "");
+                setFile(isFile ? c.downloadUrl : "", isFile ? (c.fileName || "file") : "");
                 $("ccEnroll").value = c.enrollQr || "standard";
                 $("ccScheme").value = c.urlScheme || "";
                 $("ccPref").checked = !!c.prefQr;
@@ -4049,17 +4076,52 @@
                 el.style.display = "block";
               }
               $("ccPlatform").addEventListener("change", syncPlatformFields);
+              $("ccFileRemove").addEventListener("click", function () { setFile("", ""); });
+              $("ccUpload").addEventListener("click", function () { $("ccFile").click(); });
+              $("ccFile").addEventListener("change", function () {
+                var input = $("ccFile");
+                if (!input.files || !input.files.length) return;
+                var file = input.files[0];
+                input.value = "";
+                var btn = $("ccUpload");
+                btn.disabled = true;
+                btn.textContent = "Uploading… 0%";
+                $("ccError").style.display = "none";
+                var fd = new FormData();
+                fd.append("file", file);
+                var xhr = new XMLHttpRequest();
+                xhr.open("POST", "/api/settings/custom-clients/upload");
+                xhr.withCredentials = true;
+                xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
+                xhr.setRequestHeader("Accept", "application/json");
+                xhr.upload.onprogress = function (evt) {
+                  if (evt.lengthComputable && evt.total) btn.textContent = "Uploading… " + Math.round((evt.loaded / evt.total) * 100) + "%";
+                };
+                xhr.onload = function () {
+                  btn.disabled = false;
+                  var data = null;
+                  try { data = JSON.parse(xhr.responseText); } catch (e) { data = null; }
+                  if (xhr.status >= 200 && xhr.status < 300 && data && data.ok) {
+                    setFile(data.downloadUrl, data.fileName);
+                  } else {
+                    setFile(fileUrl, fileName);
+                    fail((data && data.error) || "Upload failed.");
+                  }
+                };
+                xhr.onerror = function () { btn.disabled = false; setFile(fileUrl, fileName); fail("Upload failed."); };
+                xhr.send(fd);
+              });
               addBtn.addEventListener("click", function () { openEditor(-1); });
               $("ccCancel").addEventListener("click", closeEditor);
               $("ccSave").addEventListener("click", function () {
                 var name = $("ccName").value.trim();
                 var platform = $("ccPlatform").value;
-                var download = $("ccDownload").value.trim();
+                var download = fileUrl || $("ccDownload").value.trim();
                 var icon = $("ccIcon").value.trim();
                 var scheme = $("ccScheme").value.trim();
                 if (!name) return fail("Name is required.");
                 if (platform === "web" && !download) return fail("Web clients need an address to open.");
-                if (!validHttp(download)) return fail("Download link must start with http:// or https://.");
+                if (!fileUrl && !validHttp(download)) return fail("Download link must start with http:// or https://.");
                 if (!validHttp(icon)) return fail("Icon URL must start with http:// or https://.");
                 var mobile = platform === "ios" || platform === "android";
                 if (mobile && !validScheme(scheme)) return fail("URL scheme must look like myapp://... (not http, https or javascript).");
@@ -4070,6 +4132,7 @@
                   platform: platform,
                   iconUrl: icon,
                   downloadUrl: download,
+                  fileName: fileUrl ? fileName : "",
                   enrollQr: mobile ? $("ccEnroll").value : "none",
                   prefQr: mobile ? $("ccPref").checked : false,
                   urlScheme: mobile ? scheme : "",

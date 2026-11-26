@@ -6,6 +6,16 @@
  */
 
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+const { resolveInside } = require("./safePath");
+
+const FILES_DIR = path.join(__dirname, "..", "data", "custom-clients");
+const UPLOADS_DIR = path.join(__dirname, "..", "data", "uploads");
+/** Authenticated download of an uploaded client file (APK, IPA, ...). */
+const FILE_URL_PREFIX = "/api/custom-clients/file/";
+const FILE_URL_RE = /^\/api\/custom-clients\/file\/([a-f0-9]{16})$/;
+const ALLOWED_FILE_EXT = /\.(apk|aab|ipa|zip|exe|msi|dmg|pkg|deb|appimage)$/i;
 
 const SETTINGS_KEY = "CUSTOM_TAK_CLIENTS";
 const PLATFORMS = ["ios", "android", "web", "pc"];
@@ -40,6 +50,17 @@ function cleanHttpUrl(v) {
   }
 }
 
+/** Download target: an http(s) link, or the portal path of an uploaded file. */
+function cleanDownloadTarget(v) {
+  const s = cleanText(v, 2000);
+  if (FILE_URL_RE.test(s)) return s;
+  return cleanHttpUrl(s);
+}
+
+function cleanFileName(v) {
+  return cleanText(v, 120).replace(/[^a-zA-Z0-9 _.()+-]/g, "_");
+}
+
 /**
  * URL scheme template for "Open In App", e.g. myapp://enroll?host={host}&username={username}&token={token}
  * Returns "" when invalid or when the scheme is unsafe (javascript:, data:, etc.).
@@ -72,7 +93,7 @@ function normalizeClient(raw) {
   const name = cleanText(raw.name, 60);
   const platform = String(raw.platform || "").trim().toLowerCase();
   if (!name || !PLATFORMS.includes(platform)) return null;
-  const downloadUrl = cleanHttpUrl(raw.downloadUrl);
+  const downloadUrl = cleanDownloadTarget(raw.downloadUrl);
   // A web client is just an address to open.
   if (platform === "web" && !downloadUrl) return null;
   const enrollRaw = String(raw.enrollQr || "").trim().toLowerCase();
@@ -83,6 +104,7 @@ function normalizeClient(raw) {
     platform,
     iconUrl: cleanHttpUrl(raw.iconUrl),
     downloadUrl,
+    fileName: FILE_URL_RE.test(downloadUrl) ? cleanFileName(raw.fileName) : "",
     enrollQr: platform === "web" || platform === "pc" ? "none" : enrollQr,
     prefQr: platform === "ios" || platform === "android" ? toBool(raw.prefQr, false) : false,
     urlScheme:
@@ -146,7 +168,68 @@ function buildOpenInAppUrl(template, vars) {
   );
 }
 
+function fileIdFromUrl(url) {
+  const m = FILE_URL_RE.exec(String(url || ""));
+  return m ? m[1] : "";
+}
+
+/** Move an uploaded temp file into data/custom-clients. Returns { downloadUrl, fileName }. */
+function saveUploadedFile(tempPath, originalName) {
+  const name = cleanFileName(originalName);
+  if (!ALLOWED_FILE_EXT.test(name)) {
+    throw new Error("Unsupported file type. Use .apk, .aab, .ipa, .zip, .exe, .msi, .dmg, .pkg or .deb.");
+  }
+  const src = resolveInside(UPLOADS_DIR, tempPath);
+  if (!fs.existsSync(src)) throw new Error("Uploaded file not found.");
+  fs.mkdirSync(FILES_DIR, { recursive: true });
+  const id = crypto.randomBytes(8).toString("hex");
+  const dest = path.join(FILES_DIR, id);
+  try {
+    fs.renameSync(src, dest);
+  } catch (_) {
+    fs.copyFileSync(src, dest);
+    try { fs.unlinkSync(src); } catch (_e) { /* ignore */ }
+  }
+  return { downloadUrl: FILE_URL_PREFIX + id, fileName: name };
+}
+
+/** Find an uploaded file and its display name for a download request. */
+function getFileForDownload(fileId, clients) {
+  if (!/^[a-f0-9]{16}$/.test(String(fileId || ""))) return null;
+  const url = FILE_URL_PREFIX + fileId;
+  const client = normalizeCustomClients(clients).find((c) => c.enabled && c.downloadUrl === url);
+  if (!client) return null;
+  const filePath = path.join(FILES_DIR, fileId);
+  if (!fs.existsSync(filePath)) return null;
+  return { filePath, fileName: client.fileName || "client-download" };
+}
+
+/** Delete uploaded files that no client references any more. */
+function pruneUnreferencedFiles(clients) {
+  try {
+    const keep = new Set(normalizeCustomClients(clients).map((c) => fileIdFromUrl(c.downloadUrl)).filter(Boolean));
+    if (!fs.existsSync(FILES_DIR)) return;
+    for (const f of fs.readdirSync(FILES_DIR)) {
+      if (/^[a-f0-9]{16}$/.test(f) && !keep.has(f)) {
+        const fp = path.join(FILES_DIR, f);
+        try {
+          // Keep fresh uploads: the admin may not have saved the client yet.
+          if (Date.now() - fs.statSync(fp).mtimeMs < 60 * 60 * 1000) continue;
+          fs.unlinkSync(fp);
+        } catch (_) { /* ignore */ }
+      }
+    }
+  } catch (_) {
+    /* never block a settings save */
+  }
+}
+
 module.exports = {
+  FILE_URL_PREFIX,
+  ALLOWED_FILE_EXT,
+  saveUploadedFile,
+  getFileForDownload,
+  pruneUnreferencedFiles,
   SETTINGS_KEY,
   PLATFORMS,
   MAX_CLIENTS,

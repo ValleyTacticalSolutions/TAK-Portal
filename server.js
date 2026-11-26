@@ -433,7 +433,8 @@ app.use((req, res, next) => {
       normalizedPath === "/setup-my-device" ||
       normalizedPath.startsWith("/api/setup-my-device");
     const isAtakApkDownloadPath =
-      normalizedPath === "/api/atak/download";
+      normalizedPath === "/api/atak/download" ||
+      normalizedPath.startsWith("/api/custom-clients/file/");
     const isTakBeaconDownloadPath =
       normalizedPath === "/api/tak-beacon/download";
     const isAgreementExemptPath =
@@ -703,6 +704,27 @@ function sendHostedAtakApk(req, res, { audit = true } = {}) {
   }
 }
 
+// Uploaded file for a custom TAK client (Setup My Device card download).
+app.get("/api/custom-clients/file/:id", (req, res) => {
+  try {
+    const customSvc = require("./services/customTakClients.service");
+    const found = customSvc.getFileForDownload(req.params.id, settingsSvc.getSettings().CUSTOM_TAK_CLIENTS);
+    if (!found) return res.status(404).json({ error: "File not found." });
+    auditSvc.auditFromRequest(req, {
+      action: "CUSTOM_CLIENT_FILE_DOWNLOADED",
+      targetType: "custom_client_file",
+      targetId: String(req.params.id),
+      details: { filename: found.fileName, summary: `Downloaded custom client file ${found.fileName}.` },
+    });
+    const safe = String(found.fileName).replace(/["\\\r\n]/g, "_");
+    res.setHeader("Content-Disposition", `attachment; filename="${safe}"`);
+    res.setHeader("Content-Type", "application/octet-stream");
+    return res.sendFile(found.filePath);
+  } catch (err) {
+    return res.status(500).json({ error: toSafeApiError(err) });
+  }
+});
+
 // Hosted ATAK client APK for Setup My Device (same audience as plugin downloads).
 app.get("/api/atak/download", (req, res) => sendHostedAtakApk(req, res));
 
@@ -748,6 +770,11 @@ app.use(
   "/api/settings/atak-apk",
   requirePermission("page.settings"),
   require("./routes/atakApk.routes")
+);
+app.use(
+  "/api/settings/custom-clients",
+  requirePermission("page.settings"),
+  require("./routes/customClientFiles.routes")
 );
 app.use(
   "/api/settings/openaddresses",
@@ -2122,9 +2149,9 @@ app.post(
         return;
       }
       if (key === "CUSTOM_TAK_CLIENTS") {
-        merged[key] = require("./services/customTakClients.service").serializeCustomClients(
-          bodySettings[key]
-        );
+        const customSvc = require("./services/customTakClients.service");
+        merged[key] = customSvc.serializeCustomClients(bodySettings[key]);
+        customSvc.pruneUnreferencedFiles(merged[key]);
         return;
       }
       if (key === "DEFAULT_MAP_SOURCE") {

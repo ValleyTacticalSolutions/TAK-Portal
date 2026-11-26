@@ -3135,18 +3135,16 @@ a.settings-hub-card:visited {
     }
 }
 
+/* Short desktop windows: keep the dialog inside the screen (same approach as the Users edit modal).
+   The overlay never scrolls; only the modal body does. */
 @media (max-height: 900px) and (min-width: 991px) {
     .settings-modal-overlay {
-        align-items: flex-start;
-        overflow-x: hidden;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-        overscroll-behavior: contain;
+        overflow: hidden;
+        box-sizing: border-box;
     }
 
     .settings-modal {
-        margin-block: auto;
-        max-height: none;
+        max-height: 100%;
     }
 
     .settings-modal .modalBody,
@@ -4223,6 +4221,18 @@ body.theme-light #connectedClientsStatCard[role="button"]:hover {
   box-sizing: border-box;
 }
 
+.customClientsFileRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.customClientsFileName {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .customClientsCheck {
   flex-direction: row;
   align-items: center;
@@ -4237,6 +4247,7 @@ body.theme-light #connectedClientsStatCard[role="button"]:hover {
     grid-template-columns: minmax(0, 1fr);
   }
   .customClientsActions .btn,
+  .customClientsFileRow .btn,
   .customClientsEditor .row .btn {
     flex: 1 1 auto;
     min-height: 2.5rem;

@@ -78,4 +78,29 @@ const css = read("public", "styles.css");
 assert.ok(/@media \(max-width: 640px\)\s*\{\s*\.customClientsGrid\s*\{\s*grid-template-columns: minmax\(0, 1fr\)/.test(css));
 assert.ok(/\.customClientsTitle\s*\{[^}]*overflow-wrap: anywhere/.test(css));
 
+// --- uploaded file as download source ---
+const up = svc.normalizeCustomClients([
+  { name: "Apk", platform: "android", downloadUrl: "/api/custom-clients/file/0123456789abcdef", fileName: "my app<1>.apk" },
+  { name: "Bad path", platform: "android", downloadUrl: "/api/custom-clients/file/../../etc/passwd", fileName: "x.apk" },
+  { name: "Other path", platform: "android", downloadUrl: "/admin" },
+]);
+assert.strictEqual(up[0].downloadUrl, "/api/custom-clients/file/0123456789abcdef");
+assert.strictEqual(up[0].fileName, "my app_1_.apk", "file name is sanitized");
+assert.strictEqual(up[1].downloadUrl, "", "path traversal rejected");
+assert.strictEqual(up[2].downloadUrl, "", "arbitrary portal paths rejected");
+assert.strictEqual(svc.normalizeCustomClients([{ name: "L", platform: "android", downloadUrl: "https://a.example/x.apk", fileName: "x.apk" }])[0].fileName, "", "file name only kept for uploads");
+assert.ok(svc.ALLOWED_FILE_EXT.test("a.apk") && svc.ALLOWED_FILE_EXT.test("a.IPA") && !svc.ALLOWED_FILE_EXT.test("a.html") && !svc.ALLOWED_FILE_EXT.test("a.js"));
+assert.strictEqual(svc.getFileForDownload("../etc", up), null);
+assert.strictEqual(svc.getFileForDownload("0123456789abcdef", up), null, "missing file on disk");
+assert.ok(/custom-clients\/file\/:id/.test(server) && /pruneUnreferencedFiles/.test(server), "download route and pruning wired");
+assert.ok(/\/api\/settings\/custom-clients"[\s\S]{0,120}requirePermission\("page\.settings"\)/.test(server), "upload route is admin only");
+assert.ok(settings.includes('id="ccUpload"') && settings.includes("/api/settings/custom-clients/upload"), "editor has file upload");
+assert.ok(!/Add your own TAK client app\. Each enabled client appears[\s\S]{0,60}<\/p>/.test(settings) && settings.includes("ccTip("), "help text lives in ? hovers");
+
+// --- settings modal stays inside the screen on short windows ---
+assert.ok(
+  /@media \(max-height: 900px\) and \(min-width: 991px\)\s*\{\s*\.settings-modal-overlay\s*\{[^}]*overflow: hidden[^}]*\}\s*\.settings-modal\s*\{[^}]*max-height: 100%/.test(css),
+  "settings modal is capped to the overlay; only its body scrolls"
+);
+
 console.log("customTakClients tests passed");
