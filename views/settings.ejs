@@ -4742,6 +4742,112 @@
             </label>
           </div>
 
+          <div class="settings-oa-section" data-icon-sets-section>
+            <div class="settings-oa-header">
+              <h3>Custom Icon Sets</h3>
+              <input type="file" id="iconSetFile" accept=".zip,application/zip" style="display:none;" tabindex="-1" />
+              <button type="button" class="btn" data-icon-set-upload>Import ZIP</button>
+            </div>
+            <p class="settings-oa-msg" data-icon-set-msg aria-live="polite"></p>
+            <div class="settings-oa-table-wrap listCardTableWrap">
+              <table class="table settings-oa-table listCardTable">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Icons</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody data-icon-set-tbody>
+                  <tr class="emptyStateRow"><td colspan="3" class="muted">No Custom Icon Sets</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <script>
+            (function () {
+              var section = document.querySelector("[data-icon-sets-section]");
+              if (!section) return;
+              var fileInput = document.getElementById("iconSetFile");
+              var uploadBtn = section.querySelector("[data-icon-set-upload]");
+              var msg = section.querySelector("[data-icon-set-msg]");
+              var tbody = section.querySelector("[data-icon-set-tbody]");
+              var hdrs = { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" };
+              function say(text, isError) {
+                msg.textContent = text || "";
+                msg.classList.toggle("is-error", !!isError);
+              }
+              function cell(text) {
+                var td = document.createElement("td");
+                td.textContent = text;
+                return td;
+              }
+              function render(sets) {
+                tbody.textContent = "";
+                if (!sets.length) {
+                  var empty = document.createElement("tr");
+                  empty.className = "emptyStateRow";
+                  var ec = cell("No Custom Icon Sets");
+                  ec.colSpan = 3;
+                  ec.className = "muted";
+                  empty.appendChild(ec);
+                  tbody.appendChild(empty);
+                  return;
+                }
+                sets.forEach(function (set) {
+                  var tr = document.createElement("tr");
+                  var a = document.createElement("td");
+                  var rm = document.createElement("button");
+                  rm.type = "button";
+                  rm.className = "btn danger";
+                  rm.textContent = "Remove";
+                  rm.addEventListener("click", function () {
+                    if (!window.confirm("Remove This Icon Set?")) return;
+                    fetch("/api/settings/icon-sets/" + encodeURIComponent(set.uid), {
+                      method: "DELETE",
+                      credentials: "same-origin",
+                      headers: hdrs,
+                    }).then(handle);
+                  });
+                  a.appendChild(rm);
+                  tr.appendChild(cell(set.name));
+                  tr.appendChild(cell(String(set.pngCount)));
+                  tr.appendChild(a);
+                  tbody.appendChild(tr);
+                });
+              }
+              function handle(res) {
+                return res.json().then(function (body) {
+                  if (!res.ok || !body.ok) {
+                    say(body.error || "Request Failed", true);
+                    return;
+                  }
+                  say(body.imported ? "Imported " + body.imported.name : "Removed", false);
+                  render(body.iconsets || []);
+                });
+              }
+              uploadBtn.addEventListener("click", function () { fileInput.click(); });
+              fileInput.addEventListener("change", function () {
+                var f = fileInput.files && fileInput.files[0];
+                if (!f) return;
+                var fd = new FormData();
+                fd.append("iconset", f);
+                say("Importing…", false);
+                fetch("/api/settings/icon-sets", {
+                  method: "POST",
+                  credentials: "same-origin",
+                  headers: hdrs,
+                  body: fd,
+                }).then(handle).catch(function () { say("Import Failed", true); });
+                fileInput.value = "";
+              });
+              fetch("/api/settings/icon-sets", { credentials: "same-origin", headers: hdrs })
+                .then(function (r) { return r.json(); })
+                .then(function (b) { if (b && b.ok) render(b.iconsets || []); })
+                .catch(function () {});
+            })();
+          </script>
+
           <div class="settings-oa-section" data-openaddresses-section>
             <div class="settings-oa-header">
               <h3>OpenAddresses search</h3>

@@ -772,6 +772,11 @@ app.use(
   require("./routes/atakApk.routes")
 );
 app.use(
+  "/api/settings/icon-sets",
+  requirePermission("page.settings"),
+  require("./routes/customIconsets.routes")
+);
+app.use(
   "/api/settings/custom-clients",
   requirePermission("page.settings"),
   require("./routes/customClientFiles.routes")
