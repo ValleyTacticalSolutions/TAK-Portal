@@ -852,6 +852,16 @@
             />
           </div>
 
+          <label class="settings-field">
+            <span class="settings-label">Key Type</span>
+            <select id="sshKeyTypeSelect" class="input">
+              <option value="" selected>Keep Current Key (new RSA 4096 if none)</option>
+              <option value="rsa">RSA 4096 (Default)</option>
+              <option value="ecdsa-256">ECDSA P-256 (FIPS - ADVANCED USERS)</option>
+              <option value="ecdsa-384">ECDSA P-384 (FIPS - ADVANCED USERS)</option>
+              <option value="ecdsa-521">ECDSA P-521 (FIPS - ADVANCED USERS)</option>
+            </select>
+          </label>
           <div style="margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;">
             <button type="button" class="btn" id="sshSetupBtn">Set Up SSH (Generate Key, Install on Server, Configure Sudo, and Test)</button>
             <button type="button" class="btn" id="sshTestOnlyBtn">Test SSH Connection</button>
@@ -5346,6 +5356,16 @@
                 </label>
               </div>
               <p class="muted" style="font-size:0.85rem;">Enter host, user, and password, then save. The portal generates a key, installs it on that host, tests the login, and detects CloudTAK if the test passes.</p>
+              <label class="settings-field">
+            <span class="settings-label">Key Type</span>
+            <select id="cloudtakSshKeyTypeSelect" class="input">
+              <option value="" selected>Keep Current Key (new RSA 4096 if none)</option>
+              <option value="rsa">RSA 4096 (Default)</option>
+              <option value="ecdsa-256">ECDSA P-256 (FIPS - ADVANCED USERS)</option>
+              <option value="ecdsa-384">ECDSA P-384 (FIPS - ADVANCED USERS)</option>
+              <option value="ecdsa-521">ECDSA P-521 (FIPS - ADVANCED USERS)</option>
+            </select>
+          </label>
               <div style="margin-top:0.75rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
                 <button type="button" class="btn" id="cloudtakMarketplaceSetupBtn">Save SSH, generate key, and test</button>
               </div>
@@ -6399,7 +6419,13 @@
         fetch("/api/cloudtak-marketplace/ssh/setup", {
           method: "POST",
           headers: { Accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify({ host: host, port: port, username: sshUser, password: password }),
+          body: JSON.stringify({
+            host: host,
+            port: port,
+            username: sshUser,
+            password: password,
+            keyType: ((document.getElementById("cloudtakSshKeyTypeSelect") || {}).value || ""),
+          }),
         })
           .then(function (r) { return r.json(); })
           .then(function (j) {
@@ -6592,6 +6618,7 @@
             username,
             password,
             privilegeCmd: getSshPrivilegeCmd(),
+            keyType: ((document.getElementById("sshKeyTypeSelect") || {}).value || ""),
           });
           if (passInput) passInput.value = "";
           lastSshTestPassed = !!data.testPassed;
