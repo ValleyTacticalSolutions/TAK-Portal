@@ -243,7 +243,7 @@ function installFakeFetch() {
       pkgVersion = "1.3.0";
       marketplace.remoteVersionCache.clear();
       ar = await apiRow();
-      assert.strictEqual(ar.updateAvailable, false, "repo is at 1.3.0 but only the 1.2.0 bundle exists: do not publish older");
+      assert.strictEqual(ar.updateAvailable, true, "repo is at 1.3.0: update is queued even though only the 1.2.0 bundle exists");
       assert.match(ar.bundlePending, /v1\.3\.0/, "card says the bundle is still pending");
       assert.strictEqual(ar.remoteVersion, "1.3.0");
       plugins = [{ id: "id-demo", name: "demo", version: "1.2.0", enabled: true }];

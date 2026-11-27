@@ -2285,13 +2285,12 @@ async function enrichUpdateShas(uiPlugins, serverVersion) {
       const bundleReady = !!bundle && (!targetVer || compareCloudtakVersions(bundleVer, targetVer) >= 0);
       next.remoteVersion = targetVer;
       const newer = !!(installedVer && targetVer && compareCloudtakVersions(targetVer, installedVer) > 0);
+      // No bundle needed to queue the update: the job publishes one when it exists, else installs from source.
       next.updateAvailable = !!(
-        bundle && (
-          (serverPlugins && want && !onServer) || // removed from CloudTAK outside TAK Portal: republish
-          (newer && bundleReady)
-        )
+        (bundle && serverPlugins && want && !onServer) || // removed from CloudTAK outside TAK Portal: republish
+        newer
       );
-      next.bundlePending = newer && !bundleReady ? "v" + targetVer + " is in the repo but its phone bundle has not been built yet" : "";
+      next.bundlePending = newer && !bundleReady ? "v" + targetVer + " has no phone bundle yet; the update installs from source" : "";
       next.minCloudtak = await remoteMinCloudtakForPlugin(row.catalog);
       next.updateBlocked = updateBlockedMessage(serverVer, next.minCloudtak);
       if (next.updateBlocked) next.updateAvailable = false;

@@ -1088,7 +1088,7 @@
       if (p.bundlePending && !p.updateBlocked) {
         var pendingEl = document.createElement("div");
         pendingEl.className = "plugin-update-blocked";
-        pendingEl.textContent = "Waiting for bundle: " + String(p.bundlePending);
+        pendingEl.textContent = "Note: " + String(p.bundlePending);
         el.querySelector(".plugin-desc").insertAdjacentElement("afterend", pendingEl);
       }
       if (note) el.querySelector(".plugin-notes").textContent = note;
