@@ -14,9 +14,10 @@ async function checkTakApiHealthyOnce() {
   if (!takSvc.isTakConfigured()) return { ok: false, detail: "tak_url_missing" };
   if (getBool("TAK_BYPASS_ENABLED", false)) return { ok: false, detail: "tak_bypass_enabled" };
   try {
+    // GET /api/version is far lighter than the cert catalog on a server that is still starting.
     const client = takSvc.buildTakAxios({ timeout: 12000 });
-    const res = await client.get("/api/certadmin/cert", {
-      params: { page: 0, size: 1 },
+    const res = await client.get("/api/version", {
+      responseType: "text",
       validateStatus: () => true,
     });
     if (res.status >= 200 && res.status < 500) return { ok: true, detail: String(res.status) };

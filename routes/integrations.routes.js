@@ -477,7 +477,9 @@ router.post("/", async (req, res) => {
     createdUserId = result?.user?.pk;
     createdUsername = result?.user?.username || "";
 
-    await takSshSvc.provisionIntegrationCertFiles(createdUsername);
+    await takSshSvc.provisionIntegrationCertFiles(createdUsername, {
+      password: result?.initialPassword,
+    });
 
     const finalDataFeedName =
       !isSkipDataFeed && takSvc.isTakConfigured() ? streamingDataFeedName : null;
@@ -617,7 +619,7 @@ router.get("/:userId/certs/download", async (req, res) => {
     let intermediateTrust = null;
     let intermediateError = "";
     try {
-      intermediateTrust = await takSshSvc.fetchTakIntermediateTruststoreP12FromRemote();
+      intermediateTrust = await takSshSvc.fetchTakIntermediateTruststoreP12();
     } catch (err) {
       intermediateError = String(err?.message || err || "Intermediate truststore unavailable");
       console.warn(

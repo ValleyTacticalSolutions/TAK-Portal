@@ -1939,7 +1939,11 @@ async function createIntegrationUser(
     /* optional */
   }
   const user = await directoryRepo.getUserByUsername(username);
-  return { user, groups: selectedGroups };
+  const result = { user, groups: selectedGroups };
+  // Non-enumerable so it never ends up in a JSON response or log; used once to sign the
+  // integration cert through TAK Server 5.6+ (which only signs for the logged-in user).
+  Object.defineProperty(result, "initialPassword", { value: randomPassword, enumerable: false });
+  return result;
 }
 
 /**
