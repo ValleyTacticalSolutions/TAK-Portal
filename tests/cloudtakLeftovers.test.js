@@ -119,3 +119,10 @@ try {
   assert.ok(/rm_path\(\)/.test(script) && !/plugin-x\.ts/.test(script));
   console.log("cloudtak cleanup job tests passed");
 }
+
+// ---- the job log sent to the page covers the whole stored log (5000 lines), not the last 120 ----
+{
+  const routeSrc = fs.readFileSync(path.join(__dirname, "..", "routes", "cloudtakMarketplace.routes.js"), "utf8");
+  assert.ok(/log\.length > 5000 \? log\.slice\(-5000\) : log/.test(routeSrc) && !/slice\(-120\)/.test(routeSrc));
+  console.log("cloudtak job log limit tests passed");
+}

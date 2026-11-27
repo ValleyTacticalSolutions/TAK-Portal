@@ -89,7 +89,7 @@ function presentJob(job, keepLog) {
     delete next.log;
     return next;
   }
-  next.log = log.length > 120 ? log.slice(-120) : log;
+  next.log = log.length > 5000 ? log.slice(-5000) : log;
   return next;
 }
 
