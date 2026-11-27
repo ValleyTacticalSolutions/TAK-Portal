@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.  Minor qual
 ## Version History
 
 ### v2.0.44 - IN PROGRESS
+⬆️ `Dependency Update` - TAK Portal container now runs on Node.js 26 (was 22): Docker base image moved to `node:26-alpine` (pinned by digest) and the minimum Node version is now 26 (#166)<br>
 🎉 `New Feature` - Live Map can use your own ATAK-style icon sets. Settings → Live Map → Custom Icon Sets lets an admin import an iconset ZIP (PNG icons plus `iconset.xml`) and remove it again. Markers whose `usericon` path points at the imported set show its icons, other markers keep the generic fallback, and imported sets are stored on the data volume so they survive restarts and updates. Uploads are admin-only and checked for safe paths, PNG-only files and size limits. An optional Auto-Import Icon Sets switch also imports iconset ZIPs found in data packages and Data Sync missions (#143)<br>
 ### v2.0.43 - 11/25/26
 ✨ `Enhancement` - Settings → SMS now has an SMS Consent Notice toggle. When on, you type your own notice and Request Access shows it under the optional Phone Number field with a checkbox the user must tick to agree before submitting a phone number (#142)<br>

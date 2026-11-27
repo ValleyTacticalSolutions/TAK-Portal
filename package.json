@@ -6,7 +6,7 @@
   "description": "",
   "main": "server.js",
   "engines": {
-    "node": ">=22"
+    "node": ">=26"
   },
   "scripts": {
     "test": "node scripts/run-tests.js",
