@@ -26,3 +26,12 @@ assert.match(mobile[0], /flex-wrap:\s*wrap/);
 assert.match(mobile[0], /\.groupFilterActions\s*\{[^}]*margin-left:\s*0/);
 
 console.log("dataPagesMobile ok");
+
+{
+  const dp = read("views", "data-package.ejs");
+  assert.match(dp, /input\[type="datetime-local"\]\s*\{[^}]*min-width:\s*0[^}]*max-width:\s*100%/, "datetime input is capped to its container");
+  assert.match(dp, /data-packages-create-top \{[^}]*minmax\(240px,\s*1fr\)/, "create row gives expiration enough width");
+  assert.match(dp, /@media \(max-width: 1000px\) \{\s*\.data-packages-page \.data-packages-create-top/, "create row stacks before the date field is squeezed");
+  assert.match(dp, /@media \(max-width: 760px\) \{\s*#packageModal \.data-packages-edit-top/, "edit modal stacks before the date field is squeezed");
+  console.log("dataPackage expiration ok");
+}
