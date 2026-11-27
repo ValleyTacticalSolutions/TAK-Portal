@@ -1,8 +1,8 @@
 {
   "name": "tak-portal",
   "version": "2.0.43",
-  "beta-version": "2.0.43",
-  "cloudtak-marketplace-version": "1.0.11",
+  "beta-version": "2.0.44",
+  "cloudtak-marketplace-version": "1.1.0",
   "description": "",
   "main": "server.js",
   "engines": {

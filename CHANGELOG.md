@@ -11,6 +11,15 @@ All notable changes to this project will be documented in this file.  Minor qual
 
 ## Version History
 
+### v2.0.44 - IN PROGRESS
+✨ `Enhancement` - CloudTAK Marketplace now respects each plugin's minimum CloudTAK version. If your CloudTAK is older than a plugin needs, the update is no longer offered (not in Update All or update emails), a fresh install is refused before anything on the host changes, and the plugin card says "Update needs CloudTAK vX" (#189)<br>
+🎉 `New Feature` - CloudTAK API connection: on the CloudTAK Marketplace page, paste a CloudTAK admin API token (stored encrypted) so TAK Portal can talk to CloudTAK directly instead of only over SSH (#132)<br>
+🎉 `New Feature` - CloudTAK Marketplace now installs, updates, and removes plugins that ship a phone bundle (CloudTAK 14.2+) entirely over the CloudTAK API, with no SSH, no source patching and no rebuild. The bundle is checked (sha256) and enabled automatically so it shows up under Settings → Plugins in the iOS and Android apps. Plugins that also need server routes or sidecars keep installing over SSH and get their phone bundle published too (#190)<br>
+✨ `Enhancement` - Plugins installed over SSH show an Update when a phone-capable release exists. Updating publishes the bundle first, then removes the old SSH-installed files and moves the plugin to the API. If publishing fails nothing is removed (#190)<br>
+✨ `Enhancement` - Each installed plugin card shows a Phone app line: Published, available, no bundle in this release, or needs CloudTAK 14.2.0 (#190)<br>
+✨ `Enhancement` - Every CloudTAK Marketplace plugin card now shows an architecture badge: "Mobile supported" for plugins that ship a phone bundle (new architecture) or "Legacy" for web-only compiled-in plugins<br>
+✨ `Enhancement` - When a TAK Portal user is removed, their CloudTAK profile is erased through the CloudTAK API (disabling a user leaves their CloudTAK profile alone) (needs the CloudTAK API token; switch off with `CLOUDTAK_USER_SYNC`). A missing profile counts as done, and a CloudTAK error is audited but never blocks the change (#132)<br>
+
 ### v2.0.43 - 11/25/26
 ✨ `Enhancement` - Settings → SMS now has an SMS Consent Notice toggle. When on, you type your own notice and Request Access shows it under the optional Phone Number field with a checkbox the user must tick to agree before submitting a phone number (#142)<br>
 ✨ `Enhancement` - TAK Server SSH setup and CloudTAK Marketplace SSH setup now have a Key Type choice: RSA 4096 (default), ECDSA P-256, P-384 or P-521, so FIPS-mode hosts that block other key types can be used. Picking a different type replaces the saved key and installs the new one on the host (#60)<br>

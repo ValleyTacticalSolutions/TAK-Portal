@@ -4,7 +4,9 @@ const fs = require("fs");
 const { trimChar } = require("../services/safeRegex");
 const os = require("os");
 const path = require("path");
-const router = require("express").Router();
+const express = require("express");
+const router = express.Router();
+const cloudtakApi = require("../services/cloudtakApi.service");
 const multer = require("multer");
 const marketplace = require("../services/cloudtakMarketplace.service");
 const ssh = require("../services/cloudtakMarketplace.ssh");
@@ -498,6 +500,49 @@ router.post("/ssh/key", upload.single("key"), (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: err?.message || String(err) });
   }
+});
+
+// CloudTAK API connection (admin API token). The token is stored encrypted and never returned.
+router.get("/api-connection", (req, res) => {
+  res.json({
+    ok: true,
+    url: cloudtakApi.baseUrl(),
+    configured: cloudtakApi.isConfigured(),
+    userSync: settingsSvc.getSettings().CLOUDTAK_USER_SYNC !== false,
+  });
+});
+
+router.post("/api-connection", express.json(), async (req, res) => {
+  try {
+    const body = req.body || {};
+    const current = settingsSvc.getSettings() || {};
+    const next = { ...current };
+    if (typeof body.url === "string") {
+      const url = body.url.trim().replace(/\/+$/, "");
+      if (url && !/^https?:\/\/[^\s]+$/i.test(url)) {
+        return res.status(400).json({ ok: false, error: "CloudTAK URL must start with http:// or https://" });
+      }
+      next.CLOUDTAK_API_URL = url;
+    }
+    if (typeof body.userSync === "boolean") next.CLOUDTAK_USER_SYNC = body.userSync;
+    settingsSvc.saveSettings(next);
+    if (typeof body.token === "string") cloudtakApi.saveToken(body.token);
+    auditSvc.auditFromRequest(req, {
+      action: "CLOUDTAK_MARKETPLACE_API_CONNECTION",
+      targetType: "settings",
+      targetId: "cloudtak-api",
+      details: { summary: "Updated CloudTAK API connection.", tokenChanged: typeof body.token === "string" },
+    });
+    const test = cloudtakApi.isConfigured() ? await cloudtakApi.testConnection() : null;
+    res.json({ ok: true, configured: cloudtakApi.isConfigured(), test });
+  } catch (err) {
+    const status = err instanceof cloudtakApi.CloudtakApiError && err.status ? err.status : 500;
+    res.status(status).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+router.post("/api-connection/test", async (req, res) => {
+  res.json(await cloudtakApi.testConnection());
 });
 
 router.post("/notify/test", async (req, res) => {

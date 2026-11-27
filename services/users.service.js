@@ -11,6 +11,7 @@ const directoryRepo = require("./directoryRepo.service");
 const authentikOutbox = require("./authentikOutbox.service");
 const db = require("./db");
 const userLoginStatus = require("./userLoginStatus.service");
+const cloudtakUserSync = require("./cloudtakUserSync.service");
 const {
   isUserHidden,
   isGroupHidden,
@@ -3139,6 +3140,7 @@ async function toggleUserActive(userId, isActive, opts = {}) {
   });
   if (wait) await authentikOutbox.waitForOutbox(outboxId, 8000);
 
+
   invalidateUsersCache();
   try {
     await userLoginStatus.refreshStoredStatusForUserIds([userBefore.uuid || userBefore.id]);
@@ -3194,6 +3196,8 @@ async function deleteUser(userId, opts = {}) {
     );
   });
   if (wait) await authentikOutbox.waitForOutbox(outboxId, 8000);
+  // Erase the CloudTAK profile too (irreversible); failures are audited, never block the delete.
+  await cloudtakUserSync.erase(user.username);
   invalidateUsersCache();
   return true;
 }

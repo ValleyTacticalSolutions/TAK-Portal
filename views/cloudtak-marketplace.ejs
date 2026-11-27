@@ -24,6 +24,21 @@
       </div>
     </div>
     <div id="mpMsg" class="msg" style="margin-top:8px;"></div>
+    <details class="mp-api-box" id="mpApiBox" style="margin-top:12px;">
+      <summary>CloudTAK API connection <span id="mpApiState" class="muted"></span></summary>
+      <p class="muted" style="margin:8px 0;">
+        With an admin API token, plugins that include a phone bundle install, update and remove over the CloudTAK API (no SSH), and are published to the iOS/Android app automatically.
+        Create the token in CloudTAK as a system admin: sign in, expand the sidebar, open Settings, then API Tokens, click the plus button, name the token, save, copy it and paste it here. It is stored encrypted and never shown again.
+      </p>
+      <div class="mp-api-row">
+        <input type="url" id="mpApiUrl" placeholder="https://cloudtak.example.com" autocomplete="off" />
+        <input type="password" id="mpApiToken" placeholder="Paste API token (etl.…)" autocomplete="off" />
+      </div>
+      <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="btn" id="mpApiSave">Save &amp; Test</button>
+        <span id="mpApiMsg" class="msg" style="margin:0;min-width:0;overflow-wrap:anywhere;"></span>
+      </div>
+    </details>
     <div id="mpGrid" class="plugin-cards marketplace-grid"></div>
     <div id="mpEmpty" class="muted" style="display:none;margin-top:16px;">No plugins match this filter.</div>
   </div>
@@ -277,6 +292,37 @@
   }
   .plugin-cards .plugin-meta a:hover {
     border-bottom-color: var(--text);
+  }
+  .mp-api-box summary { cursor: pointer; font-weight: 600; }
+  .mp-api-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .mp-api-row input { min-width: 0; width: 100%; }
+  @media (max-width: 640px) { .mp-api-row { grid-template-columns: 1fr; } }
+  .plugin-cards .plugin-phone {
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+  .plugin-cards .plugin-arch {
+    display: inline-block;
+    padding: 1px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .plugin-cards .plugin-arch.arch-mobile { color: var(--ok, #15803d); border-color: currentColor; }
+  .plugin-cards .plugin-arch.arch-legacy { color: var(--muted); }
+  .plugin-cards .plugin-update-blocked {
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    color: var(--warn, #b45309);
+    overflow-wrap: anywhere;
+    min-width: 0;
   }
   .plugin-cards .plugin-notes {
     margin: 0;
@@ -951,6 +997,7 @@
         remoteVer && installedVer && remoteVer.toLowerCase() !== installedVer.toLowerCase()
           ? "Update to " + remoteVer
           : "Update";
+      if (p.migratesToApi) updateLabel = "Update (adds phone app support)";
       if (jobBusy) {
         actions = "";
       } else if (p.unknown) {
@@ -1038,6 +1085,28 @@
         var originEl = document.createElement("span");
         originEl.textContent = origin;
         meta.appendChild(originEl);
+      }
+      if (meta) {
+        var archEl = document.createElement("span");
+        var isMobile = p.architecture === "mobile";
+        archEl.className = "plugin-arch " + (isMobile ? "arch-mobile" : "arch-legacy");
+        archEl.textContent = isMobile ? "Mobile supported" : "Legacy";
+        archEl.title = isMobile
+          ? "Runs in the CloudTAK phone apps as well as the web app"
+          : "Web-only plugin (old architecture). It does not run in the phone apps";
+        meta.insertBefore(archEl, meta.firstChild);
+      }
+      if (p.updateBlocked) {
+        var blockedEl = document.createElement("div");
+        blockedEl.className = "plugin-update-blocked";
+        blockedEl.textContent = "Update " + String(p.updateBlocked).replace(/^Needs/, "needs");
+        el.querySelector(".plugin-desc").insertAdjacentElement("afterend", blockedEl);
+      }
+      if (p.phone && p.phone.text && p.installed) {
+        var phoneEl = document.createElement("div");
+        phoneEl.className = "plugin-phone phone-" + String(p.phone.code || "none");
+        phoneEl.textContent = "Phone app: " + p.phone.text;
+        el.querySelector(".plugin-desc").insertAdjacentElement("afterend", phoneEl);
       }
       if (note) el.querySelector(".plugin-notes").textContent = note;
       grid.appendChild(el);
@@ -1385,6 +1454,45 @@
       done(false);
     }
   }
+
+  function describeApiTest(t) {
+    if (!t) return "";
+    return t.ok
+      ? "Connected to CloudTAK v" + t.version + (t.bundles ? "" : " (phone bundles need v14.2.0 or newer)")
+      : t.message || "Could not connect.";
+  }
+  function refreshApiConnection() {
+    fetch("/api/cloudtak-marketplace/api-connection", { headers: { Accept: "application/json" } })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j || !j.ok) return;
+        if (!$("mpApiUrl").value) $("mpApiUrl").value = j.url || "";
+        $("mpApiState").textContent = j.configured ? "(token saved)" : "(not set)";
+      })
+      .catch(function () {});
+  }
+  (function wireApiConnection() {
+    var save = $("mpApiSave");
+    if (!save) return;
+    save.addEventListener("click", function () {
+      var body = { url: $("mpApiUrl").value };
+      if ($("mpApiToken").value.trim()) body.token = $("mpApiToken").value;
+      $("mpApiMsg").textContent = "Saving…";
+      fetch("/api/cloudtak-marketplace/api-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body)
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          $("mpApiMsg").textContent = j.ok ? describeApiTest(j.test) || "Saved." : j.error || "Save failed.";
+          if (j.ok) $("mpApiToken").value = "";
+          refreshApiConnection();
+        })
+        .catch(function (e) { $("mpApiMsg").textContent = e.message || "Save failed."; });
+    });
+    refreshApiConnection();
+  })();
 
   function postJob(body) {
     return fetch("/api/cloudtak-marketplace/jobs", {

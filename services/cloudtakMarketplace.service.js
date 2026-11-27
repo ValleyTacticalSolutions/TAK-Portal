@@ -9,6 +9,8 @@ const { getString, getInt, getBool } = require("./env");
 const emailSvc = require("./email.service");
 const store = require("./cloudtakMarketplace.store");
 const ssh = require("./cloudtakMarketplace.ssh");
+const cloudtakApi = require("./cloudtakApi.service");
+const cloudtakBundle = require("./cloudtakBundle.service");
 const caddyMod = require("./cloudtakMarketplace.caddy");
 const settingsSvc = require("./settings.service");
 const takSshSvc = require("./takSsh.service");
@@ -401,6 +403,7 @@ function normalizeCatalog(doc) {
       composeFile: String(p.composeFile || "").trim(),
       sidecars: Array.isArray(p.sidecars) ? p.sidecars : [],
       csp: normalizeCsp(p),
+      bundle: p.bundle && typeof p.bundle === "object" ? { asset: String(p.bundle.asset || "").trim() } : null,
     });
   }
   return { version: Number(doc && doc.version) || 1, plugins: out, fetchedAt: doc && doc.fetchedAt ? doc.fetchedAt : null };
@@ -413,6 +416,7 @@ function mergeCatalogPlugin(seed, remote) {
       ...seed,
       web: { ...(remote.web || {}), ...(seed.web || {}) },
       routes: seed.routes || remote.routes,
+      bundle: seed.bundle || remote.bundle || null,
       installScript: seed.installScript || remote.installScript,
       detect: seed.detect && seed.detect.length ? seed.detect : remote.detect,
       detectAliases: seed.detectAliases && seed.detectAliases.length ? seed.detectAliases : remote.detectAliases,
@@ -1517,6 +1521,13 @@ for f in "$CT/docker-compose.yml" "$CT/docker-compose.yaml" "$CT/docker-compose.
   fi
 done
 printf 'WEB_PLUGINS %s\\n' "$web_plugins"
+ct_server_ver=""
+for f in "$CT/package.json" "$CT/api/package.json" "$CT/app/package.json"; do
+  [ -f "$f" ] || continue
+  ct_server_ver=$(sed -n '1,80s/.*"version"[[:space:]]*:[[:space:]]*"\\([0-9][0-9A-Za-z.+-]*\\)".*/\\1/p' "$f" | head -n 1)
+  [ -n "$ct_server_ver" ] && break
+done
+printf 'CLOUDTAK_VERSION %s\\n' "$ct_server_ver"
 ${detectProbeLines(catalogPlugins)}
 if command -v docker >/dev/null 2>&1; then
   # Only the API service holds plugins. Scan its container(s) and fall back to every
@@ -1566,6 +1577,7 @@ function parseScanStdout(stdout, catalogPlugins) {
   const seenDest = new Set();
   const routeFiles = [];
   let webPluginsRaw = "";
+  let cloudtakVersion = "";
   const pushPlugin = (row) => {
     const dest = String(row.dest || "").trim();
     if (!dest || dest === "*" || dest === "." || dest === ".." || isHostPluginNoise(dest)) return;
@@ -1635,6 +1647,8 @@ function parseScanStdout(stdout, catalogPlugins) {
       routeFiles.push(t.slice(6).trim());
     } else if (t.startsWith("WEB_PLUGINS ")) {
       webPluginsRaw += t.slice(12);
+    } else if (t.startsWith("CLOUDTAK_VERSION ")) {
+      cloudtakVersion = cleanPluginVersion(t.slice(17).trim());
     }
   }
   for (const p of plugins) p.routeFiles = routeFiles;
@@ -1658,7 +1672,7 @@ function parseScanStdout(stdout, catalogPlugins) {
   let m;
   while ((m = urlRe.exec(webPluginsRaw))) webUrls.push(m[0].replace(/"/g, ""));
 
-  return { plugins, routeFiles, webPluginUrls: webUrls };
+  return { plugins, routeFiles, webPluginUrls: webUrls, cloudtakVersion };
 }
 
 function caddyCacheRecord(probe) {
@@ -1969,6 +1983,7 @@ async function scanHost() {
     ok: true,
     plugins: found,
     routeFiles: parsed.routeFiles,
+    cloudtakVersion: parsed.cloudtakVersion || "",
     caddy: caddyCacheRecord(caddy),
   };
   store.writeScanCache(cache);
@@ -2050,6 +2065,57 @@ async function remoteVersionForPlugin(plugin, now = Date.now(), refOverride) {
   return version;
 }
 
+const remoteMinCache = new Map();
+
+/**
+ * Minimum CloudTAK version a plugin declares at its catalog ref (no upper limit):
+ * package.json cloudtak.minVersion (root, then plugin/), then the README
+ * "Minimum CloudTAK:" line, then MIN_CLOUDTAK= in install.sh. "" if undeclared.
+ */
+async function remoteMinCloudtakForPlugin(plugin, now = Date.now(), refOverride) {
+  const gh = plugin && parseGitHubRepo(plugin.repo);
+  if (!gh) return "";
+  const ref = String(refOverride || plugin.ref || "main").trim() || "main";
+  const key = gh.owner + "/" + gh.repo + "@" + ref;
+  const hit = remoteMinCache.get(key);
+  if (hit && now - hit.at < REMOTE_VERSION_TTL_MS) return hit.min;
+  const base = "https://raw.githubusercontent.com/" + gh.owner + "/" + gh.repo + "/" + encodeURIComponent(ref) + "/";
+  const fetchFile = async (file, json) => {
+    try {
+      const response = await guardedAxios(axios).get(base + file, {
+        timeout: 8000,
+        headers: { "User-Agent": "TAK-Portal" },
+        responseType: json ? "json" : "text",
+        transformResponse: json ? undefined : [(d) => d],
+      });
+      return response.data;
+    } catch (_) {
+      return null;
+    }
+  };
+  let min = "";
+  for (const file of ["package.json", "plugin/package.json"]) {
+    const data = await fetchFile(file, true);
+    const declared = data && typeof data === "object" && data.cloudtak && data.cloudtak.minVersion;
+    const m = String(declared || "").match(/^v?(\d+(?:\.\d+)*)/);
+    if (m) {
+      min = m[1];
+      break;
+    }
+  }
+  if (!min) min = parsePluginMinCloudtak(await fetchFile("README.md", false));
+  if (!min) min = parsePluginMinCloudtak(await fetchFile("install.sh", false));
+  remoteMinCache.set(key, { at: now, min });
+  return min;
+}
+
+/** Message when the server is older than the plugin's minimum; "" when fine or unknown. */
+function updateBlockedMessage(serverVersion, minVersion) {
+  if (!serverVersion || !minVersion) return "";
+  if (compareCloudtakVersions(serverVersion, minVersion) >= 0) return "";
+  return "Needs CloudTAK v" + minVersion + " (this server runs v" + String(serverVersion).replace(/^v/i, "") + ")";
+}
+
 async function remoteShaForPlugin(plugin) {
   const gh = parseGitHubRepo(plugin.repo);
   if (gh) {
@@ -2081,8 +2147,50 @@ function installedShaFromRow(row, installedPlugins) {
   return (rec && rec.sha) || (row.scan && row.scan.gitHead) || "";
 }
 
-async function enrichUpdateShas(uiPlugins) {
+let apiVersionCache = { at: 0, version: "" };
+
+/** CloudTAK version over the API (cached 5 minutes); "" when no API token or unreachable. */
+async function apiServerVersion() {
+  if (!cloudtakApi.isConfigured()) return "";
+  if (Date.now() - apiVersionCache.at < 5 * 60 * 1000) return apiVersionCache.version;
+  let version = "";
+  try {
+    version = cleanPluginVersion(await cloudtakApi.getServerVersion());
+  } catch (_) {
+    version = "";
+  }
+  apiVersionCache = { at: Date.now(), version };
+  return version;
+}
+
+/**
+ * Phone-app status for a catalog plugin: { code, text }. code is one of
+ * published | available | none | needs-version | no-token.
+ */
+function phoneStatus({ plugin, rec, serverVer, bundle, apiOn }) {
+  if (!apiOn) return { code: "no-token", text: "Add a CloudTAK API token to publish to phones" };
+  if (serverVer && !cloudtakApi.supportsBundles(serverVer)) {
+    return { code: "needs-version", text: "Needs CloudTAK v" + cloudtakApi.MIN_BUNDLE_CLOUDTAK };
+  }
+  if (rec && rec.bundleName) {
+    return { code: "published", text: "Published v" + (rec.bundleVersion || "") + ". Users load it in Settings → Plugins in the app" };
+  }
+  if (bundle) return { code: "available", text: "Phone bundle available (v" + bundle.version + ")" };
+  return { code: "none", text: "No phone bundle in this release" };
+}
+
+/** "mobile" = phone-capable runtime bundle architecture; "legacy" = compiled-in web plugin only. */
+function pluginArchitecture({ rec, bundle }) {
+  if (rec && (rec.installMethod === "api" || rec.bundleName)) return "mobile";
+  return bundle ? "mobile" : "legacy";
+}
+
+async function enrichUpdateShas(uiPlugins, serverVersion) {
   const installed = store.readInstalled();
+  const scanCache = store.readScanCache();
+  const apiVer = serverVersion ? "" : await apiServerVersion();
+  const apiOn = cloudtakApi.isConfigured();
+  const serverVer = cleanPluginVersion(serverVersion || apiVer || (scanCache && scanCache.cloudtakVersion) || "");
   const out = [];
   for (const row of uiPlugins) {
     const next = { ...row };
@@ -2101,6 +2209,24 @@ async function enrichUpdateShas(uiPlugins) {
     }
     if (row.catalog) {
       next.remoteVersion = await remoteVersionForPlugin(row.catalog);
+      next.minCloudtak = await remoteMinCloudtakForPlugin(row.catalog);
+      next.updateBlocked = updateBlockedMessage(serverVer, next.minCloudtak);
+      if (next.updateBlocked) next.updateAvailable = false;
+      const rec = installed.plugins && installed.plugins[row.id];
+      // The release lookup only reads GitHub, so the architecture label works without an API token.
+      const bundleLookupOk = !serverVer || cloudtakApi.supportsBundles(serverVer);
+      const bundle = bundleLookupOk ? await cloudtakBundle.findReleaseBundle(row.catalog) : null;
+      next.architecture = pluginArchitecture({ rec, bundle });
+      next.phone = phoneStatus({ plugin: row.catalog, rec, serverVer, bundle, apiOn });
+      // Installed over SSH but a phone-capable release now exists: offer the update that
+      // moves it to the API and cleans up the old files.
+      if (
+        row.installed && !next.updateBlocked && bundle &&
+        cloudtakBundle.isBundleOnlyLayout(row.catalog) && !(rec && rec.installMethod === "api")
+      ) {
+        next.updateAvailable = true;
+        next.migratesToApi = true;
+      }
     }
     next.installedVersion = cleanPluginVersion(row.installedVersion);
     // Host scan can omit package.json version; resolve from the installed commit so
@@ -2327,8 +2453,13 @@ function buildUiPlugins(options = {}) {
             remoteSha: sha.remoteSha || "",
             installedSha: sha.installedSha || "",
             remoteVersion: cleanPluginVersion(sha.remoteVersion),
+            minCloudtak: sha.minCloudtak || "",
+            updateBlocked: sha.updateBlocked || "",
+            phone: sha.phone || null,
+            architecture: sha.architecture || "legacy",
+            migratesToApi: !!sha.migratesToApi,
           }
-        : { ...row, updateAvailable: false, remoteSha: "", installedSha: "", remoteVersion: "" };
+        : { ...row, updateAvailable: false, remoteSha: "", installedSha: "", remoteVersion: "", minCloudtak: "", updateBlocked: "" };
       base.installedVersion = installedVersion;
       const bubble = pluginVersionBubble(base);
       return { ...base, versionLabel: bubble.label, versionTitle: bubble.title };
@@ -2357,6 +2488,11 @@ async function refreshShaCache() {
       installedSha: row.installedSha || "",
       updateAvailable: !!row.updateAvailable,
       remoteVersion: row.remoteVersion || "",
+      minCloudtak: row.minCloudtak || "",
+      updateBlocked: row.updateBlocked || "",
+      phone: row.phone || null,
+      architecture: row.architecture || "legacy",
+      migratesToApi: !!row.migratesToApi,
       installedVersion: row.installedVersion || "",
       installedVersionSha: row.installedVersion && row.installedSha ? row.installedSha : "",
     };
@@ -2568,7 +2704,22 @@ function parsePluginCloudtakRange(text) {
     const m = s.match(re);
     if (m) return { min: m[1], max: m[2] };
   }
-  return null;
+  const min = parsePluginMinCloudtak(s);
+  return min ? { min, max: null } : null;
+}
+
+/** Minimum-only declaration (no upper limit): README line or MIN_CLOUDTAK= in install.sh. */
+function parsePluginMinCloudtak(text) {
+  const s = String(text || "");
+  const patterns = [
+    /Minimum CloudTAK:?\**:?\s*v?(\d+(?:\.\d+)*)/i,
+    /^\s*(?:export\s+)?MIN_CLOUDTAK\s*=\s*["']?v?(\d+(?:\.\d+)*)/im,
+  ];
+  for (const re of patterns) {
+    const m = s.match(re);
+    if (m) return m[1];
+  }
+  return "";
 }
 
 function compareCloudtakVersions(a, b) {
@@ -2596,9 +2747,9 @@ function compareCloudtakVersions(a, b) {
 
 /** "above" | "below" when version is outside range; "" when in range or unknown. */
 function cloudtakRangeMismatch(version, range) {
-  if (!version || !range || !range.min || !range.max) return "";
+  if (!version || !range || !range.min) return "";
   if (compareCloudtakVersions(version, range.min) < 0) return "below";
-  if (compareCloudtakVersions(version, range.max) > 0) return "above";
+  if (range.max && compareCloudtakVersions(version, range.max) > 0) return "above";
   return "";
 }
 
@@ -4680,13 +4831,28 @@ cloudtak_checkout_version() {
 
 refuse_if_cloudtak_outside_plugin_range() {
   local sh="$1" range_text min max host cmp_min cmp_max
-  range_text=$(plugin_cloudtak_range "$sh") || return 0
-  min=$(printf '%s\n' "$range_text" | sed -n '1p')
-  max=$(printf '%s\n' "$range_text" | sed -n '2p')
-  [ -n "$min" ] && [ -n "$max" ] || return 0
+  if range_text=$(plugin_cloudtak_range "$sh"); then
+    min=$(printf '%s\n' "$range_text" | sed -n '1p')
+    max=$(printf '%s\n' "$range_text" | sed -n '2p')
+  else
+    # Minimum only (no upper limit): MIN_CLOUDTAK= or a "Minimum CloudTAK: vX" line.
+    min=$(grep -E -m1 -i '^[[:space:]]*(export[[:space:]]+)?MIN_CLOUDTAK=|Minimum CloudTAK:' "$sh" | grep -oE '[0-9]+([.][0-9]+)*' | head -n 1 || true)
+    max=""
+  fi
+  [ -n "$min" ] || return 0
   host=$(cloudtak_checkout_version) || return 0
   cmp_min=$(ct_ver_cmp "$host" "$min")
-  cmp_max=$(ct_ver_cmp "$host" "$max")
+  cmp_max=0
+  [ -z "$max" ] || cmp_max=$(ct_ver_cmp "$host" "$max")
+  if [ -z "$max" ] && [ "$cmp_min" -lt 0 ]; then
+    echo "ERROR: $ID supports CloudTAK v$min or newer; this checkout is v$host." >&2
+    echo "Nothing was changed. The plugin patches were not applied." >&2
+    exit 1
+  fi
+  if [ -z "$max" ]; then
+    echo "CloudTAK v$host meets the plugin's minimum v$min"
+    return 0
+  fi
   if [ "$cmp_min" -lt 0 ] || [ "$cmp_max" -gt 0 ]; then
     echo "ERROR: $ID supports CloudTAK v$min - v$max; this checkout is v$host." >&2
     echo "Nothing was changed. The plugin patches were not applied." >&2
@@ -5406,8 +5572,95 @@ async function stageMarketplaceHelperSource(jobIds) {
   return { ok: true };
 }
 
+/** True when the host scan shows this catalog plugin's files on the CloudTAK checkout. */
+function scanShowsPlugin(plugin) {
+  const scan = store.readScanCache();
+  const destKey = pluginMatchKey(plugin && plugin.web && plugin.web.dest);
+  const idKey = pluginMatchKey(plugin && plugin.id);
+  return !!(scan && Array.isArray(scan.plugins) && scan.plugins.some((s) => {
+    if (!s || s.onDisk === false) return false;
+    if (s.catalogId && s.catalogId === plugin.id) return true;
+    const k = pluginMatchKey(s.dest);
+    return !!k && (k === destKey || k === idKey);
+  }));
+}
+
+/**
+ * Install or update a plugin entirely over the CloudTAK API when it only needs a
+ * runtime bundle (no routes/sidecars/patches) and the server is >= 14.2.0.
+ * A plugin previously installed over SSH is migrated: the bundle is published
+ * first, then the old compiled-in files are removed. Returns null to fall back
+ * to the SSH install (no token, old CloudTAK, no bundle, or other layout).
+ */
+async function tryApiInstall(job, plugin) {
+  if (!cloudtakApi.isConfigured() || !cloudtakBundle.isBundleOnlyLayout(plugin)) return null;
+  let serverVersion = "";
+  try {
+    serverVersion = await cloudtakApi.getServerVersion();
+  } catch (err) {
+    appendJobLog(job.id, `CloudTAK API not available (${err.message}); using SSH.`);
+    return null;
+  }
+  if (!cloudtakApi.supportsBundles(serverVersion)) return null;
+  const blocked = updateBlockedMessage(serverVersion, await remoteMinCloudtakForPlugin(plugin));
+  if (blocked) throw new Error(blocked + ". Nothing was changed.");
+  const pub = await cloudtakBundle.publishPlugin(plugin, { serverVersion });
+  if (pub.status !== "published" && pub.status !== "already") {
+    if (pub.status === "failed") appendJobLog(job.id, `Phone bundle could not be published (${pub.message}); using SSH.`);
+    return null;
+  }
+  appendJobLog(job.id, `Published ${pub.name} v${pub.version} to CloudTAK over the API (no SSH needed).`);
+  const prev = store.readInstalled().plugins[plugin.id];
+  const viaSsh = (prev && prev.installMethod !== "api") || scanShowsPlugin(plugin);
+  let path = "";
+  let composeService = "";
+  if (viaSsh) {
+    appendJobLog(job.id, "Moving this plugin from the old SSH install to the API: removing the old files.");
+    try {
+      const loc = await performUninstall(job, plugin.web.dest, plugin, { keepBundle: true });
+      path = loc.path;
+      composeService = loc.composeService;
+    } catch (err) {
+      appendJobLog(job.id, `Old files could not be removed over SSH (${err.message}). The bundle is published; remove them manually.`);
+    }
+  }
+  const sha = (await remoteShaForPlugin(plugin).catch(() => "")) || "";
+  const rec = store.readInstalled();
+  rec.plugins[plugin.id] = {
+    sha,
+    dest: plugin.web.dest,
+    installedAt: new Date().toISOString(),
+    repo: plugin.repo,
+    ref: plugin.ref,
+    installMethod: "api",
+    bundleName: pub.name,
+    bundleVersion: pub.version,
+  };
+  store.writeInstalled(rec);
+  return { sha, path, composeService, skipRebuild: !path, via: "api" };
+}
+
+/** After an SSH install, also publish the phone bundle when there is one (never fails the install). */
+async function publishBundleAfterSshInstall(job, plugin) {
+  if (!cloudtakApi.isConfigured()) return;
+  const pub = await cloudtakBundle.publishPlugin(plugin);
+  if (pub.status === "published" || pub.status === "already") {
+    appendJobLog(job.id, `Published ${pub.name} v${pub.version} to the CloudTAK phone app.`);
+    const rec = store.readInstalled();
+    if (rec.plugins[plugin.id]) {
+      rec.plugins[plugin.id].bundleName = pub.name;
+      rec.plugins[plugin.id].bundleVersion = pub.version;
+      store.writeInstalled(rec);
+    }
+  } else if (pub.status === "failed") {
+    appendJobLog(job.id, `Phone bundle was not published: ${pub.message}`);
+  }
+}
+
 async function performInstall(job, plugin) {
   if (!safeDestName(plugin.web.dest)) throw new Error("Invalid plugin dest folder");
+  const viaApi = await tryApiInstall(job, plugin);
+  if (viaApi) return viaApi;
   const loc = await ensureCheckoutPath();
   if (!loc.ok) throw new Error(loc.message || "CloudTAK path not found");
   if (loc.healedFrom) {
@@ -5417,6 +5670,13 @@ async function performInstall(job, plugin) {
     );
   }
   appendJobLog(job.id, `Using CloudTAK at ${loc.path}`);
+  // Refuse before anything on the host changes when the plugin needs a newer CloudTAK.
+  const scanForMin = store.readScanCache();
+  const blocked = updateBlockedMessage(
+    cleanPluginVersion((scanForMin && scanForMin.cloudtakVersion) || ""),
+    await remoteMinCloudtakForPlugin(plugin)
+  );
+  if (blocked) throw new Error(blocked + ". Nothing was changed.");
   await stageMarketplaceHelperSource(job.id);
   const result = await runLoggedScript(
     job.id,
@@ -5442,6 +5702,7 @@ async function performInstall(job, plugin) {
     ...(routeFiles.length ? { routeFiles } : {}),
   };
   store.writeInstalled(rec);
+  await publishBundleAfterSshInstall(job, plugin).catch(() => {});
   const out = String(result.stdout || "") + "\n" + String(result.stderr || "");
   const skipRebuild =
     /Rebuilding CloudTAK API image/i.test(out) ||
@@ -5454,8 +5715,23 @@ async function performInstall(job, plugin) {
   };
 }
 
-async function performUninstall(job, dest, plugin) {
+async function performUninstall(job, dest, plugin, opts = {}) {
   if (!safeDestName(dest)) throw new Error("Invalid plugin dest folder");
+  const before = plugin && store.readInstalled().plugins[plugin.id];
+  if (!opts.keepBundle && before && before.bundleName && cloudtakApi.isConfigured()) {
+    try {
+      await cloudtakBundle.unpublishPlugin(before.bundleName);
+      appendJobLog(job.id, `Removed ${before.bundleName} from CloudTAK over the API.`);
+    } catch (err) {
+      appendJobLog(job.id, `Could not remove the phone bundle (${err.message}).`);
+    }
+  }
+  if (before && before.installMethod === "api") {
+    const rec = store.readInstalled();
+    delete rec.plugins[plugin.id];
+    store.writeInstalled(rec);
+    return { path: "", composeService: "", via: "api" };
+  }
   const loc = await ensureCheckoutPath();
   if (!loc.ok) throw new Error(loc.message || "CloudTAK path not found");
   if (loc.healedFrom) {
@@ -5592,21 +5868,25 @@ async function runChangeBatch(jobs) {
         const plugin = job.pluginId ? pluginById(job.pluginId) : null;
         const dest = (job.extra && job.extra.dest) || (plugin && plugin.web && plugin.web.dest);
         if (!dest) throw new Error("Missing dest folder");
-        lastLoc = await performUninstall(job, dest, plugin);
-        needsRebuild = true;
+        const un = await performUninstall(job, dest, plugin);
+        // API-only removals need no host rebuild and carry no checkout path.
+        if (un && un.path) lastLoc = un;
+        if (!(un && un.via === "api")) needsRebuild = true;
       } else if (job.kind === "update-all") {
         for (const p of item.plugins) {
           appendJobLog(job.id, `Updating ${p.name}`);
-          lastLoc = await performInstall(job, p.catalog);
-          if (lastLoc && !lastLoc.skipRebuild) needsRebuild = true;
+          const r = await performInstall(job, p.catalog);
+          if (r && r.path) lastLoc = r;
+          if (r && !r.skipRebuild) needsRebuild = true;
         }
       } else {
         const plugin = pluginById(job.pluginId);
         if (!plugin) throw new Error(`Plugin ${job.pluginId} is not in the catalog`);
-        lastLoc = await performInstall(job, plugin);
-        if (lastLoc && !lastLoc.skipRebuild) needsRebuild = true;
-        if (lastLoc && lastLoc.sha) {
-          updateJob(job.id, { extra: { ...(job.extra || {}), sha: lastLoc.sha } });
+        const r = await performInstall(job, plugin);
+        if (r && r.path) lastLoc = r;
+        if (r && !r.skipRebuild) needsRebuild = true;
+        if (r && r.sha) {
+          updateJob(job.id, { extra: { ...(job.extra || {}), sha: r.sha } });
         }
       }
     } catch (err) {
@@ -6009,6 +6289,15 @@ module.exports = {
   cleanPluginVersion,
   pluginVersionBubble,
   remoteVersionForPlugin,
+  remoteMinCloudtakForPlugin,
+  updateBlockedMessage,
+  tryApiInstall,
+  enrichUpdateShas,
+  performInstall,
+  performUninstall,
+  phoneStatus,
+  pluginArchitecture,
+  parsePluginMinCloudtak,
   remoteVersionCache,
   scanRemoteScript,
   loadCatalog,

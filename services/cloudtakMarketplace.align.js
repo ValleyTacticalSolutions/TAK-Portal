@@ -1042,9 +1042,9 @@ function compareCloudtakVersions(a, b) {
 
 /** "above" | "below" when version is outside range; "" when in range or unknown. */
 function cloudtakRangeMismatch(version, range) {
-  if (!version || !range || !range.min || !range.max) return "";
+  if (!version || !range || !range.min) return "";
   if (compareCloudtakVersions(version, range.min) < 0) return "below";
-  if (compareCloudtakVersions(version, range.max) > 0) return "above";
+  if (range.max && compareCloudtakVersions(version, range.max) > 0) return "above";
   return "";
 }
 
@@ -1058,7 +1058,10 @@ function parsePluginCloudtakRange(text) {
     const m = s.match(re);
     if (m) return { min: m[1], max: m[2] };
   }
-  return null;
+  const minOnly =
+    s.match(/Minimum CloudTAK:?\**:?\s*v?(\d+(?:\.\d+)*)/i) ||
+    s.match(/^\s*(?:export\s+)?MIN_CLOUDTAK\s*=\s*["']?v?(\d+(?:\.\d+)*)/im);
+  return minOnly ? { min: minOnly[1], max: null } : null;
 }
 
 function readCloudtakCheckoutVersion(ctRoot) {

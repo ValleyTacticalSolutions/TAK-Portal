@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 
-const view = fs.readFileSync(path.join(__dirname, "..", "views", "cloudtak-marketplace.ejs"), "utf8");
+const view = fs.readFileSync(path.join(__dirname, "..", "views", "cloudtak-marketplace.ejs"), "utf8").replace(/\r\n/g, "\n");
 
 // #183: a tab left open after the login lapses must stop polling, not hit the sign-in redirect forever.
 function grab(name) {
