@@ -47,7 +47,9 @@ console.log("dockerBuildCache.test.js: ok");
 {
   const froms = dockerfile.split("\n").filter((l) => l.startsWith("FROM "));
   assert.strictEqual(froms.length, 3);
-  for (const l of froms) assert.match(l, /^FROM node:22-alpine@sha256:[0-9a-f]{64}( AS \S+)?$/, `pinned by digest: ${l}`);
+  for (const l of froms) assert.match(l, /^FROM node:26-alpine@sha256:[0-9a-f]{64}( AS \S+)?$/, `pinned by digest: ${l}`);
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+  assert.strictEqual(pkg.engines.node, ">=26");
   const finalStage = dockerfile.slice(dockerfile.lastIndexOf("FROM "));
   assert.match(finalStage, /apk upgrade --no-cache/);
   assert.match(finalStage, /rm -rf [^\n]*node_modules\/npm/);

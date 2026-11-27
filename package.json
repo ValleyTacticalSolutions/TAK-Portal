@@ -6,7 +6,7 @@
   "description": "",
   "main": "server.js",
   "engines": {
-    "node": ">=22"
+    "node": ">=26"
   },
   "scripts": {
     "test": "node scripts/run-tests.js",
@@ -44,7 +44,7 @@
     "@tak-ps/node-tak": "^12.37.0",
     "@tmcw/togeojson": "^7.1.4",
     "@xmldom/xmldom": "^0.9.12",
-    "archiver": "^7.0.1",
+    "archiver": "^8.0.0",
     "axios": "^1.21.0",
     "dotenv": "^18.0.9",
     "ejs": "^7.0.2",

@@ -877,6 +877,30 @@ CTAK_COMPOSE_SERVICE=${ssh.shellQuote(composeService)}
 CTAK_DOCKER_BIN=""
 CTAK_DOCKER_NOPASS=""
 CTAK_DOCKER_PASS=""
+CTAK_SUDO_PASS_REJECTED=0
+# Keep the job log's stderr on fd 9 so a password rejection is reported even when the
+# caller hides its own output.
+exec 9>&2
+
+# Every use of the stored password goes through here (#178). A wrong password is an
+# "incorrect password attempt" that sudo mails to root, so after the first rejection
+# the password is not tried again this run.
+ctak_pass_priv() {
+  local err ec=0
+  [ -n "\${CTAK_SUDO_PASS:-}" ] || return 1
+  if [ "\${CTAK_SUDO_PASS_REJECTED:-0}" = "1" ]; then return 1; fi
+  err=$(mktemp /tmp/ctak-pass.XXXXXX)
+  # stderr streams live (docker build progress) and is also captured for the check.
+  { printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' "$@" 2>&1 1>&8 8>&- | tee "$err" >&2 8>&-; ec=\${PIPESTATUS[1]}; } 8>&1 || true
+  if [ "$ec" -ne 0 ] && grep -qE 'incorrect password attempt|no password was provided|Sorry, try again' "$err"; then
+    CTAK_SUDO_PASS_REJECTED=1
+    rm -f "$err"
+    echo "elevate: stored $CTAK_PRIV password was rejected; not trying it again this run (fix or clear the stored sudo password in TAK Portal)" >&9
+    return 1
+  fi
+  rm -f "$err"
+  return "$ec"
+}
 
 # infra-TAK: broker PATH shims so docker/chown work for non-root takwerx without docker group.
 if [ -d /opt/infratak/.shims ]; then
@@ -915,7 +939,7 @@ marketplace_helper_available() {
   [ -x "$CTAK_MARKETPLACE_HELPER" ] || return 1
   if "$CTAK_PRIV" -n "$CTAK_MARKETPLACE_HELPER" version >/dev/null 2>&1; then return 0; fi
   if [ -n "\${CTAK_SUDO_PASS:-}" ]; then
-    if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' "$CTAK_MARKETPLACE_HELPER" version >/dev/null 2>&1; then
+    if ctak_pass_priv "$CTAK_MARKETPLACE_HELPER" version >/dev/null 2>&1; then
       return 0
     fi
   fi
@@ -934,9 +958,9 @@ marketplace_helper_run() {
     return $?
   fi
   if [ -n "\${CTAK_SUDO_PASS:-}" ]; then
-    if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' "$CTAK_MARKETPLACE_HELPER" version >/dev/null 2>&1; then
+    if ctak_pass_priv "$CTAK_MARKETPLACE_HELPER" version >/dev/null 2>&1; then
       echo "elevate: marketplace-helper (password) $*"
-      printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' "$CTAK_MARKETPLACE_HELPER" "$@"
+      ctak_pass_priv "$CTAK_MARKETPLACE_HELPER" "$@"
       return $?
     fi
   fi
@@ -972,27 +996,58 @@ marketplace_helper_write_install_script() {
   chmod 700 "$out"
 }
 
+# Refresh an installed helper from the staged Portal source so new verbs land without an
+# infra-TAK package bump. Narrow grants allow running the helper, not \`cp\` over it, so a
+# refused \`-n cp\` mailed root on every elevate (#178). Now: skip when the files already
+# match (no privilege needed), try at most once per run, and update through the helper's
+# own granted \`self-install\` verb. An older helper without that verb is left alone on
+# infra-TAK (infra-TAK owns it there); elsewhere only a stored password may copy it.
+marketplace_refresh_helper() {
+  local err
+  [ "\${CTAK_HELPER_REFRESH_TRIED:-0}" = "1" ] && return 0
+  CTAK_HELPER_REFRESH_TRIED=1
+  [ -f "\${CTAK_MARKETPLACE_HELPER_SRC:-}" ] || return 0
+  if cmp -s "$CTAK_MARKETPLACE_HELPER_SRC" "$CTAK_MARKETPLACE_HELPER"; then return 0; fi
+  err=$(mktemp /tmp/ctak-helper-refresh.XXXXXX)
+  if "$CTAK_PRIV" -n "$CTAK_MARKETPLACE_HELPER" self-install "$CTAK_MARKETPLACE_HELPER_SRC" >/dev/null 2>"$err"; then
+    rm -f "$err"
+    echo "elevate: refreshed marketplace helper from staged source (self-install)"
+    return 0
+  fi
+  if [ -n "\${CTAK_SUDO_PASS:-}" ] && ctak_pass_priv "$CTAK_MARKETPLACE_HELPER" self-install "$CTAK_MARKETPLACE_HELPER_SRC" >/dev/null 2>>"$err"; then
+    rm -f "$err"
+    echo "elevate: refreshed marketplace helper from staged source (self-install, stored password)"
+    return 0
+  fi
+  if grep -q 'unknown verb' "$err" 2>/dev/null; then
+    # Helper predates self-install.
+    if marketplace_is_infratak; then
+      rm -f "$err"
+      echo "elevate: marketplace helper at $CTAK_MARKETPLACE_HELPER is older than TAK Portal's copy and cannot update itself; update it through infra-TAK (installed helper still used)" >&2
+      return 0
+    fi
+    if [ -n "\${CTAK_SUDO_PASS:-}" ] \\
+      && ctak_pass_priv cp "$CTAK_MARKETPLACE_HELPER_SRC" "$CTAK_MARKETPLACE_HELPER" >/dev/null 2>&1 \\
+      && ctak_pass_priv chmod 755 "$CTAK_MARKETPLACE_HELPER" >/dev/null 2>&1; then
+      rm -f "$err"
+      echo "elevate: refreshed marketplace helper from staged source (stored password)"
+      return 0
+    fi
+    rm -f "$err"
+    echo "elevate: marketplace helper at $CTAK_MARKETPLACE_HELPER is older than TAK Portal's copy; re-run the TAK Portal SSH handshake to update it (installed helper still used)" >&2
+    return 0
+  fi
+  echo "elevate: marketplace helper refresh failed (installed helper still used): $(head -c 300 "$err" | tr '\\n' ' ')" >&2
+  rm -f "$err"
+  return 0
+}
+
 # Deploy helper for takwerx BEFORE removing leftover NOPASSWD: ALL (bootstrap once).
-# When a helper already exists, refresh it from the staged Portal source so new verbs
-# (e.g. apply-caddyfile) land without requiring a separate infra-TAK package bump.
 install_marketplace_helper() {
   local script
   marketplace_should_auto_deploy_helper || return 1
   if marketplace_helper_available; then
-    if [ -f "\${CTAK_MARKETPLACE_HELPER_SRC:-}" ]; then
-      if "$CTAK_PRIV" -n cp "$CTAK_MARKETPLACE_HELPER_SRC" "$CTAK_MARKETPLACE_HELPER" 2>/dev/null \\
-        && "$CTAK_PRIV" -n chmod 755 "$CTAK_MARKETPLACE_HELPER" 2>/dev/null; then
-        echo "elevate: refreshed marketplace helper from staged source"
-        return 0
-      fi
-      if [ -n "\${CTAK_SUDO_PASS:-}" ] && printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' true >/dev/null 2>&1; then
-        if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' cp "$CTAK_MARKETPLACE_HELPER_SRC" "$CTAK_MARKETPLACE_HELPER" >/dev/null 2>&1 \\
-          && printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' chmod 755 "$CTAK_MARKETPLACE_HELPER" >/dev/null 2>&1; then
-          echo "elevate: refreshed marketplace helper from staged source"
-          return 0
-        fi
-      fi
-    fi
+    marketplace_refresh_helper
     return 0
   fi
   if [ ! -f "\${CTAK_MARKETPLACE_HELPER_SRC:-}" ]; then
@@ -1010,12 +1065,10 @@ install_marketplace_helper() {
     marketplace_helper_available && return 0
   fi
   if [ -n "\${CTAK_SUDO_PASS:-}" ]; then
-    if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' true >/dev/null 2>&1; then
-      if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' bash "$script"; then
-        rm -f "$script" || true
-        echo "elevate: marketplace helper installed via stored password"
-        marketplace_helper_available && return 0
-      fi
+    if ctak_pass_priv bash "$script"; then
+      rm -f "$script" || true
+      echo "elevate: marketplace helper installed via stored password"
+      marketplace_helper_available && return 0
     fi
   fi
 
@@ -1054,11 +1107,9 @@ install_marketplace_helper() {
         rm -f "$script" || true
         marketplace_helper_available && return 0
       fi
-      if [ -n "\${CTAK_SUDO_PASS:-}" ] && printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' true >/dev/null 2>&1; then
-        if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' bash "$script"; then
-          rm -f "$script" || true
-          marketplace_helper_available && return 0
-        fi
+      if [ -n "\${CTAK_SUDO_PASS:-}" ] && ctak_pass_priv bash "$script"; then
+        rm -f "$script" || true
+        marketplace_helper_available && return 0
       fi
       rm -f "$script" || true
       echo "elevate: helper binary deployed; waiting on sudoers grant for $CTAK_MARKETPLACE_HELPER" >&2
@@ -1077,7 +1128,7 @@ cleanup_leftover_marketplace_sudoers() {
   echo "elevate: removing leftover $f (security hardening #68)"
   if marketplace_helper_run cleanup-sudoers; then return 0; fi
   if [ -n "\${CTAK_SUDO_PASS:-}" ]; then
-    if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' rm -f "$f"; then
+    if ctak_pass_priv rm -f "$f"; then
       echo "elevate: removed leftover sudoers via stored password"
       return 0
     fi
@@ -1111,7 +1162,7 @@ resolve_docker_bin() {
     return 0
   fi
   if [ -n "\${CTAK_SUDO_PASS:-}" ]; then
-    if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' docker info >/dev/null 2>&1; then
+    if ctak_pass_priv docker info >/dev/null 2>&1; then
       echo "elevate: using password $CTAK_PRIV docker"
       CTAK_DOCKER_BIN="$CTAK_DOCKER_PASS"
       return 0
@@ -1124,7 +1175,7 @@ resolve_docker_bin() {
 docker_cli() {
   resolve_docker_bin || return 1
   if [ "$CTAK_DOCKER_BIN" = "$CTAK_DOCKER_PASS" ]; then
-    printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' docker "$@"
+    ctak_pass_priv docker "$@"
   elif [ "$CTAK_DOCKER_BIN" = "$CTAK_DOCKER_NOPASS" ]; then
     "$CTAK_PRIV" -n docker "$@" </dev/null
   else
@@ -1142,13 +1193,11 @@ elevate_via_priv() {
   local cmd="$1"
   # Do not probe \`sudo -n true\` for arbitrary cmds — narrow portal sudoers no longer grant ALL.
   # Only use a stored password for arbitrary bash; passwordless root is helper-only.
-  if [ -n "\${CTAK_SUDO_PASS:-}" ]; then
-    if printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' true >/dev/null 2>&1; then
-      echo "elevate: $CTAK_PRIV -S stored password"
-      printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' bash -lc "$cmd"
-      return $?
-    fi
-    echo "elevate: stored $CTAK_PRIV password rejected" >&2
+  # Run the real command; a \`true\` probe is refused by narrow grants and mails root (#178).
+  if [ -n "\${CTAK_SUDO_PASS:-}" ] && [ "\${CTAK_SUDO_PASS_REJECTED:-0}" != "1" ]; then
+    echo "elevate: $CTAK_PRIV -S stored password"
+    ctak_pass_priv bash -lc "$cmd"
+    return $?
   fi
   return 1
 }
@@ -1228,8 +1277,9 @@ ensure_marketplace_sudoers() {
     echo "elevate: marketplace helper ready at $CTAK_MARKETPLACE_HELPER"
     return 0
   fi
-  if [ -n "\${CTAK_SUDO_PASS:-}" ] && printf '%s\\n' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p '' true >/dev/null 2>&1; then
-    echo "elevate: stored $CTAK_PRIV password available (no NOPASSWD: ALL)"
+  # No \`true\` probe here (#178): the password is checked by the real command that uses it.
+  if [ -n "\${CTAK_SUDO_PASS:-}" ]; then
+    echo "elevate: stored $CTAK_PRIV password configured (no NOPASSWD: ALL)"
     return 0
   fi
   if resolve_docker_bin; then
@@ -3593,6 +3643,24 @@ function pluginRuntimePrivilegeBash() {
     'CTAK_DOCKER_BIN=""',
     'CTAK_DOCKER_NOPASS=""',
     'CTAK_DOCKER_PASS=""',
+    'CTAK_SUDO_PASS_REJECTED=0',
+    'exec 9>&2',
+    "# Stored-password uses go through here; a rejected password is not retried this run (#178).",
+    "ctak_pass_priv() {",
+    "  local err ec=0",
+    '  [ -n "${CTAK_SUDO_PASS:-}" ] || return 1',
+    '  if [ "${CTAK_SUDO_PASS_REJECTED:-0}" = "1" ]; then return 1; fi',
+    "  err=$(mktemp /tmp/ctak-pass.XXXXXX)",
+    '  { printf \'%s\\n\' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p \'\' "$@" 2>&1 1>&8 8>&- | tee "$err" >&2 8>&-; ec=${PIPESTATUS[1]}; } 8>&1 || true',
+    '  if [ "$ec" -ne 0 ] && grep -qE \'incorrect password attempt|no password was provided|Sorry, try again\' "$err"; then',
+    "    CTAK_SUDO_PASS_REJECTED=1",
+    '    rm -f "$err"',
+    '    echo "elevate: stored $CTAK_PRIV password was rejected; not trying it again this run (fix or clear the stored sudo password in TAK Portal)" >&9',
+    "    return 1",
+    "  fi",
+    '  rm -f "$err"',
+    '  return "$ec"',
+    "}",
     'if [ -d /opt/infratak/.shims ]; then',
     '  case ":${PATH:-}:" in',
     '    *:/opt/infratak/.shims:*) ;;',
@@ -3617,7 +3685,7 @@ function pluginRuntimePrivilegeBash() {
     "    return 0",
     "  fi",
     '  if [ -n "${CTAK_SUDO_PASS:-}" ]; then',
-    '    if printf \'%s\\n\' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p \'\' docker info >/dev/null 2>&1; then',
+    '    if ctak_pass_priv docker info >/dev/null 2>&1; then',
     '      echo "elevate: using password $CTAK_PRIV docker"',
     '      CTAK_DOCKER_BIN="$CTAK_DOCKER_PASS"',
     "      return 0",
@@ -3629,7 +3697,7 @@ function pluginRuntimePrivilegeBash() {
     "docker_cli() {",
     "  resolve_docker_bin || return 1",
     '  if [ "$CTAK_DOCKER_BIN" = "$CTAK_DOCKER_PASS" ]; then',
-    '    printf \'%s\\n\' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p \'\' docker "$@"',
+    '    ctak_pass_priv docker "$@"',
     '  elif [ "$CTAK_DOCKER_BIN" = "$CTAK_DOCKER_NOPASS" ]; then',
     '    "$CTAK_PRIV" -n docker "$@"',
     "  else",
@@ -3652,12 +3720,10 @@ function pluginRuntimePrivilegeBash() {
     '    return "$ec"',
     "  fi",
     '  rm -f "$err"',
-    '  if [ -n "${CTAK_SUDO_PASS:-}" ]; then',
-    '    if printf \'%s\\n\' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p \'\' true >/dev/null 2>&1; then',
-    '      echo "elevate: $CTAK_PRIV -S stored password"',
-    '      printf \'%s\\n\' "$CTAK_SUDO_PASS" | "$CTAK_PRIV" -S -p \'\' bash -lc "$cmd"',
-    "      return $?",
-    "    fi",
+    '  if [ -n "${CTAK_SUDO_PASS:-}" ] && [ "${CTAK_SUDO_PASS_REJECTED:-0}" != "1" ]; then',
+    '    echo "elevate: $CTAK_PRIV -S stored password"',
+    '    ctak_pass_priv bash -lc "$cmd"',
+    "    return $?",
     "  fi",
     "  return 1",
     "}",

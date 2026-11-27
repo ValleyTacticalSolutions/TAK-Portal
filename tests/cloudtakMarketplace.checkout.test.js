@@ -327,7 +327,7 @@ exit 0
 
 {
   const helper = fs.readFileSync(helperSrc, "utf8");
-  assert.match(helper, /HELPER_VERSION=5/);
+  assert.match(helper, /HELPER_VERSION=6/);
   assert.match(helper, /require_checkout_package_json/);
 }
 

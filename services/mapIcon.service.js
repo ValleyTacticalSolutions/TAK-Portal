@@ -8,6 +8,7 @@ const fsp = fs.promises;
 const path = require("path");
 const mapIconResolve = require("./mapIcon.resolve");
 const mapMilSym = require("./mapMilSym.service");
+const customIconsets = require("./customIconsets.service");
 
 const DATA_ROOT = path.join(__dirname, "..", "assets", "map-icons");
 const SUPPLEMENT_ROOT = path.join(__dirname, "..", "data", "map-icon-supplement");
@@ -45,7 +46,7 @@ function decodeXmlAttr(tag, name) {
   return m ? m[1] : "";
 }
 
-function parseIconsetXml(xml, dirName) {
+function parseIconsetXml(xml, dirName, root = DATA_ROOT) {
   const header = xml.match(/<iconset[^>]*>/i);
   if (!header) return null;
 
@@ -57,7 +58,8 @@ function parseIconsetXml(xml, dirName) {
     uid,
     name: decodeXmlAttr(tag, "name") || dirName,
     dirName,
-    rootDir: path.join(DATA_ROOT, dirName),
+    rootDir: path.join(root, dirName),
+    custom: root !== DATA_ROOT,
     defaultGroup: decodeXmlAttr(tag, "defaultGroup") || "",
     defaultFriendly: decodeXmlAttr(tag, "defaultFriendly") || "",
     defaultHostile: decodeXmlAttr(tag, "defaultHostile") || "",
@@ -291,14 +293,16 @@ function getDefaultIconIds() {
   return out;
 }
 
-async function loadIconsetDir(dirName) {
-  const rootDir = path.join(DATA_ROOT, dirName);
+async function loadIconsetDir(dirName, root = DATA_ROOT) {
+  const rootDir = path.join(root, dirName);
   const xmlPath = path.join(rootDir, "iconset.xml");
   if (!fs.existsSync(xmlPath)) return null;
 
   const xml = await fsp.readFile(xmlPath, "utf8");
-  const iconset = parseIconsetXml(xml, dirName);
+  const iconset = parseIconsetXml(xml, dirName, root);
   if (!iconset) return null;
+  // Bundled sets win: an admin-imported set can never replace one.
+  if (iconset.custom && iconsetsByUid.has(iconset.uid)) return null;
 
   for (const m of xml.matchAll(/<icon\s+([^>]+?)\/?>/gi)) {
     const attrs = m[1];
@@ -390,6 +394,14 @@ async function ensureIconsets() {
 
     await mergeIconSupplements();
 
+    for (const dirName of customIconsets.listDirs()) {
+      try {
+        await loadIconsetDir(dirName, customIconsets.CUSTOM_ROOT);
+      } catch (err) {
+        console.warn("[map-icon] failed to load custom iconset", dirName, err?.message || err);
+      }
+    }
+
     for (const iconset of iconsetsByUid.values()) {
       if (!mapIconResolve.isIconsetUidToken(iconset.uid)) {
         console.warn(
@@ -404,6 +416,12 @@ async function ensureIconsets() {
   })();
 
   return initPromise.current;
+}
+
+/** Re-read bundled and admin-imported sets (after an import or removal). */
+async function reloadIconsets() {
+  initPromise.current = null;
+  return ensureIconsets();
 }
 
 function getStatus() {
@@ -439,11 +457,13 @@ function listIconsets() {
     dirName: set.dirName,
     iconCount: set.icons.length,
     pngCount: set.fileByBase.size,
+    custom: !!set.custom,
   }));
 }
 
 module.exports = {
   ensureIconsets,
+  reloadIconsets,
   resolveIcon,
   resolveExplicitIcon,
   resolveIconAsync,

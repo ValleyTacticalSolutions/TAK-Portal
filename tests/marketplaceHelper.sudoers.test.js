@@ -67,7 +67,7 @@ function runHelper(args, opts = {}) {
 const version = runHelper(["version"]);
 assert.strictEqual(version.status, 0, version.stderr || version.stdout);
 assert.match(version.stdout, /tak-portal-marketplace-helper/);
-assert.match(source, /HELPER_VERSION=5/);
+assert.match(source, /HELPER_VERSION=6/);
 assert.match(source, /require_checkout_package_json/);
 
 const badReclaim = runHelper(["reclaim", "../evil", "root", "root"]);

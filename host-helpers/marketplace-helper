@@ -4,7 +4,7 @@
 # Do not add shell/eval; validate every argument.
 set -euo pipefail
 
-HELPER_VERSION=5
+HELPER_VERSION=6
 CADDY_SITES_D="${TAK_PORTAL_CADDY_SITES_D:-/etc/caddy/sites.d}"
 
 die() {
@@ -33,6 +33,7 @@ Verbs:
   write-caddy-route <map_host> <plugin_id>   (Caddy snippet on stdin)
   apply-caddyfile <caddyfile_path>           (full Caddyfile on stdin; backup+validate+reload)
   rm-plugin <cloudtak_path> <dest>
+  self-install <staged_source>               (replace this helper with a newer staged copy)
 EOF
   exit 2
 }
@@ -457,6 +458,54 @@ cmd_install_plugin() {
   echo "installed $plugin_id -> $target"
 }
 
+# Replace this helper with a newer staged copy (#178). The sudoers grant lets the SSH
+# account run the helper but not `cp` over it, so Portal refreshes it through this verb.
+# The source must be a regular file owned by root or the calling user, not group/world
+# writable, look like this helper, pass `bash -n`, and not lower HELPER_VERSION.
+file_owner_uid() {
+  stat -c '%u' "$1" 2>/dev/null || stat -f '%u' "$1"
+}
+
+file_mode_octal() {
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"
+}
+
+cmd_self_install() {
+  local src="${1:-}" self dir tmp owner caller mode new_ver
+  is_abs_no_dotdot "$src" || die "invalid source path"
+  [ -f "$src" ] && [ ! -L "$src" ] || die "source must be a regular file: $src"
+  owner=$(file_owner_uid "$src") || die "cannot stat source"
+  caller="${SUDO_UID:-$(id -u)}"
+  [ "$owner" = "0" ] || [ "$owner" = "$caller" ] || die "source must be owned by root or the calling user"
+  mode=$(file_mode_octal "$src") || die "cannot stat source"
+  [ $((8#$mode & 8#022)) -eq 0 ] || die "source must not be group or world writable"
+
+  self="${BASH_SOURCE[0]}"
+  case "$self" in
+    /*) ;;
+    *) self="$(cd "$(dirname "$self")" && pwd -P)/$(basename "$self")" ;;
+  esac
+  dir=$(dirname "$self")
+  # Copy first, then check the copy, so the source cannot change between check and install.
+  tmp=$(mktemp "$dir/.marketplace-helper.XXXXXX") || die "cannot create temp file in $dir"
+  if ! cp "$src" "$tmp"; then rm -f "$tmp"; die "could not copy source"; fi
+  if [ "$(head -n 1 "$tmp")" != "#!/bin/bash" ] || ! grep -q '^# TAK Portal CloudTAK marketplace helper' "$tmp"; then
+    rm -f "$tmp"
+    die "source is not a TAK Portal marketplace helper"
+  fi
+  new_ver=$(sed -n 's/^HELPER_VERSION=\([0-9][0-9]*\)$/\1/p' "$tmp" | head -n 1)
+  if [ -z "$new_ver" ]; then rm -f "$tmp"; die "source has no HELPER_VERSION"; fi
+  if [ "$new_ver" -lt "$HELPER_VERSION" ]; then
+    rm -f "$tmp"
+    die "refusing downgrade from version $HELPER_VERSION to $new_ver"
+  fi
+  if ! bash -n "$tmp" 2>/dev/null; then rm -f "$tmp"; die "source failed bash syntax check"; fi
+  chmod 755 "$tmp"
+  if [ "$(id -u)" = "0" ]; then chown root:root "$tmp" 2>/dev/null || true; fi
+  mv -f "$tmp" "$self" || { rm -f "$tmp"; die "could not replace $self"; }
+  echo "SELF_INSTALL_OK $new_ver"
+}
+
 main() {
   local verb="${1:-}"
   [ -n "$verb" ] || usage
@@ -487,6 +536,10 @@ main() {
     rm-plugin)
       [ "$#" -eq 2 ] || die "rm-plugin requires <cloudtak_path> <dest>"
       cmd_rm_plugin "$@"
+      ;;
+    self-install)
+      [ "$#" -eq 1 ] || die "self-install requires <staged_source>"
+      cmd_self_install "$@"
       ;;
     -h | --help | help) usage ;;
     *) die "unknown verb: $verb (ask your admin to enable marketplace installs)" ;;

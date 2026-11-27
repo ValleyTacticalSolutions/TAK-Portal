@@ -6,7 +6,7 @@ const auditSvc = require("../services/auditLog.service");
 const takSshSvc = require("../services/takSsh.service");
 const takSvc = require("../services/tak.service");
 const { toSafeApiError } = require("../services/apiErrorPayload.service");
-const archiver = require("archiver");
+const { createZipArchive } = require("../services/zipArchive");
 
 function toErrorPayload(err) {
   return toSafeApiError(err);
@@ -665,7 +665,7 @@ router.get("/:userId/certs/download", async (req, res) => {
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", `attachment; filename="${safeName}-certs.zip"`);
 
-    const archive = archiver("zip", { zlib: { level: 9 } });
+    const archive = createZipArchive({ zlib: { level: 9 } });
     archive.on("error", (err) => {
       try {
         if (!res.headersSent) {

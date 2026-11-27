@@ -58,7 +58,7 @@
   <div class="card" style="margin-top:1.25rem;">
     <h2 style="margin-top:0;">Existing Data Packages</h2>
     <div class="row" style="flex-wrap:wrap; align-items:flex-end; gap:12px;">
-      <div id="bulkActionsWrap" style="min-width:280px; display:none;">
+      <div id="bulkActionsWrap" class="bulkActionsWrap" style="display:none;">
         <div class="row" style="gap:8px; align-items:center; margin-top:2px;">
           <select id="bulkActionSelect">
             <option value="">Choose action...</option>
@@ -173,7 +173,7 @@
   .data-packages-status.bad { border-color: rgba(255,80,80,.45); background: rgba(255,80,80,.08); }
   .data-packages-page .data-packages-create-top {
     display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.2fr);
+    grid-template-columns: minmax(0, 1.2fr) minmax(240px, 1fr) minmax(0, 1.2fr);
     gap: 12px;
     align-items: end;
   }
@@ -181,7 +181,13 @@
   .data-packages-page .data-packages-create-top > .data-packages-upload-block {
     min-width: 0;
   }
-  @media (max-width: 900px) {
+  .data-packages-page input[type="datetime-local"] {
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  @media (max-width: 1000px) {
     .data-packages-page .data-packages-create-top {
       grid-template-columns: 1fr;
       align-items: stretch;
@@ -279,7 +285,7 @@
   }
   #packageModal .data-packages-edit-top {
     display: grid;
-    grid-template-columns: minmax(0, 1.6fr) minmax(220px, 0.9fr);
+    grid-template-columns: minmax(0, 1.4fr) minmax(250px, 1fr);
     gap: 14px 18px;
     align-items: end;
   }
@@ -350,7 +356,7 @@
       column-width: 180px;
     }
   }
-  @media (max-width: 640px) {
+  @media (max-width: 760px) {
     #packageModal .data-packages-edit-top {
       grid-template-columns: 1fr;
     }
@@ -420,7 +426,7 @@
       overflow-wrap: anywhere;
       min-width: 0 !important;
       max-width: none !important;
-      white-space: normal;
+      white-space: normal !important;
     }
     .data-packages-table.listCardTable tbody td[data-label]::before {
       content: attr(data-label);
@@ -461,6 +467,12 @@
     .data-packages-page .groupsInner {
       column-count: 1;
     }
+  }
+  .bulkActionsWrap { min-width: min(280px, 100%); max-width: 100%; box-sizing: border-box; }
+  @media (max-width: 640px) {
+    .bulkActionsWrap { width: 100%; }
+    .bulkActionsWrap .row { flex-wrap: nowrap; }
+    .bulkActionsWrap select { flex: 1 1 auto; min-width: 0; }
   }
 </style>
 

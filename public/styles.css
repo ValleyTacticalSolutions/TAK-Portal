@@ -4244,3 +4244,21 @@ body.theme-light #connectedClientsStatCard[role="button"]:hover {
 .settings-allowed-client-item[data-custom-client-id] .settings-allowed-client-row {
   flex-wrap: wrap;
 }
+
+/* Group filter row: stack search and buttons on phones */
+@media (max-width: 640px) {
+    .groupFilterRow {
+        flex-wrap: wrap;
+    }
+    .groupFilterRow > input {
+        flex: 1 1 100%;
+    }
+    .groupFilterActions {
+        flex: 1 1 100%;
+        margin-left: 0;
+    }
+    .groupFilterActions .btn {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+}
