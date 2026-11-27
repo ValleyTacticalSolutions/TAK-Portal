@@ -1190,7 +1190,7 @@ elevate_via_priv() {
   # Do not probe \`sudo -n true\` for arbitrary cmds — narrow portal sudoers no longer grant ALL.
   # Only use a stored password for arbitrary bash; passwordless root is helper-only.
   # Run the real command; a \`true\` probe is refused by narrow grants and mails root (#178).
-  if [ -n "\${CTAK_SUDO_PASS:-}" ]; then
+  if [ -n "\${CTAK_SUDO_PASS:-}" ] && [ "\${CTAK_SUDO_PASS_REJECTED:-0}" != "1" ]; then
     echo "elevate: $CTAK_PRIV -S stored password"
     ctak_pass_priv bash -lc "$cmd"
     return $?
@@ -3569,7 +3569,7 @@ function pluginRuntimePrivilegeBash() {
     '    return "$ec"',
     "  fi",
     '  rm -f "$err"',
-    '  if [ -n "${CTAK_SUDO_PASS:-}" ]; then',
+    '  if [ -n "${CTAK_SUDO_PASS:-}" ] && [ "${CTAK_SUDO_PASS_REJECTED:-0}" != "1" ]; then',
     '    echo "elevate: $CTAK_PRIV -S stored password"',
     '    ctak_pass_priv bash -lc "$cmd"',
     "    return $?",

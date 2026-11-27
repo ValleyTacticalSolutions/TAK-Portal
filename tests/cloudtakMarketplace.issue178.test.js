@@ -219,6 +219,13 @@ assert.strictEqual(wrong.calls.length, 1, "wrong password must be tried once per
 assert.match(wrong.stdout, /first=1[\s\S]*second=1[\s\S]*third=1/);
 assert.strictEqual((wrong.stderr.match(/stored .* password was rejected/g) || []).length, 1, wrong.stderr);
 
+// After a rejection, elevate_via_priv must not claim it is using the stored password.
+const evp = new Function(`return \`${src.match(/\nelevate_via_priv\(\) \{\n[\s\S]*?\n\}\n/)[0]}\`;`)();
+const evpRun = withPass("nope", [evp, "elevate_via_priv 'echo a' || true", "elevate_via_priv 'echo b' || echo rc=$?"].join("\n"));
+assert.strictEqual((evpRun.stdout.match(/stored password/g) || []).length, 1, evpRun.stdout);
+assert.match(evpRun.stdout, /rc=1/);
+assert.strictEqual(evpRun.calls.length, 1);
+
 const right = withPass("right", [
   "ctak_pass_priv bash -c 'echo out; echo err >&2; exit 4' || echo rc=$?",
   "ctak_pass_priv bash -c 'echo again'",
