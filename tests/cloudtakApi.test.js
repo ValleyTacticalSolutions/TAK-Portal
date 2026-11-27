@@ -252,6 +252,12 @@ function installFakeFetch() {
       ar = await apiRow();
       assert.strictEqual(ar.updateAvailable, false, "installed 1.2.0 matches package.json 1.2.0");
       pkgVersion = "";
+      // API-managed + no bundle for the new version: stop, never fall back to an SSH rebuild.
+      const noBundle = { ...plugin, bundle: { minVersion: "9.0.0" } };
+      bundleSvc.clearCache();
+      sshCalls.length = 0;
+      await assert.rejects(() => marketplace.tryApiInstall({ id: "job2" }, noBundle), /No phone bundle exists/);
+      assert.strictEqual(sshCalls.length, 0, "no SSH, no rebuild");
       const checkSrc = require("fs").readFileSync(require("path").join(__dirname, "..", "routes", "cloudtakMarketplace.routes.js"), "utf8");
       assert.match(checkSrc, /canSkipHostScan\(\) \? \{ ok: true, skipped: true \} : await marketplace\.scanHost\(\)/);
       // Host scan is skipped only when the API is set up and every installed plugin runs through it.
