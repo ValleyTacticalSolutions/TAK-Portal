@@ -2256,7 +2256,9 @@ async function enrichUpdateShas(uiPlugins, serverVersion) {
   // compare with the latest release bundle. No commit lookup, no SSH.
   const isApiRow = (row) =>
     apiOn && row.installed && row.catalog && installed.plugins && installed.plugins[row.id] &&
-    installed.plugins[row.id].installMethod === "api";
+    (installed.plugins[row.id].installMethod === "api" ||
+      // Declares a bundle and needs nothing else: judged by bundle, even if an old SSH install left it recorded as SSH.
+      (row.catalog.bundle && cloudtakBundle.isBundleOnlyLayout(row.catalog)));
   let serverPlugins = null;
   if (uiPlugins.some(isApiRow)) {
     try {
@@ -2274,7 +2276,7 @@ async function enrichUpdateShas(uiPlugins, serverVersion) {
       const onServer = serverPlugins && want
         ? serverPlugins.find((p) => String((p && p.name) || "").trim().toLowerCase() === want)
         : null;
-      const installedVer = cleanPluginVersion((onServer && onServer.version) || rec.bundleVersion || "");
+      const installedVer = cleanPluginVersion((onServer && onServer.version) || rec.bundleVersion || row.installedVersion || "");
       next.installedSha = rec.sha || "";
       next.remoteSha = "";
       next.installedVersion = installedVer;
@@ -2286,12 +2288,12 @@ async function enrichUpdateShas(uiPlugins, serverVersion) {
       const bundleReady = !!bundle && (!targetVer || compareCloudtakVersions(bundleVer, targetVer) >= 0);
       next.remoteVersion = targetVer;
       const newer = !!(installedVer && targetVer && compareCloudtakVersions(targetVer, installedVer) > 0);
-      // No bundle needed to queue the update: the job publishes one when it exists, else installs from source.
+      // Offer the update only once a bundle for the new version exists, so it never starts and then fails.
       next.updateAvailable = !!(
         (bundle && serverPlugins && want && !onServer) || // removed from CloudTAK outside TAK Portal: republish
-        newer
+        (newer && bundleReady)
       );
-      next.bundlePending = newer && !bundleReady ? "v" + targetVer + " has no phone bundle yet; the update will stop until one is published" : "";
+      next.bundlePending = newer && !bundleReady ? "v" + targetVer + " is in the repo; waiting for its phone bundle (release)" : "";
       next.minCloudtak = await remoteMinCloudtakForPlugin(row.catalog);
       next.updateBlocked = updateBlockedMessage(serverVer, next.minCloudtak);
       if (next.updateBlocked) next.updateAvailable = false;
