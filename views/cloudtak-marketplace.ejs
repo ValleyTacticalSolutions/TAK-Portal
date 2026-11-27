@@ -20,25 +20,13 @@
         <button type="button" class="btn mp-filter-btn" id="mpFilterNew" data-mp-filter="new">New</button>
         <button type="button" class="btn mp-filter-btn" id="mpFilterInstalled" data-mp-filter="installed">Installed</button>
         <button type="button" class="btn" id="mpCheckUpdates">Check for Updates</button>
+        <button type="button" class="btn" id="mpCheckLeftovers">Check for Leftovers</button>
         <button type="button" class="btn qr" id="mpUpdateAll" style="display:none;">Queue All Updates</button>
       </div>
     </div>
     <div id="mpMsg" class="msg" style="margin-top:8px;"></div>
-    <details class="mp-api-box" id="mpApiBox" style="margin-top:12px;">
-      <summary>CloudTAK API connection <span id="mpApiState" class="muted"></span></summary>
-      <p class="muted" style="margin:8px 0;">
-        With an admin API token, plugins that include a phone bundle install, update and remove over the CloudTAK API (no SSH), and are published to the iOS/Android app automatically.
-        Create the token in CloudTAK as a system admin: sign in, expand the sidebar, open Settings, then API Tokens, click the plus button, name the token, save, copy it and paste it here. It is stored encrypted and never shown again.
-      </p>
-      <div class="mp-api-row">
-        <input type="url" id="mpApiUrl" placeholder="https://cloudtak.example.com" autocomplete="off" />
-        <input type="password" id="mpApiToken" placeholder="Paste API token (etl.…)" autocomplete="off" />
-      </div>
-      <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
-        <button type="button" class="btn" id="mpApiSave">Save &amp; Test</button>
-        <span id="mpApiMsg" class="msg" style="margin:0;min-width:0;overflow-wrap:anywhere;"></span>
-      </div>
-    </details>
+    <div id="mpLeftovers" class="mp-leftovers" style="display:none;margin-top:12px;"></div>
+    <div id="mpApiBanner" class="mp-banner error" role="alert" style="display:none;margin-top:12px;"></div>
     <div id="mpGrid" class="plugin-cards marketplace-grid"></div>
     <div id="mpEmpty" class="muted" style="display:none;margin-top:16px;">No plugins match this filter.</div>
   </div>
@@ -293,18 +281,6 @@
   .plugin-cards .plugin-meta a:hover {
     border-bottom-color: var(--text);
   }
-  .mp-api-box summary { cursor: pointer; font-weight: 600; }
-  .mp-api-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .mp-api-row input { min-width: 0; width: 100%; }
-  @media (max-width: 640px) { .mp-api-row { grid-template-columns: 1fr; } }
-  .plugin-cards .plugin-phone {
-    margin: 0;
-    font-size: 0.8rem;
-    line-height: 1.4;
-    color: var(--muted);
-    overflow-wrap: anywhere;
-    min-width: 0;
-  }
   .plugin-cards .plugin-arch {
     display: inline-block;
     padding: 1px 8px;
@@ -315,7 +291,6 @@
     white-space: nowrap;
   }
   .plugin-cards .plugin-arch.arch-mobile { color: var(--ok, #15803d); border-color: currentColor; }
-  .plugin-cards .plugin-arch.arch-legacy { color: var(--muted); }
   .plugin-cards .plugin-update-blocked {
     margin: 0;
     font-size: 0.8rem;
@@ -527,6 +502,18 @@
     background: color-mix(in srgb, #6b7280 12%, transparent);
   }
   .mp-banner.warn { border-color: #c80; }
+  .mp-banner.error {
+    border-color: #c0392b;
+    background: color-mix(in srgb, #c0392b 14%, transparent);
+    color: var(--text);
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+  .mp-leftovers { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-width: 0; overflow-wrap: anywhere; }
+  .mp-leftovers ul { margin: 6px 0; padding-left: 18px; }
+  .mp-leftovers li { margin: 2px 0; font-size: 0.85rem; }
+  .mp-leftovers .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+  .mp-banner.error a { color: inherit; text-decoration: underline; }
   @media (max-width: 990px) {
     .marketplace-grid { grid-template-columns: minmax(0, 1fr); }
     .mp-jobs-header {
@@ -1086,14 +1073,11 @@
         originEl.textContent = origin;
         meta.appendChild(originEl);
       }
-      if (meta) {
+      if (meta && p.architecture === "mobile") {
         var archEl = document.createElement("span");
-        var isMobile = p.architecture === "mobile";
-        archEl.className = "plugin-arch " + (isMobile ? "arch-mobile" : "arch-legacy");
-        archEl.textContent = isMobile ? "Mobile supported" : "Legacy";
-        archEl.title = isMobile
-          ? "Runs in the CloudTAK phone apps as well as the web app"
-          : "Web-only plugin (old architecture). It does not run in the phone apps";
+        archEl.className = "plugin-arch arch-mobile";
+        archEl.textContent = "v14 Enabled";
+        archEl.title = (p.installed && p.phone && p.phone.text) || "Runs in the CloudTAK phone apps as well as the web app";
         meta.insertBefore(archEl, meta.firstChild);
       }
       if (p.updateBlocked) {
@@ -1101,12 +1085,6 @@
         blockedEl.className = "plugin-update-blocked";
         blockedEl.textContent = "Update " + String(p.updateBlocked).replace(/^Needs/, "needs");
         el.querySelector(".plugin-desc").insertAdjacentElement("afterend", blockedEl);
-      }
-      if (p.phone && p.phone.text && p.installed) {
-        var phoneEl = document.createElement("div");
-        phoneEl.className = "plugin-phone phone-" + String(p.phone.code || "none");
-        phoneEl.textContent = "Phone app: " + p.phone.text;
-        el.querySelector(".plugin-desc").insertAdjacentElement("afterend", phoneEl);
       }
       if (note) el.querySelector(".plugin-notes").textContent = note;
       grid.appendChild(el);
@@ -1455,44 +1433,30 @@
     }
   }
 
-  function describeApiTest(t) {
-    if (!t) return "";
-    return t.ok
-      ? "Connected to CloudTAK v" + t.version + (t.bundles ? "" : " (phone bundles need v14.2.0 or newer)")
-      : t.message || "Could not connect.";
-  }
-  function refreshApiConnection() {
-    fetch("/api/cloudtak-marketplace/api-connection", { headers: { Accept: "application/json" } })
+  function refreshApiBanner() {
+    var box = $("mpApiBanner");
+    if (!box) return;
+    function show(msg) {
+      box.textContent = "";
+      box.appendChild(document.createTextNode(msg + " "));
+      var a = document.createElement("a");
+      a.href = "/settings";
+      a.textContent = "Open Settings → CloudTAK Plugin Marketplace → API connection.";
+      box.appendChild(a);
+      box.style.display = "";
+    }
+    fetch("/api/cloudtak-marketplace/api-connection?test=1", { headers: { Accept: "application/json" } })
       .then(function (r) { return r.json(); })
       .then(function (j) {
         if (!j || !j.ok) return;
-        if (!$("mpApiUrl").value) $("mpApiUrl").value = j.url || "";
-        $("mpApiState").textContent = j.configured ? "(token saved)" : "(not set)";
+        if (!j.configured) show("CloudTAK API is not set up, so phone-app plugins cannot be installed or published and CloudTAK profiles are not cleaned up when users are deleted.");
+        else if (j.test && !j.test.ok) show("CloudTAK API connection is failing: " + (j.test.message || "could not connect") + ".");
+        else box.style.display = "none";
       })
       .catch(function () {});
   }
-  (function wireApiConnection() {
-    var save = $("mpApiSave");
-    if (!save) return;
-    save.addEventListener("click", function () {
-      var body = { url: $("mpApiUrl").value };
-      if ($("mpApiToken").value.trim()) body.token = $("mpApiToken").value;
-      $("mpApiMsg").textContent = "Saving…";
-      fetch("/api/cloudtak-marketplace/api-connection", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify(body)
-      })
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-          $("mpApiMsg").textContent = j.ok ? describeApiTest(j.test) || "Saved." : j.error || "Save failed.";
-          if (j.ok) $("mpApiToken").value = "";
-          refreshApiConnection();
-        })
-        .catch(function (e) { $("mpApiMsg").textContent = e.message || "Save failed."; });
-    });
-    refreshApiConnection();
-  })();
+  refreshApiBanner();
+  window.setInterval(refreshApiBanner, 120000);
 
   function postJob(body) {
     return fetch("/api/cloudtak-marketplace/jobs", {
@@ -1633,6 +1597,52 @@
         btn.textContent = "Check for Updates";
       });
   });
+  (function wireLeftovers() {
+    var btn = $("mpCheckLeftovers");
+    var box = $("mpLeftovers");
+    if (!btn || !box) return;
+    function esc(s) { return String(s).replace(/[<>&]/g, function (c) { return ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c]; }); }
+    function render(items, cleaned) {
+      var found = items.filter(function (i) { return i.state === "found"; });
+      var removed = items.filter(function (i) { return i.state === "removed"; });
+      var failed = items.filter(function (i) { return i.state === "failed"; });
+      var html = "";
+      if (cleaned) {
+        html += "<strong>Removed " + removed.length + " leftover" + (removed.length === 1 ? "" : "s") + ".</strong>";
+        if (failed.length) html += " " + failed.length + " could not be removed (check the host's sudo setup).";
+        if (removed.some(function (i) { return i.needsRebuild; })) html += " Removed web and route files stop shipping at the next CloudTAK rebuild.";
+        if (failed.length) html += "<ul>" + failed.map(function (i) { return "<li>" + esc(i.plugin) + ": " + esc(i.path) + "</li>"; }).join("") + "</ul>";
+      } else if (!found.length) {
+        html += "<strong>No leftovers found.</strong> Nothing old remains for plugins that run through the API.";
+      } else {
+        html += "<strong>" + found.length + " leftover" + (found.length === 1 ? "" : "s") + " found</strong> from plugins that now run through the API:<ul>" +
+          found.map(function (i) { return "<li>" + esc(i.plugin) + " — " + esc(i.label) + " <span class=\"muted\">" + esc(i.path) + (i.sizeKb ? " (" + i.sizeKb + " KB)" : "") + "</span></li>"; }).join("") + "</ul>";
+        html += '<div class="row"><button type="button" class="btn danger" id="mpCleanLeftovers">Remove these leftovers</button></div>';
+      }
+      box.innerHTML = html;
+      box.style.display = "";
+      var clean = $("mpCleanLeftovers");
+      if (clean) clean.addEventListener("click", runClean);
+    }
+    function runClean() {
+      var clean = $("mpCleanLeftovers");
+      if (clean) { clean.disabled = true; clean.textContent = "Removing…"; }
+      fetch("/api/cloudtak-marketplace/leftovers/clean", { method: "POST", headers: { Accept: "application/json" } })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { if (!j.ok) throw new Error(j.error || "Cleanup failed"); render(j.items || [], true); })
+        .catch(function (e) { setMsg(e.message || "Cleanup failed", true); if (clean) { clean.disabled = false; clean.textContent = "Remove these leftovers"; } });
+    }
+    btn.addEventListener("click", function () {
+      if (jobBusy || btn.disabled) return;
+      btn.disabled = true;
+      btn.textContent = "Checking…";
+      fetch("/api/cloudtak-marketplace/leftovers", { headers: { Accept: "application/json" } })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { if (!j.ok) throw new Error(j.error || "Leftover check failed"); render(j.items || [], false); })
+        .catch(function (e) { setMsg(e.message || "Leftover check failed", true); })
+        .finally(function () { btn.disabled = false; btn.textContent = "Check for Leftovers"; });
+    });
+  })();
   $("mpUpdateAll").addEventListener("click", function () {
     if (jobBusy || $("mpUpdateAll").disabled) return;
     postJob({ kind: "update-all" }).then(function (out) {

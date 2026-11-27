@@ -354,6 +354,31 @@ router.post("/catalog/refresh", async (req, res) => {
   }
 });
 
+router.get("/leftovers", async (req, res) => {
+  try {
+    res.json(await marketplace.checkLeftovers());
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+router.post("/leftovers/clean", async (req, res) => {
+  try {
+    const out = await marketplace.cleanLeftovers();
+    const removed = out.items.filter((i) => i.state === "removed").length;
+    const failed = out.items.filter((i) => i.state === "failed").length;
+    auditSvc.auditFromRequest(req, {
+      action: "CLOUDTAK_MARKETPLACE_LEFTOVERS_CLEAN",
+      targetType: "cloudtak_plugin",
+      targetId: "leftovers",
+      details: { summary: `Removed ${removed} leftover CloudTAK plugin path(s)`, removed, failed },
+    });
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
 router.post("/check-updates", async (req, res) => {
   try {
     if (!marketplace.isEnabled()) {
@@ -503,11 +528,22 @@ router.post("/ssh/key", upload.single("key"), (req, res) => {
 });
 
 // CloudTAK API connection (admin API token). The token is stored encrypted and never returned.
-router.get("/api-connection", (req, res) => {
+let apiTestCache = { at: 0, key: "", result: null };
+router.get("/api-connection", async (req, res) => {
+  const configured = cloudtakApi.isConfigured();
+  let test = null;
+  if (configured && req.query.test) {
+    const key = cloudtakApi.baseUrl();
+    if (apiTestCache.key !== key || Date.now() - apiTestCache.at > 60000) {
+      apiTestCache = { at: Date.now(), key, result: await cloudtakApi.testConnection() };
+    }
+    test = apiTestCache.result;
+  }
   res.json({
     ok: true,
     url: cloudtakApi.baseUrl(),
-    configured: cloudtakApi.isConfigured(),
+    configured,
+    test,
     userSync: settingsSvc.getSettings().CLOUDTAK_USER_SYNC !== false,
   });
 });
@@ -534,6 +570,7 @@ router.post("/api-connection", express.json(), async (req, res) => {
       details: { summary: "Updated CloudTAK API connection.", tokenChanged: typeof body.token === "string" },
     });
     const test = cloudtakApi.isConfigured() ? await cloudtakApi.testConnection() : null;
+    apiTestCache = { at: 0, key: "", result: null };
     res.json({ ok: true, configured: cloudtakApi.isConfigured(), test });
   } catch (err) {
     const status = err instanceof cloudtakApi.CloudtakApiError && err.status ? err.status : 500;

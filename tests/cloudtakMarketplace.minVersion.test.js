@@ -79,9 +79,21 @@ assert.strictEqual(m.updateBlockedMessage("", "14.2.0"), "", "unknown server ver
   assert.strictEqual(pluginArchitecture({ rec: null, bundle: { version: "1.0.0" } }), "mobile");
   assert.strictEqual(pluginArchitecture({ rec: { installMethod: "api" }, bundle: null }), "mobile");
   assert.strictEqual(pluginArchitecture({ rec: { bundleName: "x" }, bundle: null }), "mobile");
-  assert.match(view, /Mobile supported/);
-  assert.match(view, /"Legacy"/);
+  assert.match(view, /"v14 Enabled"/);
+  assert.match(view, /p\.architecture === "mobile"/);
+  assert.ok(!view.includes("Legacy") && !view.includes("Phone app:"), "no Legacy pill and no Phone app line");
   assert.match(view, /\.plugin-arch\s*\{[^}]*white-space/);
+  // API connection lives in Settings (above SSH); Marketplace page only shows a red banner.
+  const settingsView = fs.readFileSync(path.join(__dirname, "..", "views", "settings.ejs"), "utf8").replace(/\r\n/g, "\n");
+  const iApi = settingsView.indexOf("cloudtakApiSaveBtn");
+  const iSsh = settingsView.indexOf(">SSH</h3>");
+  assert.ok(iApi > 0 && iSsh > iApi, "API connection section sits before the SSH section in Settings");
+  assert.ok(!view.includes("mpApiBox") && !view.includes("mpApiToken"), "no API token form on the Marketplace page");
+  assert.match(view, /id="mpApiBanner"[^>]*class="mp-banner error"|class="mp-banner error"[^>]*id="mpApiBanner"/);
+  assert.match(view, /\.mp-banner\.error\s*\{[^}]*#c0392b/);
+  assert.match(view, /api-connection\?test=1/);
+  const srv = fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8");
+  assert.match(srv, /api-connection\(\\\/test\)\?/);
   console.log("cloudtakMarketplace minVersion tests passed");
 })().catch((e) => {
   console.error(e);

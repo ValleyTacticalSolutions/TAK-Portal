@@ -577,7 +577,8 @@ function requireCloudtakMarketplaceEnabled(req, res, next) {
   if (
     /\/api\/cloudtak-marketplace\/status\/?$/.test(p) ||
     /\/api\/cloudtak-marketplace\/ssh\/(test|detect|key)\/?$/.test(p) ||
-    /\/api\/cloudtak-marketplace\/notify\/test\/?$/.test(p)
+    /\/api\/cloudtak-marketplace\/notify\/test\/?$/.test(p) ||
+    /\/api\/cloudtak-marketplace\/api-connection(\/test)?\/?$/.test(p)
   ) {
     return next();
   }

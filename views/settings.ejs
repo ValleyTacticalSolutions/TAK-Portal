@@ -5423,6 +5423,24 @@
             </div>
           </div>
           <div id="cloudtakMarketplaceEnabledFields" style="display:<%= mpEnabledOn ? 'block' : 'none' %>;">
+            <h3 style="margin:1rem 0 0.5rem;">API connection</h3>
+            <div class="settings-help" style="margin:0 0 0.5rem;">
+              With a CloudTAK admin API token, plugins that include a phone bundle install, update and remove over the CloudTAK API (no SSH) and are published to the iOS/Android app automatically. Deleting a user here also erases their CloudTAK profile. To create the token in CloudTAK: sign in as a system admin, expand the sidebar, open Settings, then API Tokens, click the plus button, name the token, save, and copy it. It is stored encrypted and never shown again.
+            </div>
+            <div class="grid2">
+              <div class="field">
+                <label for="cloudtakApiUrl">CloudTAK URL</label>
+                <input type="url" id="cloudtakApiUrl" placeholder="https://cloudtak.example.com" autocomplete="off" style="min-width:0;width:100%;" />
+              </div>
+              <div class="field">
+                <label for="cloudtakApiToken">API token</label>
+                <input type="password" id="cloudtakApiToken" placeholder="Paste API token (etl.…)" autocomplete="new-password" style="min-width:0;width:100%;" />
+              </div>
+            </div>
+            <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
+              <button type="button" class="btn" id="cloudtakApiSaveBtn">Save API connection and test</button>
+              <span id="cloudtakApiMsg" class="settings-help" style="margin:0;min-width:0;overflow-wrap:anywhere;" role="status" aria-live="polite"></span>
+            </div>
             <h3 style="margin:1rem 0 0.5rem;">SSH</h3>
             <div class="grid2">
               <% renderField("CLOUDTAK_MARKETPLACE_USE_TAK_SSH","Use TAK Server SSH","On: reuse Connection &amp; Certificates SSH. Off: a different CloudTAK host.","true"); %>
@@ -6484,6 +6502,37 @@
         });
       });
     }
+    (function wireCloudtakApi() {
+      var saveBtn = document.getElementById("cloudtakApiSaveBtn");
+      var msg = document.getElementById("cloudtakApiMsg");
+      var urlIn = document.getElementById("cloudtakApiUrl");
+      var tokIn = document.getElementById("cloudtakApiToken");
+      if (!saveBtn || !msg || !urlIn || !tokIn) return;
+      function describe(t) {
+        if (!t) return "";
+        return t.ok
+          ? "Connected to CloudTAK v" + t.version + (t.bundles ? "" : " (phone bundles need v14.2.0 or newer)")
+          : t.message || "Could not connect.";
+      }
+      mpJson("/api/cloudtak-marketplace/api-connection").then(function (j) {
+        if (!j || !j.ok) return;
+        urlIn.value = j.url || "";
+        if (j.configured) tokIn.placeholder = "Token saved (paste a new one to replace it)";
+      }).catch(function () {});
+      saveBtn.addEventListener("click", function () {
+        var body = { url: urlIn.value };
+        if (tokIn.value.trim()) body.token = tokIn.value;
+        msg.textContent = "Saving…";
+        mpJson("/api/cloudtak-marketplace/api-connection", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(body)
+        }).then(function (j) {
+          msg.textContent = j && j.ok ? describe(j.test) || "Saved." : (j && j.error) || "Save failed.";
+          if (j && j.ok) { tokIn.value = ""; if (j.configured) tokIn.placeholder = "Token saved (paste a new one to replace it)"; }
+        }).catch(function (e) { msg.textContent = (e && e.message) || "Save failed."; });
+      });
+    })();
     var detectBtn = document.getElementById("cloudtakMarketplaceDetectBtn");
     var testBtn = document.getElementById("cloudtakMarketplaceTestBtn");
     var setupBtn = document.getElementById("cloudtakMarketplaceSetupBtn");

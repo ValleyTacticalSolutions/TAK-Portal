@@ -6336,7 +6336,171 @@ function rememberSeenCatalog() {
   }
 }
 
+// ---- Leftover check: old SSH files that remain after a plugin moved to the API ----
+
+const LEFTOVER_KINDS = {
+  web: "Old compiled-in plugin folder",
+  route: "Old server route file",
+  runtime: "Old persisted runtime folder",
+  overlay: "Old compose overlay",
+  cache: "Old plugin source clone",
+};
+
+function leftoverIdOk(id) {
+  const s = String(id || "");
+  return safeDestName(s) && s !== "." && s !== ".." && !s.startsWith("_") && !s.startsWith(".");
+}
+
+/**
+ * What to look for, per plugin. Only plugins TAK Portal moved to the API ("api") or that are
+ * neither recorded nor found on the host ("none") are checked. Plugins installed over SSH, or
+ * present on the host, are never touched. Bare "<id>.ts" routes are not guessed because they
+ * could be CloudTAK's own files.
+ */
+function leftoverPlan() {
+  const catalog = loadCatalog();
+  const installed = store.readInstalled().plugins || {};
+  const scan = store.readScanCache();
+  const onDisk = new Set(
+    (scan && Array.isArray(scan.plugins) ? scan.plugins : []).filter((p) => p && p.catalogId).map((p) => p.catalogId)
+  );
+  const entries = [];
+  for (const plugin of catalog.plugins || []) {
+    const id = String(plugin.id || "");
+    const dest = String((plugin.web && plugin.web.dest) || id);
+    if (!leftoverIdOk(id) || !leftoverIdOk(dest)) continue;
+    const rec = installed[id];
+    let mode;
+    if (rec && rec.installMethod === "api") mode = "api";
+    else if (rec || onDisk.has(id)) continue;
+    else mode = "none";
+    const routes = [];
+    const addRoute = (f) => {
+      const name = String(f || "").trim();
+      if (/^[A-Za-z0-9._-]+\.ts$/.test(name) && !routes.includes(name)) routes.push(name);
+    };
+    for (const key of [id, dest]) {
+      addRoute(`plugin-${key}.ts`);
+      addRoute(`${key}-sync.ts`);
+    }
+    for (const f of (rec && Array.isArray(rec.routeFiles) && rec.routeFiles) || []) addRoute(f);
+    entries.push({ id, name: plugin.name || id, dest, mode, routes });
+  }
+  return entries;
+}
+
+function leftoverScript(ct, entries, clean) {
+  const lines = [
+    "set +e",
+    `CT=${ssh.shellQuote(ct)}`,
+    'CACHE_ROOT="$HOME/.cache/cloudtak-marketplace"',
+    '[ -d "$CT" ] || { echo "ERROR: CloudTAK path not found" >&2; exit 1; }',
+  ];
+  if (clean) {
+    lines.push(
+      checkoutPreflightBash(),
+      pluginLayoutBash(),
+      pluginPrivilegeBash({ composeService: ssh.resolvedComposeService() || "api" }),
+      'require_cloudtak_checkout "$CT"',
+      "rm_path() {",
+      '  rm -rf "$2" 2>/dev/null',
+      '  if { [ -e "$2" ] || [ -L "$2" ]; } && declare -F elevate_run >/dev/null 2>&1; then',
+      '    elevate_run "rm -rf $(printf \'%q\' "$2")" >/dev/null 2>&1',
+      "  fi",
+      '  if [ -e "$2" ] || [ -L "$2" ]; then',
+      '    printf \'FAILED\\t%s\\t%s\\n\' "$1" "$2"',
+      "  else",
+      '    printf \'REMOVED\\t%s\\t%s\\n\' "$1" "$2"',
+      "  fi",
+      "}",
+      "act() { if [ -e \"$2\" ] || [ -L \"$2\" ]; then rm_path \"$1\" \"$2\"; fi; }"
+    );
+  } else {
+    lines.push(
+      "act() {",
+      '  if [ -e "$2" ] || [ -L "$2" ]; then',
+      '    printf \'FOUND\\t%s\\t%s\\t%s\\n\' "$1" "$2" "$(du -sk "$2" 2>/dev/null | cut -f1)"',
+      "  fi",
+      "}"
+    );
+  }
+  for (const e of entries) {
+    const webPaths = [
+      `$CT/app/plugins/${e.dest}`,
+      `$CT/api/web/plugins/${e.dest}`,
+      `$CT/app/src/plugins/${e.dest}`,
+      `$CT/api/web/src/plugins/${e.dest}`,
+    ];
+    const body = [];
+    if (e.mode === "api") for (const p of webPaths) body.push(`act "${e.id}|web" "${p}"`);
+    for (const f of e.routes) body.push(`act "${e.id}|route" "$CT/api/stateless/routes/${f}"`);
+    body.push(`act "${e.id}|runtime" "$CT/cloudtak-marketplace-plugins/${e.id}"`);
+    body.push(`act "${e.id}|overlay" "$CT/docker-compose.plugin-${e.id}.yml"`);
+    body.push(`act "${e.id}|cache" "$CACHE_ROOT/${e.id}"`);
+    if (e.mode === "none") {
+      // Not recorded as installed: if any plugin folder exists, treat it as installed and skip.
+      const guard = webPaths.map((p) => `[ ! -e "${p}" ]`).join(" && ");
+      lines.push(`if ${guard}; then`, ...body, "fi");
+    } else {
+      lines.push(...body);
+    }
+  }
+  lines.push("echo LEFTOVER_END");
+  return lines.join("\n");
+}
+
+function parseLeftoverOutput(stdout, entries) {
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  const items = [];
+  for (const raw of String(stdout || "").split("\n")) {
+    const parts = raw.replace(/\r$/, "").split("\t");
+    if (!["FOUND", "REMOVED", "FAILED"].includes(parts[0]) || parts.length < 3) continue;
+    const [id, kind] = String(parts[1]).split("|");
+    const entry = byId.get(id);
+    if (!entry || !LEFTOVER_KINDS[kind]) continue;
+    items.push({
+      state: parts[0].toLowerCase(),
+      pluginId: id,
+      plugin: entry.name,
+      kind,
+      label: LEFTOVER_KINDS[kind],
+      path: parts[2],
+      sizeKb: parseInt(parts[3], 10) || 0,
+      needsRebuild: kind === "web" || kind === "route",
+    });
+  }
+  return items;
+}
+
+async function runLeftovers(clean) {
+  if (!isEnabled()) throw new Error("CloudTAK marketplace is not enabled.");
+  if (hasBusyChangeJobs()) throw new Error("Wait until the current job is complete.");
+  const loc = await ensureCheckoutPath();
+  if (!loc.ok) throw new Error(loc.message || "CloudTAK path not found");
+  const entries = leftoverPlan();
+  if (!entries.length) return { ok: true, items: [], checked: 0 };
+  const result = await ssh.runBashScript(leftoverScript(loc.path, entries, clean), clean ? 5 * 60 * 1000 : 60 * 1000);
+  const text = String(result.stdout || "");
+  if (!/^LEFTOVER_END$/m.test(text)) throw new Error(result.message || "Leftover check did not finish.");
+  return { ok: true, items: parseLeftoverOutput(text, entries), checked: entries.length };
+}
+
+/** Read-only: list old SSH files left behind for plugins that now run through the API. */
+function checkLeftovers() {
+  return runLeftovers(false);
+}
+
+/** Remove what checkLeftovers lists (only those exact paths). Web and route removals apply at the next rebuild. */
+function cleanLeftovers() {
+  return runLeftovers(true);
+}
+
 module.exports = {
+  checkLeftovers,
+  cleanLeftovers,
+  leftoverPlan,
+  leftoverScript,
+  parseLeftoverOutput,
   NEW_DAYS,
   isEnabled,
   notifyEnabled,
