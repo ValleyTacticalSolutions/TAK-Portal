@@ -61,7 +61,7 @@
     <h2 style="margin-top: 0;">Existing Data Sync Missions</h2>
 
     <div class="row" style="flex-wrap:wrap; align-items:flex-end; gap:12px;">
-      <div id="bulkActionsWrap" style="min-width:280px; display:none;">
+      <div id="bulkActionsWrap" class="bulkActionsWrap" style="display:none;">
         <div class="row" style="gap:8px; align-items:center; margin-top:2px;">
           <select id="bulkActionSelect">
             <option value="">Choose action...</option>
@@ -527,7 +527,7 @@
       overflow-wrap: anywhere;
       min-width: 0 !important;
       max-width: none !important;
-      white-space: normal;
+      white-space: normal !important;
     }
     .data-sync-table.listCardTable tbody td[data-label]::before {
       content: attr(data-label);
@@ -568,6 +568,12 @@
     }
   }
 
+  .bulkActionsWrap { min-width: min(280px, 100%); max-width: 100%; box-sizing: border-box; }
+  @media (max-width: 640px) {
+    .bulkActionsWrap { width: 100%; }
+    .bulkActionsWrap .row { flex-wrap: nowrap; }
+    .bulkActionsWrap select { flex: 1 1 auto; min-width: 0; }
+  }
 </style>
 
 <script>
