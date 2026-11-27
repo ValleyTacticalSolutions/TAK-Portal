@@ -5,7 +5,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const archiver = require("archiver");
+const { createZipArchive } = require("./zipArchive");
 
 const settingsSvc = require("./settings.service");
 const takSshSvc = require("./takSsh.service");
@@ -212,7 +212,7 @@ async function getTakTruststore({ forceRefresh } = {}) {
 async function zipEnrollmentPackage({ prefXml, manifestXml, caP12 }) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    const archive = archiver("zip", { zlib: { level: 9 } });
+    const archive = createZipArchive({ zlib: { level: 9 } });
     archive.on("data", (chunk) => chunks.push(chunk));
     archive.on("error", reject);
     archive.on("end", () => {

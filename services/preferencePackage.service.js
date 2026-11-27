@@ -2,7 +2,7 @@
  * Build ATAK preference data packages (config.pref + MANIFEST) for remote delivery.
  */
 const crypto = require("crypto");
-const archiver = require("archiver");
+const { createZipArchive } = require("./zipArchive");
 
 const PREFERENCE_PACKAGE_LAYOUT = {
   manifestPaths: ["MANIFEST/manifest.xml"],
@@ -329,7 +329,7 @@ async function buildPreferencePackageZip({ callsign, teamLabel, roleLabel }) {
 
   return new Promise((resolve, reject) => {
     const chunks = [];
-    const archive = archiver("zip", { zlib: { level: 9 } });
+    const archive = createZipArchive({ zlib: { level: 9 } });
     archive.on("data", (chunk) => chunks.push(chunk));
     archive.on("error", reject);
     archive.on("end", () => {

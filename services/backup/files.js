@@ -2,7 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const archiver = require("archiver");
+const { createZipArchive } = require("../zipArchive");
 const unzipper = require("unzipper");
 const { credentialFileRel } = require("./catalog");
 const { encryptBuffer, decryptBuffer, isEncryptedBackup } = require("./crypto");
@@ -75,7 +75,7 @@ function zipDirectory(srcDir, outPath) {
   ensureDir(path.dirname(outPath));
   return new Promise((resolve, reject) => {
     const output = fs.createWriteStream(outPath);
-    const archive = archiver("zip", { zlib: { level: 6 } });
+    const archive = createZipArchive({ zlib: { level: 6 } });
     output.on("close", () => resolve(outPath));
     output.on("error", reject);
     archive.on("error", reject);
