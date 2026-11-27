@@ -362,18 +362,20 @@ router.get("/leftovers", async (req, res) => {
   }
 });
 
-router.post("/leftovers/clean", async (req, res) => {
+router.post("/leftovers/clean", (req, res) => {
   try {
-    const out = await marketplace.cleanLeftovers();
-    const removed = out.items.filter((i) => i.state === "removed").length;
-    const failed = out.items.filter((i) => i.state === "failed").length;
+    if (!marketplace.isEnabled()) {
+      return res.status(400).json({ ok: false, error: "CloudTAK marketplace is not enabled." });
+    }
+    if (busyChangeError(res)) return;
+    const job = marketplace.queueCleanup(username(req));
     auditSvc.auditFromRequest(req, {
       action: "CLOUDTAK_MARKETPLACE_LEFTOVERS_CLEAN",
       targetType: "cloudtak_plugin",
       targetId: "leftovers",
-      details: { summary: `Removed ${removed} leftover CloudTAK plugin path(s)`, removed, failed },
+      details: { summary: "Queued cleanup of old CloudTAK plugin files" },
     });
-    res.json(out);
+    res.json({ ok: true, job });
   } catch (err) {
     res.status(500).json({ ok: false, error: err?.message || String(err) });
   }
@@ -385,7 +387,8 @@ router.post("/check-updates", async (req, res) => {
       return res.status(400).json({ ok: false, error: "CloudTAK marketplace is not enabled." });
     }
     const catalog = await marketplace.fetchCatalog();
-    const scan = await marketplace.scanHost();
+    // Everything installed runs through the CloudTAK API: no SSH scan, the API reports what is installed.
+    const scan = marketplace.canSkipHostScan() ? { ok: true, skipped: true } : await marketplace.scanHost();
     const byId = await marketplace.refreshShaCache();
     marketplace.refreshUiSnapshot();
     const updates = Object.values(byId || {}).filter((row) => row && row.updateAvailable).length;

@@ -20,7 +20,7 @@
         <button type="button" class="btn mp-filter-btn" id="mpFilterNew" data-mp-filter="new">New</button>
         <button type="button" class="btn mp-filter-btn" id="mpFilterInstalled" data-mp-filter="installed">Installed</button>
         <button type="button" class="btn" id="mpCheckUpdates">Check for Updates</button>
-        <button type="button" class="btn" id="mpCheckLeftovers">Check for Leftovers</button>
+        <button type="button" class="btn" id="mpCheckLeftovers">Clean Up Existing</button>
         <button type="button" class="btn qr" id="mpUpdateAll" style="display:none;">Queue All Updates</button>
       </div>
     </div>
@@ -642,7 +642,7 @@
   function changeJobsBusy(jobs) {
     return (jobs || []).some(function (j) {
       return (j.status === "queued" || j.status === "running") &&
-        (j.kind === "install" || j.kind === "update" || j.kind === "uninstall" || j.kind === "update-all");
+        (j.kind === "install" || j.kind === "update" || j.kind === "uninstall" || j.kind === "update-all" || j.kind === "cleanup");
     });
   }
 
@@ -984,7 +984,6 @@
         remoteVer && installedVer && remoteVer.toLowerCase() !== installedVer.toLowerCase()
           ? "Update to " + remoteVer
           : "Update";
-      if (p.migratesToApi) updateLabel = "Update (adds phone app support)";
       if (jobBusy) {
         actions = "";
       } else if (p.unknown) {
@@ -1125,10 +1124,12 @@
 
   function progressLabel(job) {
     if (!job) return "";
+    if (job.kind === "cleanup") return "Cleanup In Progress";
     return job.kind === "uninstall" ? "Uninstall In Progress" : "Install In Progress";
   }
 
   function queueLabel(j) {
+    if (j.kind === "cleanup") return "Clean up existing";
     var verb = j.kind === "uninstall" ? "Uninstall" : (j.kind === "update" ? "Update" : "Install");
     if (j.extra && j.extra.reinstall) verb = "Reinstall";
     var p = plugins.filter(function (x) {
@@ -1141,7 +1142,7 @@
     stagedJobs = (jobs || []).filter(function (j) { return j.status === "staged"; });
     activeJobs = (jobs || []).filter(function (j) {
       return (j.status === "queued" || j.status === "running") &&
-        (j.kind === "install" || j.kind === "update" || j.kind === "uninstall" || j.kind === "update-all");
+        (j.kind === "install" || j.kind === "update" || j.kind === "uninstall" || j.kind === "update-all" || j.kind === "cleanup");
     });
     var card = $("mpQueueCard");
     var list = $("mpQueueList");
@@ -1602,18 +1603,11 @@
     var box = $("mpLeftovers");
     if (!btn || !box) return;
     function esc(s) { return String(s).replace(/[<>&]/g, function (c) { return ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c]; }); }
-    function render(items, cleaned) {
+    function render(items) {
       var found = items.filter(function (i) { return i.state === "found"; });
-      var removed = items.filter(function (i) { return i.state === "removed"; });
-      var failed = items.filter(function (i) { return i.state === "failed"; });
       var html = "";
-      if (cleaned) {
-        html += "<strong>Removed " + removed.length + " leftover" + (removed.length === 1 ? "" : "s") + ".</strong>";
-        if (failed.length) html += " " + failed.length + " could not be removed (check the host's sudo setup).";
-        if (removed.some(function (i) { return i.needsRebuild; })) html += " Removed web and route files stop shipping at the next CloudTAK rebuild.";
-        if (failed.length) html += "<ul>" + failed.map(function (i) { return "<li>" + esc(i.plugin) + ": " + esc(i.path) + "</li>"; }).join("") + "</ul>";
-      } else if (!found.length) {
-        html += "<strong>No leftovers found.</strong> Nothing old remains for plugins that run through the API.";
+      if (!found.length) {
+        html += "<strong>Nothing to clean up.</strong> No old files remain for plugins that run through the API.";
       } else {
         html += "<strong>" + found.length + " leftover" + (found.length === 1 ? "" : "s") + " found</strong> from plugins that now run through the API:<ul>" +
           found.map(function (i) { return "<li>" + esc(i.plugin) + " — " + esc(i.label) + " <span class=\"muted\">" + esc(i.path) + (i.sizeKb ? " (" + i.sizeKb + " KB)" : "") + "</span></li>"; }).join("") + "</ul>";
@@ -1626,10 +1620,14 @@
     }
     function runClean() {
       var clean = $("mpCleanLeftovers");
-      if (clean) { clean.disabled = true; clean.textContent = "Removing…"; }
+      if (clean) { clean.disabled = true; clean.textContent = "Queuing…"; }
       fetch("/api/cloudtak-marketplace/leftovers/clean", { method: "POST", headers: { Accept: "application/json" } })
         .then(function (r) { return r.json(); })
-        .then(function (j) { if (!j.ok) throw new Error(j.error || "Cleanup failed"); render(j.items || [], true); })
+        .then(function (j) {
+          if (!j.ok) throw new Error(j.error || "Cleanup failed");
+          box.innerHTML = "<strong>Cleanup queued.</strong> Watch the job log below. Removed web and route files stop shipping once CloudTAK rebuilds, which the job does for you.";
+          return loadAll();
+        })
         .catch(function (e) { setMsg(e.message || "Cleanup failed", true); if (clean) { clean.disabled = false; clean.textContent = "Remove these leftovers"; } });
     }
     btn.addEventListener("click", function () {
@@ -1640,7 +1638,7 @@
         .then(function (r) { return r.json(); })
         .then(function (j) { if (!j.ok) throw new Error(j.error || "Leftover check failed"); render(j.items || [], false); })
         .catch(function (e) { setMsg(e.message || "Leftover check failed", true); })
-        .finally(function () { btn.disabled = false; btn.textContent = "Check for Leftovers"; });
+        .finally(function () { btn.disabled = false; btn.textContent = "Clean Up Existing"; });
     });
   })();
   $("mpUpdateAll").addEventListener("click", function () {

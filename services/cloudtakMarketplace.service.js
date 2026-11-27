@@ -2230,6 +2230,13 @@ function phoneStatus({ plugin, rec, serverVer, bundle, apiOn }) {
 }
 
 /** "mobile" = phone-capable runtime bundle architecture; "legacy" = compiled-in web plugin only. */
+/** True when the API is set up and every plugin TAK Portal installed runs through it (no host scan needed). */
+function canSkipHostScan() {
+  if (!cloudtakApi.isConfigured() || !store.readScanCache()) return false;
+  const rows = Object.values(store.readInstalled().plugins || {}).filter((r) => r && typeof r === "object" && !r.lastError);
+  return rows.length > 0 && rows.every((r) => r.installMethod === "api");
+}
+
 function pluginArchitecture({ rec, bundle }) {
   if (rec && (rec.installMethod === "api" || rec.bundleName)) return "mobile";
   return bundle ? "mobile" : "legacy";
@@ -2242,8 +2249,50 @@ async function enrichUpdateShas(uiPlugins, serverVersion) {
   const apiOn = cloudtakApi.isConfigured();
   const serverVer = cleanPluginVersion(serverVersion || apiVer || (scanCache && scanCache.cloudtakVersion) || "");
   const out = [];
+  // Plugins TAK Portal manages over the API: ask CloudTAK what is installed (one call) and
+  // compare with the latest release bundle. No commit lookup, no SSH.
+  const isApiRow = (row) =>
+    apiOn && row.installed && row.catalog && installed.plugins && installed.plugins[row.id] &&
+    installed.plugins[row.id].installMethod === "api";
+  let serverPlugins = null;
+  if (uiPlugins.some(isApiRow)) {
+    try {
+      serverPlugins = await cloudtakApi.listPlugins();
+    } catch (_) {
+      serverPlugins = null;
+    }
+  }
   for (const row of uiPlugins) {
     const next = { ...row };
+    if (isApiRow(row)) {
+      const rec = installed.plugins[row.id];
+      const bundle = await cloudtakBundle.findReleaseBundle(row.catalog);
+      const want = String(rec.bundleName || "").trim().toLowerCase();
+      const onServer = serverPlugins && want
+        ? serverPlugins.find((p) => String((p && p.name) || "").trim().toLowerCase() === want)
+        : null;
+      const installedVer = cleanPluginVersion((onServer && onServer.version) || rec.bundleVersion || "");
+      next.installedSha = rec.sha || "";
+      next.remoteSha = "";
+      next.installedVersion = installedVer;
+      next.remoteVersion = cleanPluginVersion((bundle && bundle.version) || "");
+      next.updateAvailable = !!(
+        bundle && (
+          (serverPlugins && want && !onServer) || // removed from CloudTAK outside TAK Portal: republish
+          (installedVer && compareCloudtakVersions(bundle.version, installedVer) > 0)
+        )
+      );
+      next.minCloudtak = await remoteMinCloudtakForPlugin(row.catalog);
+      next.updateBlocked = updateBlockedMessage(serverVer, next.minCloudtak);
+      if (next.updateBlocked) next.updateAvailable = false;
+      next.architecture = "mobile";
+      next.phone = phoneStatus({ plugin: row.catalog, rec, serverVer, bundle, apiOn });
+      const bubble = pluginVersionBubble(next);
+      next.versionLabel = bubble.label;
+      next.versionTitle = bubble.title;
+      out.push(next);
+      continue;
+    }
     if (row.installed && row.catalog) {
       const remoteSha = await remoteShaForPlugin(row.catalog);
       // Host scan can be missing after a failed clone that left an installed.json row (#70).
@@ -3054,7 +3103,7 @@ function isBusyJob(job) {
 }
 
 function isChangeKind(kind) {
-  return ["install", "update", "uninstall", "update-all"].includes(String(kind || ""));
+  return ["install", "update", "uninstall", "update-all", "cleanup"].includes(String(kind || ""));
 }
 
 function newestJobStamp(job) {
@@ -5585,7 +5634,11 @@ async function runLogged(jobIds, command, timeoutMs) {
 }
 
 /** Run a large remote bash script via SFTP + exec (avoids ARG_MAX). */
+/** True once a job ran an SSH script on the CloudTAK host (install, align, rebuild). */
+let _hostScriptRan = false;
+
 async function runLoggedScript(jobIds, script, timeoutMs) {
+  _hostScriptRan = true;
   const ids = (Array.isArray(jobIds) ? jobIds : [jobIds]).filter(Boolean);
   const log = (line) => ids.forEach((id) => appendJobLog(id, line));
   let streamed = false;
@@ -5707,8 +5760,48 @@ async function tryApiInstall(job, plugin) {
 }
 
 /** After an SSH install, also publish the phone bundle when there is one (never fails the install). */
-async function publishBundleAfterSshInstall(job, plugin) {
-  if (!cloudtakApi.isConfigured()) return;
+/** Bash: remove the compiled-in web folder for one plugin from every CloudTAK layout. */
+function removeCompiledInWebScript(ct, dest) {
+  return `
+set -uo pipefail
+CT=${ssh.shellQuote(ct)}
+DEST=${ssh.shellQuote(dest)}
+${checkoutPreflightBash()}
+${pluginLayoutBash()}
+${pluginPrivilegeBash({ composeService: ssh.resolvedComposeService() || "api" })}
+require_cloudtak_checkout "$CT"
+${pluginRemoveBash()}
+remove_plugin_dest_all_layouts "$DEST"
+fail=0
+for t in "$CT/app/plugins/$DEST" "$CT/api/web/plugins/$DEST" "$CT/app/src/plugins/$DEST" "$CT/api/web/src/plugins/$DEST"; do
+  if [ -e "$t" ] || [ -L "$t" ]; then fail=1; fi
+done
+if [ "$fail" -eq 0 ]; then echo WEB_REMOVED_OK; else echo WEB_REMOVED_FAILED; fi
+`.trim();
+}
+
+/**
+ * Once a plugin's phone bundle is published, the bundle is the plugin's UI on web and phone, so
+ * the compiled-in web folder is a duplicate. Remove it (server routes and sidecars stay).
+ * Returns true when the folder is gone and the image needs a rebuild to stop shipping it.
+ */
+async function removeCompiledInWeb(job, plugin, ctPath) {
+  if (!ctPath || !safeDestName(plugin.web.dest)) return false;
+  try {
+    const res = await runLoggedScript(job.id, removeCompiledInWebScript(ctPath, plugin.web.dest), 2 * 60 * 1000);
+    if (/^WEB_REMOVED_OK$/m.test(String((res && res.stdout) || ""))) {
+      appendJobLog(job.id, `Removed the old compiled-in ${plugin.web.dest} web copy. The phone bundle is the plugin's UI now.`);
+      return true;
+    }
+    appendJobLog(job.id, `Could not remove the old compiled-in ${plugin.web.dest} web copy. Run Clean Up Existing later.`);
+  } catch (err) {
+    appendJobLog(job.id, `Could not remove the old compiled-in web copy (${err && err.message ? err.message : err}).`);
+  }
+  return false;
+}
+
+async function publishBundleAfterSshInstall(job, plugin, ctPath) {
+  if (!cloudtakApi.isConfigured()) return false;
   const pub = await cloudtakBundle.publishPlugin(plugin);
   if (pub.status === "published" || pub.status === "already") {
     appendJobLog(job.id, `Published ${pub.name} v${pub.version} to the CloudTAK phone app.`);
@@ -5718,9 +5811,11 @@ async function publishBundleAfterSshInstall(job, plugin) {
       rec.plugins[plugin.id].bundleVersion = pub.version;
       store.writeInstalled(rec);
     }
+    return removeCompiledInWeb(job, plugin, ctPath);
   } else if (pub.status === "failed") {
     appendJobLog(job.id, `Phone bundle was not published: ${pub.message}`);
   }
+  return false;
 }
 
 async function performInstall(job, plugin) {
@@ -5768,11 +5863,13 @@ async function performInstall(job, plugin) {
     ...(routeFiles.length ? { routeFiles } : {}),
   };
   store.writeInstalled(rec);
-  await publishBundleAfterSshInstall(job, plugin).catch(() => {});
+  const webRemoved = await publishBundleAfterSshInstall(job, plugin, loc.path).catch(() => false);
   const out = String(result.stdout || "") + "\n" + String(result.stderr || "");
-  const skipRebuild =
-    /Rebuilding CloudTAK API image/i.test(out) ||
-    (/Plugin installed/i.test(out) && !/Skipped rebuild/i.test(out));
+  // The old web copy is gone from disk, so a rebuild is needed even if the install script built the image.
+  const skipRebuild = webRemoved
+    ? false
+    : /Rebuilding CloudTAK API image/i.test(out) ||
+      (/Plugin installed/i.test(out) && !/Skipped rebuild/i.test(out));
   return {
     sha,
     path: loc.path,
@@ -5835,6 +5932,56 @@ async function performUninstall(job, dest, plugin, opts = {}) {
 function rebuildTimeoutMs() {
   const n = getInt("CLOUDTAK_MARKETPLACE_REBUILD_TIMEOUT_MS", REBUILD_TIMEOUT_MS);
   return Math.max(INSTALL_TIMEOUT_MS, n || REBUILD_TIMEOUT_MS);
+}
+
+/** CloudTAK package.json files the marketplace align step edits for the build. */
+const HOST_PACKAGE_JSON_FILES = ["app/package.json", "api/web/package.json"];
+
+/**
+ * Put CloudTAK's package.json files back to the committed version. The align step edits them
+ * only so the image build can pass; they must not stay changed once the job has ended.
+ * Git checkouts only. A checkout that is not a git repo is left alone.
+ */
+function restorePackageJsonScript(ct) {
+  const files = HOST_PACKAGE_JSON_FILES.map((f) => ssh.shellQuote(f)).join(" ");
+  return `
+set +e
+CT=${ssh.shellQuote(ct)}
+${pluginPrivilegeBash({ composeService: ssh.resolvedComposeService() || "api" })}
+[ -d "$CT/.git" ] || { echo "PKGJSON_SKIP not a git checkout"; exit 0; }
+command -v git >/dev/null 2>&1 || { echo "PKGJSON_SKIP git not installed"; exit 0; }
+G() { git -C "$CT" -c safe.directory="$CT" -c safe.directory='*' "$@"; }
+for f in ${files}; do
+  [ -f "$CT/$f" ] || continue
+  if G diff --quiet -- "$f" 2>/dev/null && G diff --quiet --cached -- "$f" 2>/dev/null; then continue; fi
+  if G restore --worktree --staged -- "$f" 2>/dev/null || G checkout HEAD -- "$f" 2>/dev/null; then
+    echo "PKGJSON_RESTORED $f"
+  elif declare -F elevate_run >/dev/null 2>&1 && elevate_run "git -C $(printf '%q' "$CT") -c safe.directory='*' checkout HEAD -- $(printf '%q' "$f")" >/dev/null 2>&1; then
+    echo "PKGJSON_RESTORED $f"
+  else
+    echo "PKGJSON_FAILED $f"
+  fi
+done
+echo PKGJSON_END
+`.trim();
+}
+
+/** Runs after every change batch, including a cancelled or failed one. Never throws. */
+async function restoreHostPackageJson(jobIds) {
+  if (!_hostScriptRan) return;
+  _hostScriptRan = false;
+  const ids = (Array.isArray(jobIds) ? jobIds : []).filter(Boolean);
+  const log = (line) => ids.forEach((id) => appendJobLog(id, line));
+  try {
+    const ct = ssh.resolvedCheckoutPath();
+    if (!ct) return;
+    const result = await ssh.runBashScript(restorePackageJsonScript(ct), 60 * 1000);
+    const out = String(result.stdout || "");
+    for (const m of out.matchAll(/^PKGJSON_RESTORED (.+)$/gm)) log(`Restored CloudTAK ${m[1]} (marketplace build edits removed).`);
+    for (const m of out.matchAll(/^PKGJSON_FAILED (.+)$/gm)) log(`WARNING: could not restore CloudTAK ${m[1]}; it still has marketplace build edits.`);
+  } catch (err) {
+    log(`WARNING: could not restore CloudTAK package.json: ${err && err.message ? err.message : err}`);
+  }
 }
 
 async function performRebuild(jobs, ctPath, service) {
@@ -5938,6 +6085,10 @@ async function runChangeBatch(jobs) {
         // API-only removals need no host rebuild and carry no checkout path.
         if (un && un.path) lastLoc = un;
         if (!(un && un.via === "api")) needsRebuild = true;
+      } else if (job.kind === "cleanup") {
+        const c = await performCleanup(job);
+        if (c && c.path) lastLoc = c;
+        if (c && c.needsRebuild) needsRebuild = true;
       } else if (job.kind === "update-all") {
         for (const p of item.plugins) {
           appendJobLog(job.id, `Updating ${p.name}`);
@@ -6049,9 +6200,7 @@ async function claimAndRunJobs() {
   if (!queued.length) return;
   _jobRunning = true;
   try {
-    const changes = queued.filter((j) =>
-      ["install", "update", "update-all", "uninstall"].includes(j.kind)
-    );
+    const changes = queued.filter((j) => isChangeKind(j.kind));
     const scans = queued.filter((j) => j.kind === "scan");
     const catalogs = queued.filter((j) => j.kind === "refresh-catalog");
 
@@ -6093,6 +6242,7 @@ async function claimAndRunJobs() {
 
     if (changes.length && !_cancelRequested) await runChangeBatch(changes);
   } finally {
+    await restoreHostPackageJson(queued.filter((j) => isChangeKind(j.kind)).map((j) => j.id));
     _jobRunning = false;
     _cancelRequested = false;
   }
@@ -6352,9 +6502,12 @@ function leftoverIdOk(id) {
 }
 
 /**
- * What to look for, per plugin. Only plugins TAK Portal moved to the API ("api") or that are
- * neither recorded nor found on the host ("none") are checked. Plugins installed over SSH, or
- * present on the host, are never touched. Bare "<id>.ts" routes are not guessed because they
+ * What to look for, per plugin.
+ *  - "api": moved to the API. Every old SSH path is a leftover.
+ *  - "ssh-bundle": still installed over SSH for its server routes or sidecars, but its phone bundle
+ *    is published, so the compiled-in web folder is a duplicate. Only that folder is a leftover.
+ *  - "none": neither recorded nor found on the host. Only stale state is checked.
+ * Other SSH-installed plugins and plugins present on the host are never touched. Bare "<id>.ts" routes are not guessed because they
  * could be CloudTAK's own files.
  */
 function leftoverPlan() {
@@ -6372,6 +6525,7 @@ function leftoverPlan() {
     const rec = installed[id];
     let mode;
     if (rec && rec.installMethod === "api") mode = "api";
+    else if (rec && rec.bundleName && isMarketplaceInstalledRecord(rec)) mode = "ssh-bundle";
     else if (rec || onDisk.has(id)) continue;
     else mode = "none";
     const routes = [];
@@ -6432,11 +6586,14 @@ function leftoverScript(ct, entries, clean) {
       `$CT/api/web/src/plugins/${e.dest}`,
     ];
     const body = [];
-    if (e.mode === "api") for (const p of webPaths) body.push(`act "${e.id}|web" "${p}"`);
-    for (const f of e.routes) body.push(`act "${e.id}|route" "$CT/api/stateless/routes/${f}"`);
-    body.push(`act "${e.id}|runtime" "$CT/cloudtak-marketplace-plugins/${e.id}"`);
-    body.push(`act "${e.id}|overlay" "$CT/docker-compose.plugin-${e.id}.yml"`);
-    body.push(`act "${e.id}|cache" "$CACHE_ROOT/${e.id}"`);
+    if (e.mode === "api" || e.mode === "ssh-bundle") for (const p of webPaths) body.push(`act "${e.id}|web" "${p}"`);
+    if (e.mode !== "ssh-bundle") {
+      // ssh-bundle plugins still run their server routes, runtime folder, overlay and clone.
+      for (const f of e.routes) body.push(`act "${e.id}|route" "$CT/api/stateless/routes/${f}"`);
+      body.push(`act "${e.id}|runtime" "$CT/cloudtak-marketplace-plugins/${e.id}"`);
+      body.push(`act "${e.id}|overlay" "$CT/docker-compose.plugin-${e.id}.yml"`);
+      body.push(`act "${e.id}|cache" "$CACHE_ROOT/${e.id}"`);
+    }
     if (e.mode === "none") {
       // Not recorded as installed: if any plugin folder exists, treat it as installed and skip.
       const guard = webPaths.map((p) => `[ ! -e "${p}" ]`).join(" && ");
@@ -6472,17 +6629,20 @@ function parseLeftoverOutput(stdout, entries) {
   return items;
 }
 
-async function runLeftovers(clean) {
+async function runLeftovers(clean, job) {
   if (!isEnabled()) throw new Error("CloudTAK marketplace is not enabled.");
-  if (hasBusyChangeJobs()) throw new Error("Wait until the current job is complete.");
+  if (!job && hasBusyChangeJobs()) throw new Error("Wait until the current job is complete.");
   const loc = await ensureCheckoutPath();
   if (!loc.ok) throw new Error(loc.message || "CloudTAK path not found");
   const entries = leftoverPlan();
   if (!entries.length) return { ok: true, items: [], checked: 0 };
-  const result = await ssh.runBashScript(leftoverScript(loc.path, entries, clean), clean ? 5 * 60 * 1000 : 60 * 1000);
-  const text = String(result.stdout || "");
-  if (!/^LEFTOVER_END$/m.test(text)) throw new Error(result.message || "Leftover check did not finish.");
-  return { ok: true, items: parseLeftoverOutput(text, entries), checked: entries.length };
+  const script = leftoverScript(loc.path, entries, clean);
+  const result = job
+    ? await runLoggedScript(job.id, script, 5 * 60 * 1000)
+    : await ssh.runBashScript(script, 60 * 1000);
+  const text = String((result && result.stdout) || "");
+  if (!/^LEFTOVER_END$/m.test(text)) throw new Error((result && result.message) || "Leftover check did not finish.");
+  return { ok: true, items: parseLeftoverOutput(text, entries), checked: entries.length, path: loc.path, composeService: loc.composeService };
 }
 
 /** Read-only: list old SSH files left behind for plugins that now run through the API. */
@@ -6490,14 +6650,31 @@ function checkLeftovers() {
   return runLeftovers(false);
 }
 
-/** Remove what checkLeftovers lists (only those exact paths). Web and route removals apply at the next rebuild. */
-function cleanLeftovers() {
-  return runLeftovers(true);
+/** Queue a cleanup job: removes what checkLeftovers lists (only those exact paths), then one rebuild. */
+function queueCleanup(createdBy) {
+  return enqueueJob({ kind: "cleanup", createdBy });
+}
+
+async function performCleanup(job) {
+  appendJobLog(job.id, "Cleaning up old files from plugins that now run through the CloudTAK API");
+  await stageMarketplaceHelperSource(job.id);
+  const out = await runLeftovers(true, job);
+  const removed = out.items.filter((i) => i.state === "removed");
+  const failed = out.items.filter((i) => i.state === "failed");
+  removed.forEach((i) => appendJobLog(job.id, `Removed ${i.plugin}: ${i.label} (${i.path})`));
+  failed.forEach((i) => appendJobLog(job.id, `Could not remove ${i.plugin}: ${i.path}. Check the host's sudo setup.`));
+  if (!out.items.length) appendJobLog(job.id, "Nothing to clean up.");
+  return { path: out.path || "", composeService: out.composeService || "", needsRebuild: removed.some((i) => i.needsRebuild) };
 }
 
 module.exports = {
+  canSkipHostScan,
+  restorePackageJsonScript,
+  restoreHostPackageJson,
+  HOST_PACKAGE_JSON_FILES,
   checkLeftovers,
-  cleanLeftovers,
+  queueCleanup,
+  performCleanup,
   leftoverPlan,
   leftoverScript,
   parseLeftoverOutput,

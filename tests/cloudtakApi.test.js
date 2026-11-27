@@ -221,6 +221,28 @@ function installFakeFetch() {
       ]);
       assert.ok(!row2.migratesToApi);
       assert.strictEqual(row2.updateAvailable, false);
+      // API-managed plugins: updates come from CloudTAK's own plugin list vs the latest bundle.
+      installed.plugins.demo = { sha: "abc1234567", dest: "demo", installMethod: "api", bundleName: "demo", bundleVersion: "1.1.0" };
+      const apiRow = async () => (await marketplace.enrichUpdateShas([
+        { id: "demo", installed: true, catalog: plugin, scan: null, installedVersion: "" },
+      ]))[0];
+      plugins = [{ id: "id-demo", name: "demo", version: "1.1.0", enabled: true }];
+      let ar = await apiRow();
+      assert.strictEqual(ar.updateAvailable, true, "server has 1.1.0, release bundle is 1.2.0");
+      assert.deepStrictEqual({ i: ar.installedVersion, r: ar.remoteVersion }, { i: "1.1.0", r: "1.2.0" });
+      plugins = [{ id: "id-demo", name: "demo", version: "1.2.0", enabled: true }];
+      assert.strictEqual((await apiRow()).updateAvailable, false, "server already on the release version");
+      plugins = [];
+      assert.strictEqual((await apiRow()).updateAvailable, true, "removed from CloudTAK outside TAK Portal: republish");
+      const checkSrc = require("fs").readFileSync(require("path").join(__dirname, "..", "routes", "cloudtakMarketplace.routes.js"), "utf8");
+      assert.match(checkSrc, /canSkipHostScan\(\) \? \{ ok: true, skipped: true \} : await marketplace\.scanHost\(\)/);
+      // Host scan is skipped only when the API is set up and every installed plugin runs through it.
+      assert.strictEqual(marketplace.canSkipHostScan(), true);
+      installed.plugins.other = { sha: "x", dest: "other", installedAt: "2026-01-01" };
+      assert.strictEqual(marketplace.canSkipHostScan(), false, "an SSH-installed plugin still needs the scan");
+      delete installed.plugins.other;
+      const viewSrc = require("fs").readFileSync(require("path").join(__dirname, "..", "views", "cloudtak-marketplace.ejs"), "utf8");
+      assert.ok(!/adds phone app support/i.test(viewSrc), "update button never says it adds phone app support");
       // The migration runs the old-file cleanup after publishing (source check).
       const svcSrc = require("fs").readFileSync(require("path").join(__dirname, "..", "services", "cloudtakMarketplace.service.js"), "utf8");
       const iPub = svcSrc.indexOf("cloudtakBundle.publishPlugin(plugin, { serverVersion })");
