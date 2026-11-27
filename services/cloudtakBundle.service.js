@@ -175,7 +175,18 @@ async function publishPlugin(plugin, { serverVersion, deps } = {}) {
     const { alreadyUploaded } = await cloudtakApi.uploadBundle(buffer, asset.name);
     const existing = await cloudtakApi.findPluginByName(manifest.name);
     if (existing && existing.id) await cloudtakApi.setPluginEnabled(existing.id, true);
-    return { status: alreadyUploaded ? "already" : "published", version: manifest.version, name: manifest.name };
+    // Plugins that call out through CloudTAK's proxy need their origins allowed (additive, never fatal).
+    let proxy = "";
+    const origins = plugin.proxy && plugin.proxy.origins;
+    if (origins && origins.length) {
+      try {
+        const r = await cloudtakApi.ensureProxyOrigins(origins);
+        proxy = r.changed ? "Enabled CloudTAK's plugin proxy and allowed " + r.added.length + " new origin(s)." : "CloudTAK's proxy already allows this plugin's origins.";
+      } catch (err) {
+        proxy = "Could not update CloudTAK's proxy allowlist (" + ((err && err.message) || err) + "). An admin must allow this plugin's origins.";
+      }
+    }
+    return { status: alreadyUploaded ? "already" : "published", version: manifest.version, name: manifest.name, proxy };
   } catch (err) {
     return { status: "failed", message: (err && err.message) || String(err) };
   }

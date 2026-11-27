@@ -47,6 +47,7 @@ function makeBundle({ name = "demo", version = "1.2.0", badSha = false, extra = 
 // ---- mock CloudTAK server through the guarded fetch ----
 let serverVersion = "14.4.1";
 let plugins = [];
+let proxyCfg = {};
 const calls = [];
 function installFakeFetch() {
   const real = outbound.guardedFetch;
@@ -56,6 +57,8 @@ function installFakeFetch() {
     assert.match(init.headers.Authorization, /^Bearer etl\./);
     const json = (status, body) => ({ ok: status < 400, status, text: async () => JSON.stringify(body) });
     if (u.pathname === "/api/server") return json(200, { version: serverVersion });
+    if (u.pathname === "/api/config" && init.method === "GET") return json(200, { ...proxyCfg });
+    if (u.pathname === "/api/config" && init.method === "PUT") { proxyCfg = JSON.parse(init.body); return json(200, proxyCfg); }
     if (u.pathname === "/api/user" && init.method === "GET") return json(200, { items: [] });
     if (u.pathname === "/api/plugin" && init.method === "GET") return json(200, { total: plugins.length, items: plugins });
     if (u.pathname === "/api/plugin/bundle") {
@@ -92,6 +95,28 @@ function installFakeFetch() {
   assert.throws(() => bundleSvc.parseBundle(makeBundle({ badSha: true })), /sha256 does not match/);
   assert.throws(() => bundleSvc.parseBundle(makeBundle({ extra: true })), /exactly manifest.json and index.js/);
   assert.throws(() => bundleSvc.parseBundle(Buffer.from("nope")), /not a valid/);
+
+  // Proxy allowlist: additive, normalized to origins, skipped when nothing is missing.
+  {
+    const restoreFetch = installFakeFetch();
+    try {
+      assert.deepStrictEqual(api.cleanProxyOrigins(["https://a.example.com/path", "https://a.example.com", "nope", "ftp://x.example.com"]), ["https://a.example.com"]);
+      proxyCfg = { "proxy::enabled": false, "proxy::whitelist": ["https://existing.example.com"] };
+      let r = await api.ensureProxyOrigins(["https://a.example.com", "https://existing.example.com/"]);
+      assert.deepStrictEqual(r, { changed: true, added: ["https://a.example.com"] });
+      assert.strictEqual(proxyCfg["proxy::enabled"], true);
+      assert.deepStrictEqual(proxyCfg["proxy::whitelist"], ["https://existing.example.com", "https://a.example.com"], "existing origins are kept");
+      const before = calls.length;
+      r = await api.ensureProxyOrigins(["https://a.example.com"]);
+      assert.strictEqual(r.changed, false);
+      assert.ok(!calls.slice(before).some((x) => x.startsWith("PUT")), "no PUT when nothing is missing");
+    } finally {
+      restoreFetch();
+    }
+    const lw = require("../services/cloudtakMarketplace.service").loadCatalog().plugins.find((p) => p.id === "livewx");
+    assert.strictEqual(lw.proxy.origins.length, 30, "LiveWX lists the 30 origins from its README");
+    assert.ok(lw.proxy.origins.every((o) => /^https:\/\/[^/]+$/.test(o)));
+  }
 
   // Layout: only bundle-only plugins can skip SSH.
   assert.strictEqual(bundleSvc.isBundleOnlyLayout({ routes: null, sidecars: [] }), true);

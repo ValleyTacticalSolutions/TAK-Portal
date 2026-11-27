@@ -406,6 +406,7 @@ function normalizeCatalog(doc) {
       bundle: p.bundle && typeof p.bundle === "object"
         ? { asset: String(p.bundle.asset || "").trim(), minVersion: String(p.bundle.minVersion || "").trim().replace(/^v/i, "") }
         : null,
+      proxy: p.proxy && typeof p.proxy === "object" ? { origins: cloudtakApi.cleanProxyOrigins(p.proxy.origins) } : null,
     });
   }
   return { version: Number(doc && doc.version) || 1, plugins: out, fetchedAt: doc && doc.fetchedAt ? doc.fetchedAt : null };
@@ -5743,6 +5744,7 @@ async function tryApiInstall(job, plugin) {
     return null;
   }
   appendJobLog(job.id, `Published ${pub.name} v${pub.version} to CloudTAK over the API (no SSH needed).`);
+  if (pub.proxy) appendJobLog(job.id, pub.proxy);
   const prev = store.readInstalled().plugins[plugin.id];
   const viaSsh = (prev && prev.installMethod !== "api") || scanShowsPlugin(plugin);
   let path = "";
@@ -5819,6 +5821,7 @@ async function publishBundleAfterSshInstall(job, plugin, ctPath) {
   const pub = await cloudtakBundle.publishPlugin(plugin);
   if (pub.status === "published" || pub.status === "already") {
     appendJobLog(job.id, `Published ${pub.name} v${pub.version} to the CloudTAK phone app.`);
+    if (pub.proxy) appendJobLog(job.id, pub.proxy);
     const rec = store.readInstalled();
     if (rec.plugins[plugin.id]) {
       rec.plugins[plugin.id].bundleName = pub.name;

@@ -199,7 +199,42 @@ async function testConnection(opts) {
   }
 }
 
+/** Keep only well-formed scheme://host[:port] origins (what CloudTAK's proxy allowlist takes). */
+function cleanProxyOrigins(list) {
+  const out = [];
+  for (const raw of Array.isArray(list) ? list : []) {
+    let u;
+    try {
+      u = new URL(String(raw || "").trim());
+    } catch (_) {
+      continue;
+    }
+    if ((u.protocol === "https:" || u.protocol === "http:") && !out.includes(u.origin)) out.push(u.origin);
+  }
+  return out;
+}
+
+/**
+ * Make sure CloudTAK's plugin proxy is on and allows the given origins (PUT /api/config, admin).
+ * Additive only: the PUT replaces the whole list, so existing origins are read first and kept.
+ * Returns { changed, added }.
+ */
+async function ensureProxyOrigins(origins, opts) {
+  const wanted = cleanProxyOrigins(origins);
+  if (!wanted.length) return { changed: false, added: [] };
+  const cfg = (await request("GET", "/api/config", { ...opts, query: { keys: "proxy::enabled,proxy::whitelist" } })) || {};
+  const current = Array.isArray(cfg["proxy::whitelist"]) ? cfg["proxy::whitelist"].map(String) : [];
+  const have = new Set(current.map((o) => o.replace(/\/+$/, "")));
+  const added = wanted.filter((o) => !have.has(o));
+  const enabled = cfg["proxy::enabled"] === true || cfg["proxy::enabled"] === "true";
+  if (!added.length && enabled) return { changed: false, added: [] };
+  await request("PUT", "/api/config", { ...opts, body: { "proxy::enabled": true, "proxy::whitelist": [...current, ...added] } });
+  return { changed: true, added };
+}
+
 module.exports = {
+  cleanProxyOrigins,
+  ensureProxyOrigins,
   PLUGIN_API_VERSION,
   MIN_BUNDLE_CLOUDTAK,
   CloudtakApiError,

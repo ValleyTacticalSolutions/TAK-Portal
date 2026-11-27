@@ -177,6 +177,7 @@
       "maintainer": "ValleyTacticalSolutions",
       "web": { "dest": "livewx-radar" },
       "bundle": { "minVersion": "4.0.0" },
+      "proxy": { "origins": ["https://api.weather.gov","https://api.open-meteo.com","https://mesonet.agron.iastate.edu","https://mapservices.weather.noaa.gov","https://opengeo.ncep.noaa.gov","https://geo.weather.gc.ca","https://api.rainviewer.com","https://tilecache.rainviewer.com","https://nowcoast.noaa.gov","https://nomads.ncep.noaa.gov","https://maps.water.noaa.gov","https://api.water.noaa.gov","https://www.ndbc.noaa.gov","https://api.tidesandcurrents.noaa.gov","https://www.nhc.noaa.gov","https://api.avalanche.org","https://wcc.sc.egov.usda.gov","https://services.arcgis.com","https://services3.arcgis.com","https://geocoding.geo.census.gov","https://fsapps.nwcg.gov","https://www.nfmdb.org","https://data.cocorahs.org","https://waterservices.usgs.gov","https://waterdata.usgs.gov","https://earthquake.usgs.gov","https://services.dat.noaa.gov","https://gacc.nifc.gov","https://radar.weather.gov","https://aviationweather.gov"] },
       "detect": [
         "api/web/plugins/livewx-radar/index.ts",
         "app/plugins/livewx-radar/index.ts"
