@@ -172,10 +172,14 @@ function installFakeFetch() {
     // Fresh install of a bundle-only plugin over the API: no SSH at all.
     plugins = [];
     const realGet = require("axios").get;
+    let pkgVersion = "";
     require("axios").get = async (url) => {
       if (url.includes("/commits/")) return { data: { sha: "abc1234567" } };
       if (url.includes("api.github.com/repos")) return deps.get(url);
-      if (url.includes("raw.githubusercontent.com")) throw new Error("404");
+      if (url.includes("raw.githubusercontent.com")) {
+        if (pkgVersion && url.endsWith("/package.json")) return { data: { version: pkgVersion } };
+        throw new Error("404");
+      }
       return { data: bundle };
     };
     bundleSvc.clearCache();
@@ -234,6 +238,20 @@ function installFakeFetch() {
       assert.strictEqual((await apiRow()).updateAvailable, false, "server already on the release version");
       plugins = [];
       assert.strictEqual((await apiRow()).updateAvailable, true, "removed from CloudTAK outside TAK Portal: republish");
+      // Updates follow the package.json version in the repo, not the release tag.
+      plugins = [{ id: "id-demo", name: "demo", version: "1.1.0", enabled: true }];
+      pkgVersion = "1.3.0";
+      marketplace.remoteVersionCache.clear();
+      ar = await apiRow();
+      assert.strictEqual(ar.updateAvailable, false, "repo is at 1.3.0 but only the 1.2.0 bundle exists: do not publish older");
+      assert.match(ar.bundlePending, /v1\.3\.0/, "card says the bundle is still pending");
+      assert.strictEqual(ar.remoteVersion, "1.3.0");
+      plugins = [{ id: "id-demo", name: "demo", version: "1.2.0", enabled: true }];
+      pkgVersion = "1.2.0";
+      marketplace.remoteVersionCache.clear();
+      ar = await apiRow();
+      assert.strictEqual(ar.updateAvailable, false, "installed 1.2.0 matches package.json 1.2.0");
+      pkgVersion = "";
       const checkSrc = require("fs").readFileSync(require("path").join(__dirname, "..", "routes", "cloudtakMarketplace.routes.js"), "utf8");
       assert.match(checkSrc, /canSkipHostScan\(\) \? \{ ok: true, skipped: true \} : await marketplace\.scanHost\(\)/);
       // Host scan is skipped only when the API is set up and every installed plugin runs through it.

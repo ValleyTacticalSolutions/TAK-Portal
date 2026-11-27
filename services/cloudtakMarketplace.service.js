@@ -403,7 +403,9 @@ function normalizeCatalog(doc) {
       composeFile: String(p.composeFile || "").trim(),
       sidecars: Array.isArray(p.sidecars) ? p.sidecars : [],
       csp: normalizeCsp(p),
-      bundle: p.bundle && typeof p.bundle === "object" ? { asset: String(p.bundle.asset || "").trim() } : null,
+      bundle: p.bundle && typeof p.bundle === "object"
+        ? { asset: String(p.bundle.asset || "").trim(), minVersion: String(p.bundle.minVersion || "").trim().replace(/^v/i, "") }
+        : null,
     });
   }
   return { version: Number(doc && doc.version) || 1, plugins: out, fetchedAt: doc && doc.fetchedAt ? doc.fetchedAt : null };
@@ -2275,13 +2277,21 @@ async function enrichUpdateShas(uiPlugins, serverVersion) {
       next.installedSha = rec.sha || "";
       next.remoteSha = "";
       next.installedVersion = installedVer;
-      next.remoteVersion = cleanPluginVersion((bundle && bundle.version) || "");
+      // A new version is a higher package.json version at the catalog ref (no GitHub release needed
+      // to notice it). Publishing still needs a bundle for that version, never an older one.
+      const pkgVer = await remoteVersionForPlugin(row.catalog);
+      const bundleVer = cleanPluginVersion((bundle && bundle.version) || "");
+      const targetVer = pkgVer || bundleVer;
+      const bundleReady = !!bundle && (!targetVer || compareCloudtakVersions(bundleVer, targetVer) >= 0);
+      next.remoteVersion = targetVer;
+      const newer = !!(installedVer && targetVer && compareCloudtakVersions(targetVer, installedVer) > 0);
       next.updateAvailable = !!(
         bundle && (
           (serverPlugins && want && !onServer) || // removed from CloudTAK outside TAK Portal: republish
-          (installedVer && compareCloudtakVersions(bundle.version, installedVer) > 0)
+          (newer && bundleReady)
         )
       );
+      next.bundlePending = newer && !bundleReady ? "v" + targetVer + " is in the repo but its phone bundle has not been built yet" : "";
       next.minCloudtak = await remoteMinCloudtakForPlugin(row.catalog);
       next.updateBlocked = updateBlockedMessage(serverVer, next.minCloudtak);
       if (next.updateBlocked) next.updateAvailable = false;

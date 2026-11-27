@@ -97,10 +97,22 @@ function isBundleOnlyLayout(plugin) {
  * `bundle.asset` name ({version} is replaced) or any *.tar.gz asset.
  * Returns { url, name, tag } or null. Cached for a few minutes.
  */
+function versionAtLeast(version, min) {
+  const parts = (v) => String(v || "").replace(/^v/i, "").split(/[-+]/)[0].split(".").map((p) => parseInt(p, 10) || 0);
+  const a = parts(version);
+  const m = parts(min);
+  for (let i = 0; i < Math.max(a.length, m.length); i += 1) {
+    if ((a[i] || 0) !== (m[i] || 0)) return (a[i] || 0) > (m[i] || 0);
+  }
+  return true;
+}
+
 async function findReleaseBundle(plugin, deps = {}) {
   const gh = githubRepo(plugin);
   if (!gh) return null;
-  const key = gh.owner + "/" + gh.repo + "@" + ((plugin.bundle && plugin.bundle.asset) || "");
+  // bundle.minVersion: older bundles need host-side parts that are gone, so never publish them.
+  const minVersion = (plugin.bundle && plugin.bundle.minVersion) || "";
+  const key = gh.owner + "/" + gh.repo + "@" + ((plugin.bundle && plugin.bundle.asset) || "") + ">=" + minVersion;
   const now = Date.now();
   const hit = releaseCache.get(key);
   if (hit && now - hit.at < RELEASE_TTL_MS && !deps.noCache) return hit.value;
@@ -115,6 +127,7 @@ async function findReleaseBundle(plugin, deps = {}) {
     for (const rel of releases) {
       const tag = String(rel.tag_name || "");
       const version = tag.replace(/^v(?=\d)/i, "");
+      if (minVersion && !versionAtLeast(version, minVersion)) continue;
       const assets = Array.isArray(rel.assets) ? rel.assets : [];
       const wanted = plugin.bundle && plugin.bundle.asset ? plugin.bundle.asset.replace(/\{version\}/g, version) : "";
       const asset = wanted

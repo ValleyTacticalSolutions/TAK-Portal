@@ -176,6 +176,7 @@
       "added": "2026-09-21",
       "maintainer": "ValleyTacticalSolutions",
       "web": { "dest": "livewx-radar" },
+      "bundle": { "minVersion": "4.0.0" },
       "detect": [
         "api/web/plugins/livewx-radar/index.ts",
         "app/plugins/livewx-radar/index.ts"

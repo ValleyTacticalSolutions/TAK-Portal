@@ -94,6 +94,24 @@ assert.strictEqual(m.updateBlockedMessage("", "14.2.0"), "", "unknown server ver
   assert.match(view, /api-connection\?test=1/);
   const srv = fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8");
   assert.match(srv, /api-connection\(\\\/test\)\?/);
+  // bundle.minVersion: an older release bundle is never offered or published.
+  const bundleSvc = require("../services/cloudtakBundle.service");
+  const releases = [
+    { tag_name: "v3.0.1", assets: [{ name: "x-3.0.1.tar.gz", browser_download_url: "https://example.com/x-3.0.1.tar.gz" }] },
+  ];
+  const deps = { noCache: true, get: async () => ({ data: releases }) };
+  const base = { id: "x", repo: "https://github.com/example/x.git", ref: "main", routes: null, sidecars: [] };
+  assert.strictEqual((await bundleSvc.findReleaseBundle(base, deps)).version, "3.0.1", "no minimum: latest release");
+  assert.strictEqual(await bundleSvc.findReleaseBundle({ ...base, bundle: { minVersion: "4.0.0" } }, deps), null, "3.0.1 is below 4.0.0");
+  releases.unshift({ tag_name: "v4.0.0", assets: [{ name: "x-4.0.0.tar.gz", browser_download_url: "https://example.com/x-4.0.0.tar.gz" }] });
+  assert.strictEqual((await bundleSvc.findReleaseBundle({ ...base, bundle: { minVersion: "4.0.0" } }, deps)).version, "4.0.0");
+  const normalized = require("../services/cloudtakMarketplace.service").normalizeCatalog({
+    version: 1,
+    plugins: [{ id: "x", name: "X", repo: base.repo, web: { dest: "x" }, bundle: { minVersion: "v4.0.0" } }],
+  });
+  assert.strictEqual(normalized.plugins[0].bundle.minVersion, "4.0.0", "catalog keeps bundle.minVersion");
+  const lw = require("../services/cloudtakMarketplace.service").loadCatalog().plugins.find((p) => p.id === "livewx");
+  assert.ok(lw && lw.bundle && lw.bundle.minVersion === "4.0.0", "LiveWX only publishes its v4+ (route-less) bundle");
   console.log("cloudtakMarketplace minVersion tests passed");
 })().catch((e) => {
   console.error(e);

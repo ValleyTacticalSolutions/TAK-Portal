@@ -1085,6 +1085,12 @@
         blockedEl.textContent = "Update " + String(p.updateBlocked).replace(/^Needs/, "needs");
         el.querySelector(".plugin-desc").insertAdjacentElement("afterend", blockedEl);
       }
+      if (p.bundlePending && !p.updateBlocked) {
+        var pendingEl = document.createElement("div");
+        pendingEl.className = "plugin-update-blocked";
+        pendingEl.textContent = "Waiting for bundle: " + String(p.bundlePending);
+        el.querySelector(".plugin-desc").insertAdjacentElement("afterend", pendingEl);
+      }
       if (note) el.querySelector(".plugin-notes").textContent = note;
       grid.appendChild(el);
     });
