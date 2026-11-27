@@ -5,7 +5,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const archiver = require("archiver");
+const { createZipArchive } = require("./zipArchive");
 const pluginsSvc = require("./plugins.service");
 const apkMetaSvc = require("./apkMeta.service");
 const takSshSvc = require("./takSsh.service");
@@ -227,7 +227,7 @@ function buildProductInfRows(entries) {
 function zipProductInfz(productInfPath, iconFiles, outPath) {
   return new Promise((resolve, reject) => {
     const output = fs.createWriteStream(outPath);
-    const archive = archiver("zip", { zlib: { level: 9 } });
+    const archive = createZipArchive({ zlib: { level: 9 } });
     output.on("close", () => resolve());
     archive.on("error", reject);
     archive.pipe(output);

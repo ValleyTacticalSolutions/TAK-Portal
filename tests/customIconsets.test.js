@@ -8,7 +8,7 @@ const assert = require("assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const archiver = require("archiver");
+const { createZipArchive } = require("../services/zipArchive");
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "custom-iconsets-"));
 process.env.TAK_CUSTOM_ICONSETS_DIR = tmpRoot;
@@ -25,7 +25,7 @@ const XML = `<iconset name="TNTAK Traffic" uid="${UID}" defaultGroup="Traffic"><
 
 function zip(files) {
   return new Promise((resolve, reject) => {
-    const a = archiver("zip");
+    const a = createZipArchive();
     const chunks = [];
     a.on("data", (c) => chunks.push(c));
     a.on("end", () => resolve(Buffer.concat(chunks)));

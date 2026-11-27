@@ -1,7 +1,7 @@
 const path = require("path");
 const express = require("express");
 const multer = require("multer");
-const archiver = require("archiver");
+const { createZipArchive } = require("../services/zipArchive");
 const mouService = require("../services/mouService");
 const mouScheduler = require("../services/mouScheduler");
 const auditSvc = require("../services/auditLog.service");
@@ -706,7 +706,7 @@ router.get("/mou", requireMouEnabled, requireMouPermission, async (req, res) => 
       buildContentDisposition("attachment", "mou-signed-documents.zip")
     );
 
-    const archive = archiver("zip", { zlib: { level: 9 } });
+    const archive = createZipArchive({ zlib: { level: 9 } });
     archive.on("error", (err) => {
       console.error("MOU signature zip export error:", err);
       if (!res.headersSent) {
@@ -1634,7 +1634,7 @@ router.get("/admin/mou/:mouId/history.zip", requireMouEnabled, requireMouPermiss
         buildContentDisposition("attachment", `${baseName}-${agencyId}-signed-history.zip`)
       );
 
-      const archive = archiver("zip", { zlib: { level: 9 } });
+      const archive = createZipArchive({ zlib: { level: 9 } });
       archive.on("error", (err) => {
         console.error("MOU history zip export error:", err);
         if (!res.headersSent) {
