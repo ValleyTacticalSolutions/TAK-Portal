@@ -283,6 +283,12 @@ function installFakeFetch() {
       sshCalls.length = 0;
       await assert.rejects(() => marketplace.tryApiInstall({ id: "job2" }, noBundle), /No phone bundle exists/);
       assert.strictEqual(sshCalls.length, 0, "no SSH, no rebuild");
+      // Recorded as an SSH install (e.g. after an old fallback) but the catalog says it ships a bundle: still no SSH rebuild.
+      const savedRec = JSON.parse(JSON.stringify(installed));
+      installed.plugins.demo = { sha: "abc1234567", dest: "demo", installedAt: "2026-01-01" };
+      await assert.rejects(() => marketplace.tryApiInstall({ id: "job3" }, noBundle), /No phone bundle exists/);
+      assert.strictEqual(sshCalls.length, 0, "SSH-recorded bundle plugin is not rebuilt either");
+      installed = savedRec;
       const checkSrc = require("fs").readFileSync(require("path").join(__dirname, "..", "routes", "cloudtakMarketplace.routes.js"), "utf8");
       assert.match(checkSrc, /canSkipHostScan\(\) \? \{ ok: true, skipped: true \} : await marketplace\.scanHost\(\)/);
       // Host scan is skipped only when the API is set up and every installed plugin runs through it.

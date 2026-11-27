@@ -5737,7 +5737,8 @@ async function tryApiInstall(job, plugin) {
   if (pub.status !== "published" && pub.status !== "already") {
     // Already API-managed and bundle-only: an SSH source build would rebuild CloudTAK for nothing and move it back to legacy.
     const cur = store.readInstalled().plugins[plugin.id];
-    if (cur && cur.installMethod === "api" && (pub.status === "no-bundle" || pub.status === "failed")) {
+    // Same when the catalog says the plugin ships a bundle (bundle.minVersion/asset): an SSH build is never the right fallback.
+    if (((cur && cur.installMethod === "api") || plugin.bundle) && (pub.status === "no-bundle" || pub.status === "failed")) {
       throw new Error((pub.status === "failed" ? "Phone bundle could not be published (" + pub.message + ")" : "No phone bundle exists for the latest version yet") + ". Nothing was changed; no CloudTAK rebuild was started.");
     }
     if (pub.status === "failed") appendJobLog(job.id, `Phone bundle could not be published (${pub.message}); using SSH.`);
