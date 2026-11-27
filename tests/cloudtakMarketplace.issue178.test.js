@@ -23,7 +23,10 @@ assert.deepStrictEqual(
 const m = src.match(/\n\s*"elevate_run\(\) \{",\n([\s\S]*?)\n\s*"\}",\n/);
 assert.ok(m, "elevate_run block found");
 const body = new Function(`return [${m[1]}];`)();
-const fn = ["elevate_run() {", ...body, "}"].join("\n");
+const pm = src.match(/\n\s*"ctak_pass_priv\(\) \{",\n([\s\S]*?)\n\s*"\}",\n/);
+assert.ok(pm, "runtime ctak_pass_priv block found");
+const passBody = new Function(`return [${pm[1]}];`)();
+const fn = ["exec 9>&2", "ctak_pass_priv() {", ...passBody, "}", "elevate_run() {", ...body, "}"].join("\n");
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ctak178-"));
 const log = path.join(dir, "calls.log");
@@ -182,4 +185,47 @@ if (process.platform !== "win32") {
 assert.deepStrictEqual(fs.readdirSync(rdir).filter((f) => f.startsWith(".marketplace-helper.")), [], "no temp files left");
 
 fs.rmSync(rdir, { recursive: true, force: true });
+
+// 6. A rejected stored password is tried once per run, not on every elevate: each
+// "incorrect password attempt" mails root. Reported once even when the caller hides output.
+const wm = src.match(/\nCTAK_SUDO_PASS_REJECTED=0\n[\s\S]*?\nctak_pass_priv\(\) \{\n[\s\S]*?\n\}\n/);
+assert.ok(wm, "install prelude ctak_pass_priv found");
+const wrapFn = new Function(`return \`${wm[0]}\`;`)();
+assert.doesNotMatch(
+  src.replace(wm[0], "").replace(pm[0], ""),
+  /\|\s*"\$CTAK_PRIV" -S\b/,
+  "every stored-password use must go through ctak_pass_priv",
+);
+const pdir = fs.mkdtempSync(path.join(os.tmpdir(), "ctak178p-"));
+fs.writeFileSync(path.join(pdir, "fakepriv"), `#!/bin/bash
+echo "$*" >> calls.log
+read -r pw
+shift 3
+if [ "$pw" != "right" ]; then printf 'Sorry, try again.\\nsudo: no password was provided\\nsudo: 1 incorrect password attempt\\n' >&2; exit 1; fi
+exec "$@"
+`, { mode: 0o755 });
+function withPass(pass, calls) {
+  fs.writeFileSync(path.join(pdir, "calls.log"), "");
+  const script = ["set -euo pipefail", 'CTAK_PRIV="$PWD/fakepriv"', `CTAK_SUDO_PASS='${pass}'`, wrapFn, calls].join("\n");
+  const r = spawnSync("bash", ["-c", script], { cwd: pdir, encoding: "utf8" });
+  return { stdout: r.stdout, stderr: r.stderr, calls: fs.readFileSync(path.join(pdir, "calls.log"), "utf8").trim().split("\n").filter(Boolean) };
+}
+const wrong = withPass("nope", [
+  "ctak_pass_priv bash -c 'echo hi' >/dev/null 2>&1 || echo first=$?",
+  "ctak_pass_priv bash -c 'echo hi' || echo second=$?",
+  "ctak_pass_priv docker info || echo third=$?",
+].join("\n"));
+assert.strictEqual(wrong.calls.length, 1, "wrong password must be tried once per run");
+assert.match(wrong.stdout, /first=1[\s\S]*second=1[\s\S]*third=1/);
+assert.strictEqual((wrong.stderr.match(/stored .* password was rejected/g) || []).length, 1, wrong.stderr);
+
+const right = withPass("right", [
+  "ctak_pass_priv bash -c 'echo out; echo err >&2; exit 4' || echo rc=$?",
+  "ctak_pass_priv bash -c 'echo again'",
+].join("\n"));
+assert.strictEqual(right.calls.length, 2);
+assert.match(right.stdout, /out\nrc=4\nagain/, "stdout, exit code pass through; a real failure is not a rejection");
+assert.match(right.stderr, /^err$/m, "command stderr is passed through");
+assert.doesNotMatch(right.stderr, /rejected/);
+fs.rmSync(pdir, { recursive: true, force: true });
 console.log("cloudtakMarketplace.issue178 tests passed");
