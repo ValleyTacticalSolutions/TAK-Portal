@@ -322,7 +322,7 @@ function certsInP12(p12, password) {
           return r.stdout + r.stderr;
         };
         const c = ossl("client.p12", clientP12, ["-nodes"]);
-        assert.ok(c.includes("PRIVATE KEY") && c.includes("CN = svc-ossl") && c.includes("Test Root CA"), "client p12: key, cert and chain");
+        assert.ok(c.includes("PRIVATE KEY") && /CN\s*=\s*svc-ossl/.test(c) && /Test Root CA/.test(c), "client p12: key, cert and chain");
         const t = ossl("trust.p12", trustP12, ["-nokeys"]);
         assert.ok(t.includes("Test Root CA") && !t.includes("PRIVATE KEY"), "truststore p12 is cert-only");
         const bad = spawnSync("openssl", ["pkcs12", "-in", path.join(dir, "trust.p12"), "-passin", "pass:wrong", "-nokeys"], { encoding: "utf8" });
