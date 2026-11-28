@@ -3639,7 +3639,8 @@ function pluginRuntimeCleanupBash() {
     "    SVCS=$(awk '",
     "      /^services:[[:space:]]*$/ { s=1; next }",
     "      s && /^[^[:space:]#]/ { s=0 }",
-    '      s && /^  [A-Za-z0-9._-]+:[[:space:]]*$/ { sub(/^  /, ""); sub(/:[[:space:]]*$/, ""); print }',
+    // Service keys sit at the indent of the first key under services: (2 spaces, or 4 when the installer wrapped a bare compose file).
+    '      s && /^[[:space:]]+[A-Za-z0-9._-]+:[[:space:]]*$/ { m=match($0, /[^[:space:]]/); if (ind == "") ind=m; if (m == ind) { n=$0; sub(/^[[:space:]]+/, "", n); sub(/:[[:space:]]*$/, "", n); print n } }',
     "' \"$OVERRIDE\" | tr '\\n' ' ')",
     '    IMGS=""',
     '    if command -v docker >/dev/null 2>&1; then',
@@ -6688,6 +6689,7 @@ async function performCleanup(job) {
 }
 
 module.exports = {
+  pluginRuntimeCleanupBash,
   canSkipHostScan,
   restorePackageJsonScript,
   restoreHostPackageJson,

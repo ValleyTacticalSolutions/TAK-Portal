@@ -1808,3 +1808,39 @@ assertOnboardValidation()
     if (prevSha) store.writeShaCache(prevSha);
   }
 }
+
+// #197: uninstall must stop/remove services of a wrapped compose file (4-space indent), not only 2-space ones
+{
+  const { spawnSync } = require("child_process");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ctm-cleanup-"));
+  const stack = path.join(tmp, "CloudTAK");
+  fs.mkdirSync(stack);
+  fs.writeFileSync(path.join(stack, "docker-compose.yml"), "services:\n  api:\n    image: x\n");
+  const wrapped = [
+    "services:",
+    "  # wrapped by installer",
+    "    cloudtak-print:",
+    "      container_name: cloudtak-print",
+    "      restart: unless-stopped",
+    "",
+  ].join("\n");
+  const plain = ["services:", "  other-svc:", "    image: y", ""].join("\n");
+  const bin = path.join(tmp, "bin");
+  fs.mkdirSync(bin);
+  const log = path.join(tmp, "cli.log");
+  fs.writeFileSync(path.join(bin, "docker"), `#!/bin/bash\necho "$*" >> "${log}"\n`, { mode: 0o755 });
+  for (const [id, body, svc] of [["print", wrapped, "cloudtak-print"], ["other", plain, "other-svc"]]) {
+    fs.writeFileSync(path.join(stack, `docker-compose.plugin-${id}.yml`), body);
+    fs.writeFileSync(log, "");
+    const r = spawnSync("bash", ["-c", `${marketplace.pluginRuntimeCleanupBash()}\ncleanup_plugin_runtime "${id}" "${stack}"`], {
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+      encoding: "utf8",
+    });
+    assert.strictEqual(r.status, 0, r.stderr);
+    assert.match(r.stdout, new RegExp(`Stopping plugin services: ?${svc}`));
+    const calls = fs.readFileSync(log, "utf8");
+    assert.match(calls, new RegExp(`stop ${svc}`));
+    assert.match(calls, new RegExp(`rm -f ${svc}`));
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
