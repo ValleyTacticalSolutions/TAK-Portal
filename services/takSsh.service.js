@@ -23,6 +23,7 @@ const { Client, utils: sshUtils } = require("ssh2");
 const { getString, getInt, getBool } = require("./env");
 const settingsSvc = require("./settings.service");
 const takMode = require("./takServerMode.service");
+const takMarti = require("./takMartiCerts.service");
 
 const DATA_SSH_DIR = path.join(__dirname, "..", "data", "ssh");
 const DEFAULT_PRIVATE_KEY_PATH = path.join(DATA_SSH_DIR, "tak_ssh_ed25519");
@@ -552,7 +553,20 @@ function getIntegrationCertPaths(username) {
     pemPath: path.join(INTEGRATION_CERTS_DIR, un, `${un}.pem`),
     keyPath: path.join(INTEGRATION_CERTS_DIR, un, `${un}.key`),
     p12Path: path.join(INTEGRATION_CERTS_DIR, un, `${un}.p12`),
+    sourcePath: path.join(INTEGRATION_CERTS_DIR, un, "source.json"),
   };
+}
+
+/** How the cached cert was issued ("marti-api" or "ssh"); null when unknown (older caches). */
+function readIntegrationCertSource(username) {
+  try {
+    const p = getIntegrationCertPaths(username);
+    if (!fs.existsSync(p.sourcePath)) return null;
+    const meta = JSON.parse(fs.readFileSync(p.sourcePath, "utf8"));
+    return meta && typeof meta.issuedVia === "string" ? meta.issuedVia : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 function deleteStoredIntegrationCertFiles(username) {
@@ -565,6 +579,9 @@ function deleteStoredIntegrationCertFiles(username) {
   } catch (_) {}
   try {
     if (fs.existsSync(p.p12Path)) fs.unlinkSync(p.p12Path);
+  } catch (_) {}
+  try {
+    if (fs.existsSync(p.sourcePath)) fs.unlinkSync(p.sourcePath);
   } catch (_) {}
   try {
     if (fs.existsSync(p.dir) && fs.readdirSync(p.dir).length === 0) fs.rmdirSync(p.dir);
@@ -645,11 +662,61 @@ async function storeIntegrationCertPairLocally(username, certPair) {
   if (certPair.p12 && Buffer.isBuffer(certPair.p12) && certPair.p12.length > 0) {
     fs.writeFileSync(p.p12Path, certPair.p12, { mode: 0o600 });
   }
+  fs.writeFileSync(
+    p.sourcePath,
+    JSON.stringify({ issuedVia: certPair.issuedVia || "ssh", storedAt: new Date().toISOString() }),
+    { mode: 0o600 }
+  );
   return p;
 }
 
-async function provisionIntegrationCertFiles(username) {
+/** Default wait for a brand-new integration user to be accepted by TAK (LDAP sync takes minutes). */
+function getApiSignWaitMs(sshAvailable) {
+  const configured = getInt("TAK_API_CERT_SIGN_WAIT_MS", 0);
+  if (configured > 0) return configured;
+  return sshAvailable ? 30000 : 240000;
+}
+
+/**
+ * Sign the integration cert through TAK Server 5.6+ (signClient/v2) when possible.
+ * Returns the stored paths, or null when the API path is not usable here (caller falls back to SSH).
+ * Throws only when the API path is the only option and it failed.
+ */
+async function provisionIntegrationCertViaApi(un, password, sshAvailable) {
+  if (!password) return null;
+  let usable = false;
+  try {
+    usable = (await takMarti.canUseMartiCertApis()) && (await takMarti.isServerSigningEnabled());
+  } catch (_) {
+    usable = false;
+  }
+  if (!usable) return null;
+  try {
+    const pair = await takMarti.signIntegrationCertViaApi(un, password, {
+      waitMs: getApiSignWaitMs(sshAvailable),
+    });
+    const stored = await storeIntegrationCertPairLocally(un, pair);
+    return { ok: true, username: un, ...stored, usedExistingRemoteFiles: false, issuedVia: "marti-api" };
+  } catch (err) {
+    if (!sshAvailable) throw err;
+    console.warn(
+      `[TAK certs] API signing failed for "${un}", falling back to SSH makeCert.sh:`,
+      err?.message || err
+    );
+    return null;
+  }
+}
+
+/**
+ * @param {string} username
+ * @param {{ password?: string }} [opts] password: the integration user's password, so TAK 5.6+
+ *   can sign the cert over the API (TAK only signs for the logged-in user). Without it, SSH is used.
+ */
+async function provisionIntegrationCertFiles(username, opts = {}) {
   const un = sanitizeIntegrationUsername(username);
+  const sshAvailable = !!getTakSshConfig();
+  const viaApi = await provisionIntegrationCertViaApi(un, opts && opts.password, sshAvailable);
+  if (viaApi) return viaApi;
   // First try to fetch existing cert files (covers integrations created before
   // this feature, where certs may already exist on the TAK server).
   try {
@@ -667,14 +734,14 @@ async function provisionIntegrationCertFiles(username) {
 
   const pair = await fetchIntegrationCertPairFromRemote(un);
   const stored = await storeIntegrationCertPairLocally(un, pair);
-  return { ok: true, username: un, ...stored, usedExistingRemoteFiles: false };
+  return { ok: true, username: un, ...stored, usedExistingRemoteFiles: false, issuedVia: "ssh" };
 }
 
 async function getOrProvisionIntegrationCertFiles(username) {
   const un = sanitizeIntegrationUsername(username);
   if (hasStoredIntegrationCertFiles(un)) {
     const paths = getIntegrationCertPaths(un);
-    if (!fs.existsSync(paths.p12Path)) {
+    if (!fs.existsSync(paths.p12Path) && getTakSshConfig()) {
       try {
         const bundle = await fetchIntegrationCertPairFromRemote(un);
         await storeIntegrationCertPairLocally(un, bundle);
@@ -687,8 +754,27 @@ async function getOrProvisionIntegrationCertFiles(username) {
   return provisionIntegrationCertFiles(un);
 }
 
+/**
+ * Revoke an integration cert. API-issued certs (TAK 5.6+) are revoked through certadmin with no SSH.
+ * makeCert.sh certs are not in TAK's cert DB, so they still go through revokeCert.sh over SSH.
+ */
 async function revokeIntegrationCertViaSshScript(username) {
   const un = sanitizeIntegrationUsername(username);
+  if (readIntegrationCertSource(un) === "marti-api") {
+    await takMarti.revokeIntegrationCertViaApi(un, { requireVerified: true });
+    deleteStoredIntegrationCertFiles(un);
+    return { ok: true, username: un, via: "marti-api" };
+  }
+
+  // Unknown/legacy source: revoke anything TAK has on record for this user (best effort), then SSH.
+  try {
+    if (await takMarti.canUseMartiCertApis()) {
+      await takMarti.revokeIntegrationCertViaApi(un, { requireVerified: false });
+    }
+  } catch (err) {
+    console.warn(`[TAK certs] API revoke for "${un}" failed; continuing with SSH:`, err?.message || err);
+  }
+
   const cfg = getTakSshConfig();
   if (!cfg) {
     throw new Error("SSH is not configured. Complete SSH handshake in Settings.");
@@ -737,7 +823,7 @@ async function revokeIntegrationCertViaSshScript(username) {
   }
 
   deleteStoredIntegrationCertFiles(un);
-  return { ok: true, username: un };
+  return { ok: true, username: un, via: "ssh" };
 }
 
 function isUsablePrivateKey(privateKeyText, passphrase) {
@@ -1828,6 +1914,41 @@ async function fetchTakIntermediateTruststoreP12FromRemote() {
   };
 }
 
+/**
+ * Run the TAK 5.6+ API builder first; fall back to the SSH file read when it is unavailable or fails.
+ */
+async function apiThenSsh(label, apiFn, sshFn) {
+  let apiErr = null;
+  try {
+    if (await takMarti.canUseMartiCertApis()) return await apiFn();
+  } catch (err) {
+    apiErr = err;
+    console.warn(`[TAK certs] ${label} via TAK API failed; trying SSH:`, err?.message || err);
+  }
+  if (apiErr && !getTakSshConfig()) {
+    throw new Error(`${label}: ${apiErr.message || apiErr}`);
+  }
+  return sshFn();
+}
+
+/** Enrollment truststore: built from the verified TAK CA chain (5.6+), else read over SSH. */
+async function fetchTakTruststoreP12() {
+  return apiThenSsh(
+    "TAK truststore",
+    () => takMarti.buildTakRootTruststoreViaApi(),
+    () => fetchTakTruststoreP12FromRemote()
+  );
+}
+
+/** Integration zip intermediate truststore: built from the verified TAK CA chain (5.6+), else SSH. */
+async function fetchTakIntermediateTruststoreP12() {
+  return apiThenSsh(
+    "TAK intermediate truststore",
+    () => takMarti.buildTakIntermediateTruststoreViaApi(),
+    () => fetchTakIntermediateTruststoreP12FromRemote()
+  );
+}
+
 const REMOTE_TMP_SYNC_DIR = "/tmp/tak-portal-plugin-sync";
 
 function withSshConnection(connectConfig, timeoutMs, workFn) {
@@ -2123,4 +2244,7 @@ module.exports = {
   fetchTakTruststoreP12FromRemote,
   fetchTakIntermediateTruststoreP12FromRemote,
   fetchTakCaPemFromRemote,
+  fetchTakTruststoreP12,
+  fetchTakIntermediateTruststoreP12,
+  readIntegrationCertSource,
 };

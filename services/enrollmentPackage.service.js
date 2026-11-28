@@ -204,7 +204,7 @@ async function getTakTruststore({ forceRefresh } = {}) {
     const cached = readCachedTruststore();
     if (cached) return cached;
   }
-  const remote = await takSshSvc.fetchTakTruststoreP12FromRemote();
+  const remote = await takSshSvc.fetchTakTruststoreP12();
   writeCachedTruststore(remote);
   return { ...remote, fromCache: false };
 }

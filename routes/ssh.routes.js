@@ -2,6 +2,18 @@ const router = require("express").Router();
 const takSshSvc = require("../services/takSsh.service");
 const settingsSvc = require("../services/settings.service");
 const auditSvc = require("../services/auditLog.service");
+const takMartiSvc = require("../services/takMartiCerts.service");
+
+/** Marti admin-cert check (GET /api/util/isAdmin) shown with the SSH test; omitted when TAK is not set up. */
+async function takAdminCheck() {
+  try {
+    const r = await takMartiSvc.checkMartiAdminAccess();
+    if (!r || r.skipped) return undefined;
+    return { ok: !!r.ok, message: r.message };
+  } catch (_) {
+    return undefined;
+  }
+}
 
 router.get("/status", (req, res) => {
   try {
@@ -196,6 +208,7 @@ router.post("/test-connection", async (req, res) => {
       testPassed: true,
       loginOk: true,
       privilegedOk: true,
+      takAdmin: await takAdminCheck(),
     });
   } catch (err) {
     res.status(500).json({ ok: false, error: err?.message || String(err) });
@@ -276,6 +289,7 @@ router.post("/setup", async (req, res) => {
       testPassed: true,
       loginOk: true,
       privilegedOk: true,
+      takAdmin: await takAdminCheck(),
     });
   } catch (err) {
     return res.status(400).json({ ok: false, error: err?.message || String(err) });

@@ -6708,6 +6708,9 @@
       } else if (data && data.sudoSetup === "password") {
         lines.push("  • " + (getSshPrivilegeCmd() === "dzdo" ? "dzdo" : "Sudo") + ": using stored password for privileged commands");
       }
+      if (data && data.takAdmin) {
+        lines.push("  • TAK Admin API: " + (data.takAdmin.ok ? "OK" : String(data.takAdmin.message || "failed")));
+      }
       return lines.join("\n");
     }
 
