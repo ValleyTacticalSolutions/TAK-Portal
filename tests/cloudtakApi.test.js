@@ -11,6 +11,10 @@ const outbound = require("../services/outboundUrl");
 const store = require("../services/cloudtakMarketplace.store");
 const ssh = require("../services/cloudtakMarketplace.ssh");
 
+// Mock routing compares the parsed hostname, never a substring of the URL.
+const hostOf = (url) => { try { return new URL(url).hostname; } catch { return ""; } };
+const isGithubApiRepos = (url) => hostOf(url) === "api.github.com" && new URL(url).pathname.startsWith("/repos");
+
 // ---- in-memory settings (identity "encryption") ----
 let settings = { CLOUDTAK_API_URL: "https://cloudtak.example.com", CLOUDTAK_API_TOKEN: "etl.abc.def" };
 settingsSvc.getSettings = () => settings;
@@ -145,7 +149,7 @@ function installFakeFetch() {
     const deps = {
       noCache: true,
       get: async (url) => {
-        if (url.includes("api.github.com/repos")) {
+        if (isGithubApiRepos(url)) {
           return { data: [{ tag_name: "v1.2.0", assets: [{ name: "demo-1.2.0.tar.gz", browser_download_url: "https://github.com/example/demo/releases/download/v1.2.0/demo-1.2.0.tar.gz" }] }] };
         }
         return { data: bundle };
@@ -170,7 +174,7 @@ function installFakeFetch() {
     assert.strictEqual(none.status, "no-bundle");
 
     // Bad sha256 is refused before any upload.
-    const badDeps = { ...deps, get: async (url) => (url.includes("api.github.com/repos") ? deps.get(url) : { data: makeBundle({ badSha: true }) }) };
+    const badDeps = { ...deps, get: async (url) => (isGithubApiRepos(url) ? deps.get(url) : { data: makeBundle({ badSha: true }) }) };
     plugins = [];
     calls.length = 0;
     const bad = await bundleSvc.publishPlugin(plugin, { deps: badDeps });
@@ -200,8 +204,8 @@ function installFakeFetch() {
     let pkgVersion = "";
     require("axios").get = async (url) => {
       if (url.includes("/commits/")) return { data: { sha: "abc1234567" } };
-      if (url.includes("api.github.com/repos")) return deps.get(url);
-      if (url.includes("raw.githubusercontent.com")) {
+      if (isGithubApiRepos(url)) return deps.get(url);
+      if (hostOf(url) === "raw.githubusercontent.com") {
         if (pkgVersion && url.endsWith("/package.json")) return { data: { version: pkgVersion } };
         throw new Error("404");
       }
