@@ -302,10 +302,10 @@ function parseSignClientV2Response(body) {
 function buildClientP12({ keyPem, certPem, caPems = [], password = INTEGRATION_P12_PASSWORD, friendlyName }) {
   const key = forge.pki.privateKeyFromPem(keyPem);
   const chain = [certPem, ...caPems].map((p) => forge.pki.certificateFromPem(p));
-  const asn1 = forge.pkcs12.toPkcs12Asn1(key, chain, password, {
-    algorithm: "3des",
-    friendlyName: friendlyName || undefined,
-  });
+  // forge checks `'friendlyName' in options`, so the key must be absent (not undefined) when unset.
+  const opts = { algorithm: "3des" };
+  if (friendlyName) opts.friendlyName = friendlyName;
+  const asn1 = forge.pkcs12.toPkcs12Asn1(key, chain, password, opts);
   return Buffer.from(forge.asn1.toDer(asn1).getBytes(), "binary");
 }
 

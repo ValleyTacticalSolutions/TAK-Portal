@@ -299,6 +299,40 @@ function certsInP12(p12, password) {
     }
   }
 
+  /* ---------- independent parser: OpenSSL must read what forge wrote ---------- */
+  {
+    const { spawnSync } = require("child_process");
+    const os = require("os");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "marti-ossl-"));
+    try {
+      const have = spawnSync("openssl", ["version"]).status === 0;
+      // No friendlyName must not crash forge (it checks `'friendlyName' in options`).
+      const { keyPem } = marti.buildIntegrationCsr("svc-ossl", []);
+      const k = forge.pki.privateKeyFromPem(keyPem);
+      const pub = forge.pki.setRsaPublicKey(k.n, k.e);
+      const leaf = makeCert({ subject: [{ shortName: "CN", value: "svc-ossl" }], issuer: intSubj.map((a) => ({ ...a })), publicKey: pub, signKey: intKeys.privateKey, serial: "0b", ca: false });
+      const clientP12 = marti.buildClientP12({ keyPem, certPem: pemOf(leaf), caPems: [pemOf(intCert), pemOf(rootCert)] });
+      const trustP12 = marti.buildTruststoreP12([pemOf(rootCert)]);
+      if (have) {
+        const ossl = (file, buf, extra) => {
+          const f = path.join(dir, file);
+          fs.writeFileSync(f, buf);
+          const r = spawnSync("openssl", ["pkcs12", "-in", f, "-passin", "pass:atakatak", ...extra], { encoding: "utf8" });
+          assert.strictEqual(r.status, 0, `openssl rejected ${file}: ${r.stderr}`);
+          return r.stdout + r.stderr;
+        };
+        const c = ossl("client.p12", clientP12, ["-nodes"]);
+        assert.ok(c.includes("PRIVATE KEY") && c.includes("CN = svc-ossl") && c.includes("Test Root CA"), "client p12: key, cert and chain");
+        const t = ossl("trust.p12", trustP12, ["-nokeys"]);
+        assert.ok(t.includes("Test Root CA") && !t.includes("PRIVATE KEY"), "truststore p12 is cert-only");
+        const bad = spawnSync("openssl", ["pkcs12", "-in", path.join(dir, "trust.p12"), "-passin", "pass:wrong", "-nokeys"], { encoding: "utf8" });
+        assert.notStrictEqual(bad.status, 0, "wrong password is rejected");
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
   /* ---------- wiring ---------- */
   const read = (p) => fs.readFileSync(path.join(__dirname, "..", p), "utf8");
   const maint = read("services/takMaintenance.service.js");
