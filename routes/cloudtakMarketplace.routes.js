@@ -557,7 +557,7 @@ router.post("/api-connection", express.json(), async (req, res) => {
     const current = settingsSvc.getSettings() || {};
     const next = { ...current };
     if (typeof body.url === "string") {
-      const url = body.url.trim().replace(/\/+$/, "");
+      const url = trimChar(body.url.trim(), "/", { start: false });
       if (url && !/^https?:\/\/[^\s]+$/i.test(url)) {
         return res.status(400).json({ ok: false, error: "CloudTAK URL must start with http:// or https://" });
       }
